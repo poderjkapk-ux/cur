@@ -261,7 +261,7 @@ def get_courier_register_page():
 def get_courier_pwa_html(courier: Courier):
     """
     Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом.
-    Включает отображение маркера клиента и маршрута.
+    Включает отображение маркера клиента и маршрута, а также Push-уведомления (Firebase).
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
@@ -352,7 +352,61 @@ def get_courier_pwa_html(courier: Courier):
         </div>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        
+        <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
+
         <script>
+            // --- FIREBASE SETUP ---
+            const firebaseConfig = {{
+                apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
+                authDomain: "restifysite.firebaseapp.com",
+                projectId: "restifysite",
+                storageBucket: "restifysite.firebasestorage.app",
+                messagingSenderId: "679234031594",
+                appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
+            }};
+            firebase.initializeApp(firebaseConfig);
+            
+            const messaging = firebase.messaging();
+            
+            async function initPush() {{
+                try {{
+                    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+                    console.log('Service Worker Registered');
+
+                    const permission = await Notification.requestPermission();
+                    if (permission === 'granted') {{
+                        // Используем ключ, который вы указали
+                        const token = await messaging.getToken({{ 
+                            vapidKey: '5LdKijxGf7OA5qOAZpVTTAU6ooDZtM7-phrp2kIVzs0',
+                            serviceWorkerRegistration: registration 
+                        }});
+                        
+                        if (token) {{
+                            console.log('FCM Token:', token);
+                            // Відправляємо токен на сервер
+                            const fd = new FormData();
+                            fd.append('token', token);
+                            await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
+                        }}
+                    }}
+                }} catch (err) {{
+                    console.error('Push Init Error:', err);
+                }}
+            }}
+            
+            // Запуск ініціалізації пушів
+            initPush();
+            
+            // Обробка пушів, коли додаток відкритий
+            messaging.onMessage((payload) => {{
+                console.log('Foreground push:', payload);
+                // Можна додати звук або тост
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(e => console.log("Audio play failed"));
+            }});
+
             // --- State ---
             let currentJob = null;
             let isOnline = {str(courier.is_online).lower()};
@@ -365,8 +419,8 @@ def get_courier_pwa_html(courier: Courier):
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
             
             let marker = null;       // Маркер курьера
-            let targetMarker = null; // Маркер назначения (НОВОЕ)
-            let routeLine = null;    // Линия маршрута (НОВОЕ)
+            let targetMarker = null; // Маркер назначения
+            let routeLine = null;    // Линия маршрута
 
             // --- Wake Lock (Щоб екран не гас) ---
             async function requestWakeLock() {{
@@ -542,8 +596,7 @@ def get_courier_pwa_html(courier: Courier):
                 let destAddr = "";
 
                 if (currentJob.status === 'assigned') {{
-                    // Едем в РЕСТОРАН. Координат ресторана у нас в БД пока нет (обычно), 
-                    // поэтому используем поиск по тексту для ссылки на карты.
+                    // Едем в РЕСТОРАН.
                     destAddr = currentJob.partner_address;
                     
                     steps[0].className = 'step active'; steps[1].className = 'step';
@@ -560,7 +613,7 @@ def get_courier_pwa_html(courier: Courier):
                     btnAct.onclick = () => updateStatus('picked_up');
                     
                 }} else if (currentJob.status === 'picked_up') {{
-                    // Едем к КЛИЕНТУ. Тут у нас есть координаты!
+                    // Едем к КЛИЕНТУ.
                     destLat = currentJob.customer_lat;
                     destLon = currentJob.customer_lon;
                     destAddr = currentJob.customer_address;
@@ -574,7 +627,6 @@ def get_courier_pwa_html(courier: Courier):
                     
                     // Если есть координаты - ставим маркер и строим линию
                     if (destLat && destLon) {{
-                        // Красный маркер для клиента
                         const redIcon = new L.Icon({{
                             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
                             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
@@ -594,10 +646,10 @@ def get_courier_pwa_html(courier: Courier):
                              map.setView([destLat, destLon], 14);
                         }}
 
-                        // Ссылка на навигатор (по координатам - это точнее!)
+                        // Ссылка на навигатор (по координатам)
                         btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{destLat}},${{destLon}}`;
                     }} else {{
-                        // Если координат нет (старый заказ), используем адрес
+                        // Если координат нет, используем адрес
                         btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
                     }}
 

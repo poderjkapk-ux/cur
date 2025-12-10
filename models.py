@@ -82,6 +82,10 @@ class Courier(Base):
     # ID чата в Telegram для уведомлений
     telegram_chat_id = Column(String(50), nullable=True, unique=True)
 
+    # --- НОВОЕ ПОЛЕ ДЛЯ PUSH-УВЕДОМЛЕНИЙ (FIREBASE) ---
+    fcm_token = Column(String(255), nullable=True)
+    # --------------------------------------------------
+
     # Статусы
     is_active = Column(Boolean, default=True)      # Может ли вообще работать (не забанен ли)
     is_online = Column(Boolean, default=False)     # Вышел ли на смену
@@ -129,10 +133,9 @@ class DeliveryJob(Base):
     customer_name = Column(String(100), nullable=True)
     dropoff_address = Column(String(255), nullable=False)
     
-    # --- НОВЫЕ ПОЛЯ (КООРДИНАТЫ) ---
+    # Координаты доставки
     dropoff_lat = Column(Float, nullable=True) 
     dropoff_lon = Column(Float, nullable=True)
-    # -------------------------------
 
     order_price = Column(Float, default=0.0) 
     delivery_fee = Column(Float, default=0.0) 
