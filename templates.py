@@ -1747,6 +1747,7 @@ def get_courier_pwa_html(courier: Courier):
             async function checkActiveJob() {{
                 try {{
                     const res = await fetch('/api/courier/active_job');
+                    if (!res.ok) throw new Error("Server Error"); // Добавлено, чтобы ловить 500
                     const data = await res.json();
                     if(data.active) {{
                         currentJob = data.job;
@@ -1755,7 +1756,11 @@ def get_courier_pwa_html(courier: Courier):
                         document.getElementById('job-sheet').classList.remove('active');
                         currentJob = null;
                     }}
-                }} catch(e) {{}}
+                }} catch(e) {{
+                     console.error(e);
+                     // Теперь если сервер упадет, курьер увидит ошибку
+                     alert("Не вдалося завантажити деталі замовлення. Спробуйте оновити сторінку.");
+                }}
             }}
             checkActiveJob();
 
@@ -1780,7 +1785,8 @@ def get_courier_pwa_html(courier: Courier):
                     document.getElementById('current-target-addr').innerText = currentJob.partner_address;
                     document.getElementById('current-target-name').innerText = currentJob.partner_name;
                     document.getElementById('client-info-block').style.display = 'none';
-                    btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(currentJob.partner_address)}}`;
+                    // ИСПРАВЛЕНА ССЫЛКА НА КАРТУ
+                    btnNav.href = `https://www.google.com/maps/search/?api=1&query=${{encodeURIComponent(currentJob.partner_address)}}`;
                     btnAct.innerText = 'Забрав замовлення';
                     btnAct.onclick = () => updateStatus('picked_up');
                     
@@ -1791,7 +1797,8 @@ def get_courier_pwa_html(courier: Courier):
                     document.getElementById('current-target-addr').innerText = currentJob.customer_address;
                     document.getElementById('current-target-name').innerText = 'Клієнт';
                     document.getElementById('client-info-block').style.display = 'block';
-                    btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(currentJob.customer_address)}}`;
+                    // ИСПРАВЛЕНА ССЫЛКА НА КАРТУ
+                    btnNav.href = `https://www.google.com/maps/search/?api=1&query=${{encodeURIComponent(currentJob.customer_address)}}`;
                     btnAct.innerText = '✅ Доставив';
                     btnAct.onclick = () => updateStatus('delivered');
                 }}

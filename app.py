@@ -503,24 +503,31 @@ async def get_active_job(
     courier: Courier = Depends(auth.get_current_courier),
     db: AsyncSession = Depends(get_db)
 ):
+    # FIX: Используем scalars().first() вместо scalar_one_or_none().
+    # Это предотвращает ошибку 500 (MultipleResultsFound), если в БД зависло несколько активных заказов.
     result = await db.execute(
         select(DeliveryJob).options(joinedload(DeliveryJob.partner))
         .where(DeliveryJob.courier_id == courier.id)
         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
     )
-    job = result.scalar_one_or_none()
+    job = result.scalars().first()
     
     if not job:
         return JSONResponse({"active": False})
     
+    # FIX: Безопасное получение данных партнера (на случай, если он удален)
+    partner_name = job.partner.name if job.partner else "Невідомий заклад (Видалено)"
+    partner_address = job.partner.address if job.partner else "Адреса не знайдена"
+    partner_phone = job.partner.phone if job.partner else ""
+
     return JSONResponse({
         "active": True,
         "job": {
             "id": job.id,
             "status": job.status,
-            "partner_name": job.partner.name,
-            "partner_address": job.partner.address,
-            "partner_phone": job.partner.phone,
+            "partner_name": partner_name,
+            "partner_address": partner_address,
+            "partner_phone": partner_phone,
             "customer_address": job.dropoff_address,
             "customer_phone": job.customer_phone,
             "customer_name": job.customer_name,
