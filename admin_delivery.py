@@ -8,7 +8,9 @@ from sqlalchemy import select, delete
 # Импортируем auth вместо app, чтобы избежать циклического импорта
 from models import get_db, Courier, DeliveryPartner
 from auth import check_admin_auth 
-from templates import GLOBAL_STYLES
+
+# ИЗМЕНЕНИЕ: Импортируем GLOBAL_STYLES из нового модуля
+from templates_saas import GLOBAL_STYLES
 
 router = APIRouter()
 

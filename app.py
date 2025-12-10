@@ -20,7 +20,11 @@ from datetime import datetime, timedelta
 # --- 1. Импорты проекта ---
 import provision
 import auth 
-import templates
+# --- ИЗМЕНЕНИЕ: Импортируем новые модули шаблонов вместо старого templates ---
+import templates_saas
+import templates_partner
+import templates_courier
+# ---------------------------------------------------------------------------
 import admin_delivery
 import bot_service
 import order_monitor
@@ -190,7 +194,8 @@ def save_config(new_config):
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     config = load_config()
-    return HTMLResponse(content=templates.get_landing_page_html(config))
+    # ИЗМЕНЕНИЕ: templates_saas
+    return HTMLResponse(content=templates_saas.get_landing_page_html(config))
 
 # === ЛОГИКА ДЛЯ ВЛАДЕЛЬЦЕВ РЕСТОРАНОВ (SAAS USER) ===
 
@@ -201,7 +206,8 @@ async def get_login_form(request: Request, message: str = None, type: str = "err
         user = await auth.get_current_user_from_token(token, async_session_maker)
         if user:
             return RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
-    return templates.get_login_page(message, type)
+    # ИЗМЕНЕНИЕ: templates_saas
+    return templates_saas.get_login_page(message, type)
 
 @app.get("/register", response_class=HTMLResponse)
 async def get_register_form(request: Request):
@@ -210,7 +216,8 @@ async def get_register_form(request: Request):
         user = await auth.get_current_user_from_token(token, async_session_maker)
         if user:
             return RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
-    return templates.get_register_page()
+    # ИЗМЕНЕНИЕ: templates_saas
+    return templates_saas.get_register_page()
 
 @app.get("/logout")
 async def logout():
@@ -248,7 +255,8 @@ async def get_dashboard(
     user_with_instances = result.unique().scalar_one_or_none()
     if not user_with_instances:
         return RedirectResponse(url="/logout")
-    return templates.get_dashboard_html(user_with_instances, user_with_instances.instances)
+    # ИЗМЕНЕНИЕ: templates_saas
+    return templates_saas.get_dashboard_html(user_with_instances, user_with_instances.instances)
 
 
 # --- API ДЛЯ VERIFICATION (TELEGRAM AUTH) ---
@@ -323,11 +331,13 @@ async def handle_registration(
 
 @app.get("/courier/login", response_class=HTMLResponse)
 async def courier_login_page(request: Request, message: str = None):
-    return templates.get_courier_login_page(message)
+    # ИЗМЕНЕНИЕ: templates_courier
+    return templates_courier.get_courier_login_page(message)
 
 @app.get("/courier/register", response_class=HTMLResponse)
 async def courier_register_page():
-    return templates.get_courier_register_page()
+    # ИЗМЕНЕНИЕ: templates_courier
+    return templates_courier.get_courier_register_page()
 
 # --- ОНОВЛЕНИЙ РОУТ РЕЄСТРАЦІЇ КУР'ЄРА (З ВЕРИФІКАЦІЄЮ) ---
 @app.post("/api/courier/register")
@@ -385,7 +395,8 @@ async def api_courier_login(
 async def courier_pwa_main(
     courier: Courier = Depends(auth.get_current_courier)
 ):
-    return templates.get_courier_pwa_html(courier)
+    # ИЗМЕНЕНИЕ: templates_courier
+    return templates_courier.get_courier_pwa_html(courier)
 
 @app.get("/courier/logout")
 async def courier_logout():
@@ -688,11 +699,13 @@ async def get_current_partner(request: Request, db: AsyncSession = Depends(get_d
 
 @app.get("/partner/login", response_class=HTMLResponse)
 async def partner_login_page(message: str = ""):
-    return templates.get_partner_auth_html(is_register=False, message=message)
+    # ИЗМЕНЕНИЕ: templates_partner
+    return templates_partner.get_partner_auth_html(is_register=False, message=message)
 
 @app.get("/partner/register", response_class=HTMLResponse)
 async def partner_register_page(message: str = ""):
-    return templates.get_partner_auth_html(is_register=True, message=message)
+    # ИЗМЕНЕНИЕ: templates_partner
+    return templates_partner.get_partner_auth_html(is_register=True, message=message)
 
 # --- ОНОВЛЕНИЙ РОУТ РЕЄСТРАЦІЇ ПАРТНЕРА (З ВЕРИФІКАЦІЄЮ) ---
 @app.post("/partner/register")
@@ -707,14 +720,16 @@ async def partner_register_action(
     # 1. Перевірка токена
     verif = await db.get(PendingVerification, verification_token)
     if not verif or verif.status != "verified":
-         return templates.get_partner_auth_html(is_register=True, message="Телефон не підтверджено.")
+         # ИЗМЕНЕНИЕ: templates_partner
+         return templates_partner.get_partner_auth_html(is_register=True, message="Телефон не підтверджено.")
     
     phone = verif.phone # Беремо з верифікації
 
     # 2. Перевірка дублікатів
     existing = await db.execute(select(DeliveryPartner).where(DeliveryPartner.email == email))
     if existing.scalar():
-        return templates.get_partner_auth_html(is_register=True, message="Цей email вже зареєстрований")
+        # ИЗМЕНЕНИЕ: templates_partner
+        return templates_partner.get_partner_auth_html(is_register=True, message="Цей email вже зареєстрований")
     
     # 3. Створення партнера
     hashed = auth.get_password_hash(password)
@@ -744,10 +759,12 @@ async def partner_login_action(
     partner = result.scalar_one_or_none()
     
     if not partner or not auth.verify_password(password, partner.hashed_password):
-        return templates.get_partner_auth_html(is_register=False, message="Невірний email або пароль")
+        # ИЗМЕНЕНИЕ: templates_partner
+        return templates_partner.get_partner_auth_html(is_register=False, message="Невірний email або пароль")
 
     if hasattr(partner, 'is_active') and not partner.is_active:
-        return templates.get_partner_auth_html(is_register=False, message="Ваш акаунт заблоковано адміністратором.")
+        # ИЗМЕНЕНИЕ: templates_partner
+        return templates_partner.get_partner_auth_html(is_register=False, message="Ваш акаунт заблоковано адміністратором.")
     
     token = auth.create_access_token(data={"sub": f"partner:{partner.id}"})
     resp = RedirectResponse("/partner/dashboard", status_code=303)
@@ -773,7 +790,8 @@ async def partner_dashboard(
     result = await db.execute(select(DeliveryJob).where(DeliveryJob.partner_id == partner.id).order_by(DeliveryJob.id.desc()))
     jobs = result.scalars().all()
     
-    return templates.get_partner_dashboard_html(partner, jobs)
+    # ИЗМЕНЕНИЕ: templates_partner (Это и вызывало ошибку в логах)
+    return templates_partner.get_partner_dashboard_html(partner, jobs)
 
 @app.get("/api/partner/track_courier/{job_id}")
 async def track_courier_location(
@@ -1080,7 +1098,8 @@ async def admin_dashboard(
         .order_by(User.id)
     )
     clients = result.all()
-    return templates.get_admin_dashboard_html(clients, message, type)
+    # ИЗМЕНЕНИЕ: templates_saas
+    return templates_saas.get_admin_dashboard_html(clients, message, type)
 
 @app.post("/admin/control")
 async def admin_control_instance(
@@ -1137,7 +1156,8 @@ async def admin_control_instance(
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(username: str = Depends(check_admin_auth)):
     config = load_config()
-    return templates.get_settings_page_html(config)
+    # ИЗМЕНЕНИЕ: templates_saas
+    return templates_saas.get_settings_page_html(config)
 
 @app.post("/settings", response_class=HTMLResponse)
 async def settings_save(
@@ -1156,7 +1176,8 @@ async def settings_save(
         "custom_btn_content": custom_btn_content.strip() 
     })
     save_config(current_config)
-    return templates.get_settings_page_html(current_config, "Збережено успішно!")
+    # ИЗМЕНЕНИЕ: templates_saas
+    return templates_saas.get_settings_page_html(current_config, "Збережено успішно!")
 
 # --- 12. API Эндпоинты ---
 
