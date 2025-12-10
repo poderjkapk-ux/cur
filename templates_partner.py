@@ -1,7 +1,7 @@
 from typing import List, Dict
 from templates_saas import GLOBAL_STYLES
 
-# Импорт моделей для типизации
+# Імпорт моделей для типізації
 try:
     from models import DeliveryPartner, DeliveryJob, Courier
 except ImportError:
@@ -9,7 +9,7 @@ except ImportError:
     class DeliveryJob: pass
     class Courier: pass
 
-# --- Шаблоны для ПАРТНЕРОВ (Рестораны без сайта) ---
+# --- Шаблони для ПАРТНЕРІВ (Ресторани без сайту) ---
 
 def get_partner_auth_html(is_register=False, message=""):
     """Страница входа/регистрации для Партнеров (с верификацией при регистрации)"""
@@ -334,8 +334,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 
                 searchTimeout = setTimeout(async () => {{
                     try {{
-                        // Шукаємо в Україні (countrycodes=ua)
-                        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&countrycodes=ua&limit=5&accept-language=uk`;
+                        // ОНОВЛЕНО: Додано addressdetails=1 для отримання чистих даних
+                        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&countrycodes=ua&limit=5&accept-language=uk&addressdetails=1`;
                         const res = await fetch(url);
                         const data = await res.json();
                         
@@ -344,11 +344,33 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             data.forEach(item => {{
                                 const div = document.createElement('div');
                                 div.className = 'autocomplete-item';
-                                // Беремо скорочену назву або повну
-                                const displayName = item.display_name;
-                                div.innerText = displayName; 
+                                
+                                // --- ЛОГІКА ОЧИЩЕННЯ АДРЕСИ ---
+                                let cleanName = item.display_name; // За замовчуванням
+                                const addr = item.address;
+                                
+                                if (addr) {{
+                                    // Пріоритет: Місто > Смт > Село > Район міста
+                                    const city = addr.city || addr.town || addr.village || addr.city_district || '';
+                                    // Вулиця
+                                    const street = addr.road || addr.street || addr.pedestrian || addr.highway || '';
+                                    // Номер
+                                    const house = addr.house_number || '';
+
+                                    // Якщо є вулиця, формуємо гарний рядок
+                                    if (street) {{
+                                        let parts = [];
+                                        if (city) parts.push(city);
+                                        parts.push(street);
+                                        if (house) parts.push(house);
+                                        cleanName = parts.join(', ');
+                                    }}
+                                }}
+                                // ------------------------------------
+
+                                div.innerText = cleanName; 
                                 div.onclick = () => {{
-                                    addrInput.value = displayName;
+                                    addrInput.value = cleanName;
                                     addrResults.style.display = 'none';
                                 }};
                                 addrResults.appendChild(div);
@@ -358,7 +380,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             addrResults.style.display = 'none';
                         }}
                     }} catch(e) {{ console.error("OSM Error:", e); }}
-                }}, 500); // Затримка 500мс (debounce)
+                }}, 500); // Debounce 500ms
             }});
 
             // Закриття списку при кліку поза ним
