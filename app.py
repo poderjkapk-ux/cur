@@ -23,6 +23,7 @@ import auth
 import templates
 import admin_delivery
 import bot_service
+import order_monitor  # <--- НОВЫЙ ИМПОРТ
 
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, 
@@ -56,7 +57,12 @@ async def lifespan(app: FastAPI):
         logging.info("Telegram Bot Polling started via bot_service.")
     else:
         logging.warning("TG_BOT_TOKEN not set, bot disabled.")
-    # -----------------------------------
+    
+    # --- ЗАПУСК МОНИТОРИНГА ЗАВИСШИХ ЗАКАЗОВ ---
+    # Передаем manager (он будет определен ниже, но доступен в момент запуска)
+    asyncio.create_task(order_monitor.monitor_stale_orders(manager))
+    logging.info("Order Monitor started.")
+    # --------------------------------------------
 
     logging.info("Приложение запущено.")
     yield
