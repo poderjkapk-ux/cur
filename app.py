@@ -242,7 +242,7 @@ async def login_for_access_token(
     
     access_token = auth.create_access_token(data={"sub": user.email})
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
-    response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True, samesite="strict")
+    response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True, samesite="strict", max_age=604800)
     return response
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -372,7 +372,8 @@ async def api_courier_login(
     token = auth.create_access_token(data={"sub": f"courier:{courier.phone}"})
     
     resp = RedirectResponse("/courier/app", status_code=302)
-    resp.set_cookie(key="courier_token", value=token, httponly=True)
+    # --- FIX: Добавлен max_age и samesite=lax для сохранения сессии ---
+    resp.set_cookie(key="courier_token", value=token, httponly=True, max_age=604800, samesite="lax", secure=True)
     return resp
 
 @app.get("/courier/app", response_class=HTMLResponse)
@@ -409,7 +410,7 @@ async def courier_update_location(
     await db.commit()
     return JSONResponse({"status": "ok"})
 
-# --- НОВЫЙ ЭНДПОИНТ: Сохранение FCM токена курьера ---
+# --- ЭНДПОИНТ: Сохранение FCM токена курьера ---
 @app.post("/api/courier/fcm_token")
 async def update_fcm_token(
     token: str = Form(...),
@@ -421,9 +422,10 @@ async def update_fcm_token(
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- НОВЫЙ ЭНДПОИНТ: Service Worker для Firebase (c конфигурацией пользователя) ---
+# --- ЭНДПОИНТ: Service Worker для Firebase (ИСПРАВЛЕННЫЙ) ---
 @app.get("/firebase-messaging-sw.js")
 async def get_firebase_sw():
+    # --- FIX: Добавлена обработка клика notificationclick для открытия окна ---
     content = """
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
@@ -444,10 +446,29 @@ async def get_firebase_sw():
       const notificationTitle = payload.notification.title;
       const notificationOptions = {
         body: payload.notification.body,
-        icon: '/static/logo.png'
+        icon: '/static/logo.png',
+        tag: 'new-order'
       };
 
       self.registration.showNotification(notificationTitle, notificationOptions);
+    });
+
+    // ОБРАБОТЧИК КЛИКА: Открывает приложение
+    self.addEventListener('notificationclick', function(event) {
+        event.notification.close();
+        event.waitUntil(
+            clients.matchAll({type: 'window'}).then( windowClients => {
+                for (var i = 0; i < windowClients.length; i++) {
+                    var client = windowClients[i];
+                    if (client.url.indexOf('/') !== -1 && 'focus' in client) {
+                        return client.focus();
+                    }
+                }
+                if (clients.openWindow) {
+                    return clients.openWindow('/courier/app');
+                }
+            })
+        );
     });
     """
     return Response(content=content, media_type="application/javascript")
@@ -776,7 +797,8 @@ async def partner_login_action(
     
     token = auth.create_access_token(data={"sub": f"partner:{partner.id}"})
     resp = RedirectResponse("/partner/dashboard", status_code=303)
-    resp.set_cookie(key="partner_token", value=token, httponly=True)
+    # --- FIX: Добавлен max_age и samesite=lax для сохранения сессии ---
+    resp.set_cookie(key="partner_token", value=token, httponly=True, max_age=604800, samesite="lax", secure=True)
     return resp
 
 @app.get("/partner/logout")

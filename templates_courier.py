@@ -293,6 +293,12 @@ def get_courier_pwa_html(courier: Courier):
             </div>
             <a href="/courier/logout" class="icon-btn"><i class="fa-solid fa-right-from-bracket"></i></a>
         </div>
+        
+        <div id="push-perm-request" style="display:none; position:fixed; top:70px; right:10px; z-index:999; background:#e11d48; padding:10px; border-radius:8px; box-shadow:0 4px 10px rgba(0,0,0,0.3);">
+            <button onclick="requestPushPermission()" style="background:none; border:none; color:white; font-weight:bold;">
+                <i class="fa-solid fa-bell"></i> Включити звук
+            </button>
+        </div>
 
         <div id="offline-msg" style="display: { 'none' if courier.is_online else 'flex' }; position: absolute; inset:0; background:rgba(15,23,42,0.8); z-index: 50; align-items:center; justify-content:center; flex-direction:column; backdrop-filter:blur(3px);">
             <h2>Ви зараз офлайн</h2>
@@ -370,34 +376,57 @@ def get_courier_pwa_html(courier: Courier):
             
             const messaging = firebase.messaging();
             
+            // --- PUSH NOTIFICATION LOGIC (MANUAL REQUEST) ---
+            
+            // 1. Проверяем права при запуске
+            function checkPushStatus() {{
+                if (Notification.permission === 'default') {{
+                    document.getElementById('push-perm-request').style.display = 'block';
+                }} else if (Notification.permission === 'granted') {{
+                    initPush(); // Если уже разрешено, инициализируем
+                }}
+            }}
+
+            // 2. Функция, вызываемая ТОЛЬКО по клику
+            async function requestPushPermission() {{
+                try {{
+                    const permission = await Notification.requestPermission();
+                    if (permission === 'granted') {{
+                        document.getElementById('push-perm-request').style.display = 'none';
+                        initPush();
+                    }} else {{
+                        alert("Ви заборонили сповіщення. Увімкніть їх у налаштуваннях браузера.");
+                    }}
+                }} catch (err) {{
+                    console.error("Permission error:", err);
+                }}
+            }}
+            
             async function initPush() {{
                 try {{
                     const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
                     console.log('Service Worker Registered');
 
-                    const permission = await Notification.requestPermission();
-                    if (permission === 'granted') {{
-                        // Используем ключ, который вы указали
-                        const token = await messaging.getToken({{ 
-                            vapidKey: '5LdKijxGf7OA5qOAZpVTTAU6ooDZtM7-phrp2kIVzs0',
-                            serviceWorkerRegistration: registration 
-                        }});
-                        
-                        if (token) {{
-                            console.log('FCM Token:', token);
-                            // Відправляємо токен на сервер
-                            const fd = new FormData();
-                            fd.append('token', token);
-                            await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
-                        }}
+                    // Используем VAPID ключ для получения токена
+                    const token = await messaging.getToken({{ 
+                        vapidKey: '5LdKijxGf7OA5qOAZpVTTAU6ooDZtM7-phrp2kIVzs0',
+                        serviceWorkerRegistration: registration 
+                    }});
+                    
+                    if (token) {{
+                        console.log('FCM Token:', token);
+                        // Відправляємо токен на сервер
+                        const fd = new FormData();
+                        fd.append('token', token);
+                        await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
                     }}
                 }} catch (err) {{
                     console.error('Push Init Error:', err);
                 }}
             }}
             
-            // Запуск ініціалізації пушів
-            initPush();
+            // Запускаем проверку при загрузке
+            checkPushStatus();
             
             // Обробка пушів, коли додаток відкритий
             messaging.onMessage((payload) => {{
