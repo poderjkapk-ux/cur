@@ -128,6 +128,12 @@ class DeliveryJob(Base):
     customer_phone = Column(String(50), nullable=False)
     customer_name = Column(String(100), nullable=True)
     dropoff_address = Column(String(255), nullable=False)
+    
+    # --- НОВЫЕ ПОЛЯ (КООРДИНАТЫ) ---
+    dropoff_lat = Column(Float, nullable=True) 
+    dropoff_lon = Column(Float, nullable=True)
+    # -------------------------------
+
     order_price = Column(Float, default=0.0) 
     delivery_fee = Column(Float, default=0.0) 
     comment = Column(String(255), nullable=True)

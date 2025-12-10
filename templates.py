@@ -1514,7 +1514,8 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier):
     """
-    Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом
+    Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом.
+    Включает отображение маркера клиента и маршрута.
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
@@ -1616,7 +1617,10 @@ def get_courier_pwa_html(courier: Courier):
             // --- Map Init ---
             const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
-            let marker = null;
+            
+            let marker = null;       // Маркер курьера
+            let targetMarker = null; // Маркер назначения (НОВОЕ)
+            let routeLine = null;    // Линия маршрута (НОВОЕ)
 
             // --- Wake Lock (Щоб екран не гас) ---
             async function requestWakeLock() {{
@@ -1747,7 +1751,7 @@ def get_courier_pwa_html(courier: Courier):
             async function checkActiveJob() {{
                 try {{
                     const res = await fetch('/api/courier/active_job');
-                    if (!res.ok) throw new Error("Server Error"); // Добавлено, чтобы ловить 500
+                    if (!res.ok) throw new Error("Server Error");
                     const data = await res.json();
                     if(data.active) {{
                         currentJob = data.job;
@@ -1755,10 +1759,13 @@ def get_courier_pwa_html(courier: Courier):
                     }} else {{
                         document.getElementById('job-sheet').classList.remove('active');
                         currentJob = null;
+                        
+                        // Очистка карты при отсутствии заказа
+                        if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
+                        if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
                     }}
                 }} catch(e) {{
                      console.error(e);
-                     // Теперь если сервер упадет, курьер увидит ошибку
                      alert("Не вдалося завантажити деталі замовлення. Спробуйте оновити сторінку.");
                 }}
             }}
@@ -1778,27 +1785,76 @@ def get_courier_pwa_html(courier: Courier):
                 document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
                 document.getElementById('job-comment').innerText = currentJob.comment || '';
 
+                // --- ЛОГИКА ОТОБРАЖЕНИЯ НА КАРТЕ ---
+                
+                // 1. Очищаем старые маркеры назначения
+                if (targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
+                if (routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
+
+                let destLat = null;
+                let destLon = null;
+                let destAddr = "";
+
                 if (currentJob.status === 'assigned') {{
+                    // Едем в РЕСТОРАН. Координат ресторана у нас в БД пока нет (обычно), 
+                    // поэтому используем поиск по тексту для ссылки на карты.
+                    destAddr = currentJob.partner_address;
+                    
                     steps[0].className = 'step active'; steps[1].className = 'step';
                     document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
                     document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
-                    document.getElementById('current-target-addr').innerText = currentJob.partner_address;
+                    document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('current-target-name').innerText = currentJob.partner_name;
                     document.getElementById('client-info-block').style.display = 'none';
-                    // ИСПРАВЛЕНА ССЫЛКА НА КАРТУ
-                    btnNav.href = `https://www.google.com/maps/search/?api=1&query=${{encodeURIComponent(currentJob.partner_address)}}`;
+                    
+                    // Ссылка на навигатор (по адресу)
+                    btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
+                    
                     btnAct.innerText = 'Забрав замовлення';
                     btnAct.onclick = () => updateStatus('picked_up');
                     
                 }} else if (currentJob.status === 'picked_up') {{
+                    // Едем к КЛИЕНТУ. Тут у нас есть координаты!
+                    destLat = currentJob.customer_lat;
+                    destLon = currentJob.customer_lon;
+                    destAddr = currentJob.customer_address;
+
                     steps[0].className = 'step done'; steps[1].className = 'step active';
                     document.getElementById('job-status-desc').innerText = 'Везіть до клієнта';
                     document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
-                    document.getElementById('current-target-addr').innerText = currentJob.customer_address;
+                    document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('current-target-name').innerText = 'Клієнт';
                     document.getElementById('client-info-block').style.display = 'block';
-                    // ИСПРАВЛЕНА ССЫЛКА НА КАРТУ
-                    btnNav.href = `https://www.google.com/maps/search/?api=1&query=${{encodeURIComponent(currentJob.customer_address)}}`;
+                    
+                    // Если есть координаты - ставим маркер и строим линию
+                    if (destLat && destLon) {{
+                        // Красный маркер для клиента
+                        const redIcon = new L.Icon({{
+                            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+                        }});
+                        
+                        targetMarker = L.marker([destLat, destLon], {{icon: redIcon}}).addTo(map)
+                            .bindPopup("Клієнт: " + destAddr).openPopup();
+
+                        // Если курьер тоже на карте, рисуем линию
+                        if (marker) {{
+                            const courierPos = marker.getLatLng();
+                            const targetPos = [destLat, destLon];
+                            routeLine = L.polyline([courierPos, targetPos], {{color: '#6366f1', weight: 4, dashArray: '10, 10'}}).addTo(map);
+                            map.fitBounds(routeLine.getBounds(), {{padding: [50, 50]}});
+                        }} else {{
+                             map.setView([destLat, destLon], 14);
+                        }}
+
+                        // Ссылка на навигатор (по координатам - это точнее!)
+                        btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{destLat}},${{destLon}}`;
+                    }} else {{
+                        // Если координат нет (старый заказ), используем адрес
+                        btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
+                    }}
+
                     btnAct.innerText = '✅ Доставив';
                     btnAct.onclick = () => updateStatus('delivered');
                 }}
@@ -1833,6 +1889,9 @@ def get_courier_pwa_html(courier: Courier):
                         alert("Чудова робота! Замовлення завершено.");
                         currentJob = null;
                         document.getElementById('job-sheet').classList.remove('active');
+                        // Удаляем маркеры
+                        if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
+                        if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
                     }} else {{
                         renderJobSheet();
                     }}

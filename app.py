@@ -529,6 +529,12 @@ async def get_active_job(
             "partner_address": partner_address,
             "partner_phone": partner_phone,
             "customer_address": job.dropoff_address,
+            
+            # --- НОВОЕ: Передаем координаты ---
+            "customer_lat": job.dropoff_lat,
+            "customer_lon": job.dropoff_lon,
+            # ----------------------------------
+            
             "customer_phone": job.customer_phone,
             "customer_name": job.customer_name,
             "comment": job.comment,
@@ -769,62 +775,6 @@ async def partner_dashboard(
     
     return templates.get_partner_dashboard_html(partner, jobs)
 
-@app.post("/api/partner/create_order")
-async def create_partner_order(
-    dropoff_address: str = Form(...),
-    customer_phone: str = Form(...),
-    customer_name: str = Form(""),
-    order_price: float = Form(0.0),
-    delivery_fee: float = Form(50.0),
-    comment: str = Form(""),
-    db: AsyncSession = Depends(get_db),
-    partner: DeliveryPartner = Depends(get_current_partner)
-):
-    job = DeliveryJob(
-        partner_id=partner.id,
-        dropoff_address=dropoff_address,
-        customer_phone=customer_phone,
-        customer_name=customer_name,
-        order_price=order_price,
-        delivery_fee=delivery_fee,
-        comment=comment,
-        status="pending"
-    )
-    db.add(job)
-    await db.commit()
-    await db.refresh(job)
-
-    # 1. PWA Broadcast
-    order_data = {
-        "id": job.id,
-        "address": dropoff_address,
-        "restaurant": partner.name,
-        "restaurant_address": partner.address,
-        "fee": delivery_fee,
-        "price": order_price,
-        "comment": comment
-    }
-    await manager.broadcast_order_to_couriers(order_data)
-
-    # 2. Telegram Broadcast (Только свободным, онлайн и с привязанным Telegram)
-    result = await db.execute(
-        select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None)
-    )
-    online_couriers = result.scalars().all()
-    
-    tg_msg = (
-        f"🔥 <b>Нове замовлення!</b>\n"
-        f"💵 Дохід: <b>{delivery_fee} грн</b>\n"
-        f"📍 Звідки: {partner.name} ({partner.address})\n"
-        f"🏁 Куди: {dropoff_address}\n\n"
-        f"<i>Зайдіть у додаток, щоб прийняти!</i>"
-    )
-    
-    for c in online_couriers:
-        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
-
-    return RedirectResponse("/partner/dashboard", status_code=303)
-
 @app.get("/api/partner/track_courier/{job_id}")
 async def track_courier_location(
     job_id: int,
@@ -849,6 +799,94 @@ async def track_courier_location(
         "job_status": job.status,
         "last_seen": courier.last_seen.isoformat() if courier.last_seen else None
     })
+
+# --- НОВАЯ ФУНКЦИЯ ГЕОКОДИНГА ---
+async def geocode_address(address: str):
+    """Преобразует адрес в координаты через Nominatim (OSM)"""
+    url = "https://nominatim.openstreetmap.org/search"
+    headers = {"User-Agent": "RestifyDelivery/1.0 (admin@restify.site)"}
+    params = {
+        "q": address,
+        "format": "json",
+        "limit": 1
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, params=params, headers=headers, timeout=10.0)
+            data = resp.json()
+            if data and len(data) > 0:
+                # Возвращаем lat, lon
+                return float(data[0]["lat"]), float(data[0]["lon"])
+        except Exception as e:
+            logging.error(f"Geocoding Error: {e}")
+            
+    return None, None
+
+# --- ОБНОВЛЕННЫЙ ЭНДПОИНТ СОЗДАНИЯ ЗАКАЗА ---
+@app.post("/api/partner/create_order")
+async def create_partner_order(
+    dropoff_address: str = Form(...),
+    customer_phone: str = Form(...),
+    customer_name: str = Form(""),
+    order_price: float = Form(0.0),
+    delivery_fee: float = Form(50.0),
+    comment: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    partner: DeliveryPartner = Depends(get_current_partner)
+):
+    # 1. Выполняем Геокодинг
+    lat, lon = await geocode_address(dropoff_address)
+
+    # 2. Создаем заказ с координатами
+    job = DeliveryJob(
+        partner_id=partner.id,
+        dropoff_address=dropoff_address,
+        dropoff_lat=lat, # Сохраняем Lat
+        dropoff_lon=lon, # Сохраняем Lon
+        customer_phone=customer_phone,
+        customer_name=customer_name,
+        order_price=order_price,
+        delivery_fee=delivery_fee,
+        comment=comment,
+        status="pending"
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    # 3. Подготавливаем данные для PWA (Добавляем координаты в Payload)
+    order_data = {
+        "id": job.id,
+        "address": dropoff_address,
+        "lat": lat, # Передаем курьеру
+        "lon": lon, # Передаем курьеру
+        "restaurant": partner.name,
+        "restaurant_address": partner.address,
+        "fee": delivery_fee,
+        "price": order_price,
+        "comment": comment
+    }
+    await manager.broadcast_order_to_couriers(order_data)
+
+    # 4. Telegram Broadcast (Без изменений)
+    result = await db.execute(
+        select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None)
+    )
+    online_couriers = result.scalars().all()
+    
+    tg_msg = (
+        f"🔥 <b>Нове замовлення!</b>\n"
+        f"💵 Дохід: <b>{delivery_fee} грн</b>\n"
+        f"📍 Звідки: {partner.name} ({partner.address})\n"
+        f"🏁 Куди: {dropoff_address}\n\n"
+        f"<i>Зайдіть у додаток, щоб прийняти!</i>"
+    )
+    
+    for c in online_couriers:
+        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
+
+    return RedirectResponse("/partner/dashboard", status_code=303)
 
 # --- WebSocket для Партнерів (NEW) ---
 @app.websocket("/ws/partner")
