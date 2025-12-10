@@ -547,7 +547,7 @@ def get_partner_auth_html(is_register=False, message=""):
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
-    Обновленный дашборд партнера с картой трекинга, WebSocket уведомлениями и звуком
+    Обновленный дашборд партнера с картой трекинга, WebSocket уведомлениями и автоподстановкой адресов (OSM)
     """
     
     # Генерация таблицы с кнопкой "Следить"
@@ -634,6 +634,21 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             min-width: 300px;
         }}
         @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
+
+        /* --- STYLES FOR AUTOCOMPLETE (OSM) --- */
+        .autocomplete-wrapper {{ position: relative; }}
+        .autocomplete-results {{
+            position: absolute; top: 100%; left: 0; right: 0;
+            background: #1e293b; border: 1px solid var(--border);
+            border-top: none; border-radius: 0 0 10px 10px;
+            max-height: 200px; overflow-y: auto; z-index: 1000;
+            display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }}
+        .autocomplete-item {{
+            padding: 10px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: #cbd5e1;
+        }}
+        .autocomplete-item:hover {{ background: var(--primary); color: white; }}
+        .autocomplete-item:last-child {{ border-bottom: none; }}
     </style>
     </head>
     <body>
@@ -651,9 +666,13 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <div class="dashboard-grid">
                 <div class="panel">
                     <h3>📦 Викликати кур'єра</h3>
-                    <form action="/api/partner/create_order" method="post">
-                        <label>Куди везти (Адреса клієнта)</label>
-                        <input type="text" name="dropoff_address" placeholder="Вулиця, будинок, під'їзд" required>
+                    <form action="/api/partner/create_order" method="post" autocomplete="off">
+                        
+                        <div class="autocomplete-wrapper">
+                            <label>Куди везти (Адреса клієнта)</label>
+                            <input type="text" id="addr_input" name="dropoff_address" placeholder="Вулиця, будинок, під'їзд" required>
+                            <div id="addr_results" class="autocomplete-results"></div>
+                        </div>
                         
                         <label>Телефон клієнта</label>
                         <input type="tel" name="customer_phone" placeholder="0XX XXX XX XX" required>
@@ -710,6 +729,56 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             // --- ЗВУК ПОВІДОМЛЕННЯ ---
             const alertSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
 
+            // --- AUTOCOMPLETE (OPENSTREETMAP) ---
+            const addrInput = document.getElementById('addr_input');
+            const addrResults = document.getElementById('addr_results');
+            let searchTimeout = null;
+
+            addrInput.addEventListener('input', function() {{
+                clearTimeout(searchTimeout);
+                const query = this.value;
+                
+                if(query.length < 3) {{
+                    addrResults.style.display = 'none';
+                    return;
+                }}
+                
+                searchTimeout = setTimeout(async () => {{
+                    try {{
+                        // Шукаємо в Україні (countrycodes=ua)
+                        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&countrycodes=ua&limit=5&accept-language=uk`;
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        
+                        addrResults.innerHTML = '';
+                        if(data.length > 0) {{
+                            data.forEach(item => {{
+                                const div = document.createElement('div');
+                                div.className = 'autocomplete-item';
+                                // Беремо скорочену назву або повну
+                                const displayName = item.display_name;
+                                div.innerText = displayName; 
+                                div.onclick = () => {{
+                                    addrInput.value = displayName;
+                                    addrResults.style.display = 'none';
+                                }};
+                                addrResults.appendChild(div);
+                            }});
+                            addrResults.style.display = 'block';
+                        }} else {{
+                            addrResults.style.display = 'none';
+                        }}
+                    }} catch(e) {{ console.error("OSM Error:", e); }}
+                }}, 500); // Затримка 500мс (debounce)
+            }});
+
+            // Закриття списку при кліку поза ним
+            document.addEventListener('click', (e) => {{
+                if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) {{
+                    addrResults.style.display = 'none';
+                }}
+            }});
+
             // --- WEBSOCKET ДЛЯ ПАРТНЕРА ---
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/partner`);
@@ -720,13 +789,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'order_update') {{
-                    // 1. Програти звук
                     alertSound.play().catch(e => console.log('Audio error:', e));
-
-                    // 2. Показати тост
                     showToast(data.message);
-
-                    // 3. Оновити рядок таблиці
                     updateTableRow(data);
                 }}
             }};
@@ -737,8 +801,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 toast.className = 'toast';
                 toast.innerHTML = `<i class="fa-solid fa-bell" style="color:#6366f1"></i> <div>${{text}}</div>`;
                 container.appendChild(toast);
-                
-                // Видалити через 5 секунд
                 setTimeout(() => {{
                     toast.style.opacity = '0';
                     setTimeout(() => toast.remove(), 300);
@@ -748,14 +810,11 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             function updateTableRow(data) {{
                 const row = document.getElementById(`row-${{data.job_id}}`);
                 if (row) {{
-                    // Оновлюємо статус (4-й стовпчик)
                     const statusSpan = row.cells[3].querySelector('.status-badge');
                     if(statusSpan) {{
                         statusSpan.innerText = data.status_text;
                         statusSpan.style.background = data.status_color;
                     }}
-                    
-                    // Оновлюємо ім'я кур'єра (5-й стовпчик)
                     if(data.courier_name) {{
                          const courierCell = row.cells[4];
                          if (courierCell) courierCell.innerText = `🚴 ${{data.courier_name}}`;
@@ -774,7 +833,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                     L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
                 }}
                 
-                // Запускаем опрос
                 fetchLocation(jobId);
                 trackInterval = setInterval(() => fetchLocation(jobId), 5000);
             }}
