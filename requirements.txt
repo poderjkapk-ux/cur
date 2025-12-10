@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+sqlalchemy[asyncio]
+asyncpg
+bcrypt==3.2.0
+passlib==1.7.4
+python-jose[cryptography]
+python-multipart
+aiogram==3.10.0
