@@ -322,7 +322,17 @@ async def handle_registration(
 # === ЛОГИКА ДЛЯ КУРЬЕРОВ (COURIER PWA) ===
 
 @app.get("/courier/login", response_class=HTMLResponse)
-async def courier_login_page(request: Request, message: str = None):
+async def courier_login_page(request: Request, message: str = None, db: AsyncSession = Depends(get_db)):
+    # --- FIX #1: ПРОВЕРКА КУК ПЕРЕД ОТОБРАЖЕНИЕМ ФОРМЫ ---
+    token = request.cookies.get("courier_token")
+    if token:
+        try:
+            courier = await auth.get_current_courier(token, db)
+            if courier:
+                return RedirectResponse(url="/courier/app", status_code=302)
+        except Exception:
+            pass # Токен невалиден, показываем форму входа
+    
     return templates_courier.get_courier_login_page(message)
 
 @app.get("/courier/register", response_class=HTMLResponse)
@@ -372,8 +382,18 @@ async def api_courier_login(
     token = auth.create_access_token(data={"sub": f"courier:{courier.phone}"})
     
     resp = RedirectResponse("/courier/app", status_code=302)
-    # --- FIX: Добавлен max_age и samesite=lax для сохранения сессии ---
-    resp.set_cookie(key="courier_token", value=token, httponly=True, max_age=604800, samesite="lax", secure=True)
+    
+    # --- FIX #2: БЕЗОПАСНАЯ УСТАНОВКА КУКИ (HTTPS CHECK) ---
+    is_secure = ROOT_DOMAIN.startswith("https") # True, если сайт на HTTPS
+    
+    resp.set_cookie(
+        key="courier_token", 
+        value=token, 
+        httponly=True, 
+        max_age=604800, # 7 дней
+        samesite="lax", 
+        secure=is_secure # Автоматически определяем, нужно ли Secure
+    )
     return resp
 
 @app.get("/courier/app", response_class=HTMLResponse)
@@ -422,10 +442,10 @@ async def update_fcm_token(
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- ЭНДПОИНТ: Service Worker для Firebase (ИСПРАВЛЕННЫЙ) ---
+# --- ЭНДПОИНТ: Service Worker для Firebase (ПОЛНОСТЬЮ ПЕРЕПИСАН) ---
 @app.get("/firebase-messaging-sw.js")
 async def get_firebase_sw():
-    # --- FIX: Добавлена обработка клика notificationclick для открытия окна ---
+    # --- FIX #3: ПРАВИЛЬНЫЙ ОБРАБОТЧИК ФОНОВЫХ ПУШЕЙ ---
     content = """
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
@@ -441,29 +461,35 @@ async def get_firebase_sw():
 
     const messaging = firebase.messaging();
 
+    // Обработчик фоновых сообщений (когда сайт закрыт)
     messaging.onBackgroundMessage(function(payload) {
-      console.log('Received background message ', payload);
+      console.log('[firebase-messaging-sw.js] Received background message ', payload);
+      
       const notificationTitle = payload.notification.title;
       const notificationOptions = {
         body: payload.notification.body,
-        icon: '/static/logo.png',
-        tag: 'new-order'
+        icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png', 
+        tag: 'new-order',
+        data: { url: '/courier/app' } // Куда переходить
       };
 
-      self.registration.showNotification(notificationTitle, notificationOptions);
+      return self.registration.showNotification(notificationTitle, notificationOptions);
     });
 
-    // ОБРАБОТЧИК КЛИКА: Открывает приложение
+    // Обработчик клика по уведомлению
     self.addEventListener('notificationclick', function(event) {
         event.notification.close();
+        
         event.waitUntil(
-            clients.matchAll({type: 'window'}).then( windowClients => {
+            clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
+                // Если вкладка уже открыта — фокусируемся на ней
                 for (var i = 0; i < windowClients.length; i++) {
                     var client = windowClients[i];
-                    if (client.url.indexOf('/') !== -1 && 'focus' in client) {
+                    if (client.url.indexOf('/courier/app') !== -1 && 'focus' in client) {
                         return client.focus();
                     }
                 }
+                // Если нет — открываем новую
                 if (clients.openWindow) {
                     return clients.openWindow('/courier/app');
                 }

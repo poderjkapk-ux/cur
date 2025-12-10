@@ -9,7 +9,7 @@ from sqlalchemy import select, delete
 from models import get_db, Courier, DeliveryPartner
 from auth import check_admin_auth 
 
-# ИЗМЕНЕНИЕ: Импортируем GLOBAL_STYLES из нового модуля
+# Импортируем GLOBAL_STYLES
 from templates_saas import GLOBAL_STYLES
 
 router = APIRouter()
@@ -276,7 +276,9 @@ async def get_courier_manifest():
     return JSONResponse({
         "name": conf["name"],
         "short_name": conf["short_name"],
-        "start_url": "/courier/login",
+        # ИЗМЕНЕНИЕ: Открываем приложение сразу, а не страницу входа.
+        # Это предотвращает повторный запрос логина, если куки живы.
+        "start_url": "/courier/app", 
         "display": conf["display"],
         "background_color": conf["background_color"],
         "theme_color": conf["theme_color"],
