@@ -1514,14 +1514,13 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier):
     """
-    Полностью переработанный PWA интерфейс
+    Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
     
     # --- PWA META (Manifest) ---
     pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
-    # ---------------------------
 
     return f"""
     <!DOCTYPE html>
@@ -1540,7 +1539,8 @@ def get_courier_pwa_html(courier: Courier):
 
         <div class="app-header">
             <button class="icon-btn" onclick="toggleHistory(true)"><i class="fa-solid fa-clock-rotate-left"></i></button>
-            <div class="status-indicator" onclick="toggleShift()">
+            <div class="status-indicator" onclick="toggleShift()" style="position: relative;">
+                <div id="connection-dot" style="position: absolute; top:-2px; right:-2px; width:6px; height:6px; border-radius:50%; background:red; border:1px solid #0f172a;" title="Connection Status"></div>
                 <div id="status-dot" class="dot {status_class}"></div>
                 <span id="status-text">{status_text}</span>
             </div>
@@ -1567,7 +1567,7 @@ def get_courier_pwa_html(courier: Courier):
             <div class="info-block">
                 <div class="info-label" id="addr-label">Забрати тут:</div>
                 <div class="info-value" id="current-target-addr">вул. Прикладна, 10</div>
-                <div style="margin-top:5px; color:var(--text-muted); font-size:0.9rem;" id="current-target-name">Ресторан "Ромашка"</div>
+                <div style="margin-top:5px; color:var(--text-muted); font-size:0.9rem;" id="current-target-name">Ресторан</div>
             </div>
 
             <div class="info-block" id="client-info-block" style="display:none;">
@@ -1590,8 +1590,7 @@ def get_courier_pwa_html(courier: Courier):
                 <h2>Історія замовлень</h2>
                 <button class="icon-btn" onclick="toggleHistory(false)"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div id="history-list">
-                </div>
+            <div id="history-list"></div>
         </div>
 
         <div id="orderModal" class="order-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(5px);">
@@ -1601,7 +1600,7 @@ def get_courier_pwa_html(courier: Courier):
                 <p id="modal-route" style="color:#555; margin:15px 0;">Ресторан -> Адреса</p>
                 <input type="hidden" id="modal-job-id">
                 <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
-                <button onclick="document.getElementById('orderModal').style.display='none'" style="background:none; border:none; color:#777; text-decoration:underline;">Пропустити</button>
+                <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline;">Закрити</button>
              </div>
         </div>
 
@@ -1610,13 +1609,98 @@ def get_courier_pwa_html(courier: Courier):
             // --- State ---
             let currentJob = null;
             let isOnline = {str(courier.is_online).lower()};
+            let socket = null;
+            let pingInterval = null;
+            let isReconnecting = false;
             
             // --- Map Init ---
             const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
             let marker = null;
 
-            // --- Geolocation & Tracking ---
+            // --- Wake Lock (Щоб екран не гас) ---
+            async function requestWakeLock() {{
+                try {{
+                    if ('wakeLock' in navigator) {{
+                        await navigator.wakeLock.request('screen');
+                        console.log('Wake Lock active');
+                    }}
+                }} catch (err) {{ console.error(err); }}
+            }}
+            if(isOnline) requestWakeLock();
+
+            // --- WebSocket Manager (Robust) ---
+            function connectWS() {{
+                if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/courier`);
+
+                socket.onopen = () => {{
+                    console.log("WS Connected");
+                    document.getElementById('connection-dot').style.background = '#4ade80'; // Green
+                    isReconnecting = false;
+                    
+                    // Start Heartbeat (Ping) каждые 15 сек
+                    clearInterval(pingInterval);
+                    pingInterval = setInterval(() => {{
+                        if (socket.readyState === WebSocket.OPEN) socket.send("ping");
+                    }}, 15000);
+                }};
+
+                socket.onmessage = (e) => {{
+                    if (e.data === "pong") return; 
+                    const msg = JSON.parse(e.data);
+                    if(msg.type === 'new_order') {{
+                        // Проверяем, не показываем ли мы уже этот заказ
+                        const currentModalId = document.getElementById('modal-job-id').value;
+                        if (currentModalId != msg.data.id) {{
+                            showNewOrder(msg.data);
+                        }}
+                    }}
+                }};
+
+                socket.onclose = (e) => {{
+                    console.log("WS Closed", e);
+                    document.getElementById('connection-dot').style.background = 'red';
+                    clearInterval(pingInterval);
+                    
+                    // Авто-реконнект, если мы на смене
+                    if (isOnline) {{
+                        isReconnecting = true;
+                        setTimeout(connectWS, 3000); // Пробуем каждые 3 сек
+                    }}
+                }};
+                
+                socket.onerror = (err) => {{
+                    console.error("WS Error", err);
+                    socket.close();
+                }};
+            }}
+            
+            if(isOnline) connectWS();
+
+            // --- UI Functions ---
+            function showNewOrder(data) {{
+                // Проигрываем звук (нужно взаимодействие с пользователем сначала)
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(e => console.log("Audio play failed (need interaction)"));
+
+                // Вибрация (для Android)
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+                document.getElementById('modal-fee').innerText = data.fee + ' ₴';
+                document.getElementById('modal-route').innerText = `${{data.restaurant}} ➝ Клієнт`;
+                document.getElementById('modal-job-id').value = data.id;
+                document.getElementById('orderModal').style.display = 'flex';
+            }}
+            
+            function closeOrderModal() {{
+                document.getElementById('orderModal').style.display = 'none';
+                document.getElementById('modal-job-id').value = '';
+            }}
+
+            // --- Geolocation ---
             if (navigator.geolocation) {{
                 navigator.geolocation.watchPosition((pos) => {{
                     const {{ latitude, longitude }} = pos.coords;
@@ -1627,7 +1711,8 @@ def get_courier_pwa_html(courier: Courier):
                         marker.setLatLng([latitude, longitude]);
                     }}
                     
-                    if(isOnline) {{
+                    // Отправляем локацию, если онлайн и сокет открыт
+                    if(isOnline && socket && socket.readyState === WebSocket.OPEN) {{
                         const fd = new FormData();
                         fd.append('lat', latitude);
                         fd.append('lon', longitude);
@@ -1636,38 +1721,117 @@ def get_courier_pwa_html(courier: Courier):
                 }}, console.error, {{ enableHighAccuracy: true }});
             }}
 
-            // --- WebSocket ---
-            let socket;
-            function connectWS() {{
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/courier`);
-                socket.onmessage = (e) => {{
-                    const msg = JSON.parse(e.data);
-                    if(msg.type === 'new_order') showNewOrder(msg.data);
-                }};
-            }}
-            if(isOnline) connectWS();
-
-            // --- UI Functions ---
-            function showNewOrder(data) {{
-                document.getElementById('modal-fee').innerText = data.fee + ' ₴';
-                document.getElementById('modal-route').innerText = `${{data.restaurant}} ➝ ${{data.address}}`;
-                document.getElementById('modal-job-id').value = data.id;
-                document.getElementById('orderModal').style.display = 'flex';
-                // Try play sound
-                new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play().catch(e=>{{}});
-            }}
-
+            // --- Shift Logic ---
             async function toggleShift() {{
-                const res = await fetch('/api/courier/toggle_status', {{method:'POST'}});
-                const data = await res.json();
-                isOnline = data.is_online;
-                document.getElementById('offline-msg').style.display = isOnline ? 'none' : 'flex';
-                document.getElementById('status-dot').className = isOnline ? 'dot online' : 'dot offline';
-                document.getElementById('status-text').innerText = isOnline ? 'НА ЗМІНІ' : 'ОФЛАЙН';
-                if(isOnline) connectWS();
+                try {{
+                    const res = await fetch('/api/courier/toggle_status', {{method:'POST'}});
+                    const data = await res.json();
+                    isOnline = data.is_online;
+                    
+                    document.getElementById('offline-msg').style.display = isOnline ? 'none' : 'flex';
+                    document.getElementById('status-dot').className = isOnline ? 'dot online' : 'dot offline';
+                    document.getElementById('status-text').innerText = isOnline ? 'НА ЗМІНІ' : 'ОФЛАЙН';
+                    
+                    if(isOnline) {{
+                        requestWakeLock();
+                        connectWS();
+                    }} else {{
+                        if(socket) socket.close();
+                    }}
+                }} catch(e) {{
+                    alert("Помилка з'єднання. Перевірте інтернет.");
+                }}
             }}
 
+            // --- Job Logic (Existing) ---
+            async function checkActiveJob() {{
+                try {{
+                    const res = await fetch('/api/courier/active_job');
+                    const data = await res.json();
+                    if(data.active) {{
+                        currentJob = data.job;
+                        renderJobSheet();
+                    }} else {{
+                        document.getElementById('job-sheet').classList.remove('active');
+                        currentJob = null;
+                    }}
+                }} catch(e) {{}}
+            }}
+            checkActiveJob();
+
+            function renderJobSheet() {{
+                const sheet = document.getElementById('job-sheet');
+                const btnNav = document.getElementById('btn-nav');
+                const btnAct = document.getElementById('btn-action');
+                const steps = [document.getElementById('step-1'), document.getElementById('step-2')];
+                
+                sheet.classList.add('active');
+                document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
+                document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
+                document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
+                document.getElementById('client-phone').innerText = currentJob.customer_phone;
+                document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
+                document.getElementById('job-comment').innerText = currentJob.comment || '';
+
+                if (currentJob.status === 'assigned') {{
+                    steps[0].className = 'step active'; steps[1].className = 'step';
+                    document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
+                    document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
+                    document.getElementById('current-target-addr').innerText = currentJob.partner_address;
+                    document.getElementById('current-target-name').innerText = currentJob.partner_name;
+                    document.getElementById('client-info-block').style.display = 'none';
+                    btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(currentJob.partner_address)}}`;
+                    btnAct.innerText = 'Забрав замовлення';
+                    btnAct.onclick = () => updateStatus('picked_up');
+                    
+                }} else if (currentJob.status === 'picked_up') {{
+                    steps[0].className = 'step done'; steps[1].className = 'step active';
+                    document.getElementById('job-status-desc').innerText = 'Везіть до клієнта';
+                    document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
+                    document.getElementById('current-target-addr').innerText = currentJob.customer_address;
+                    document.getElementById('current-target-name').innerText = 'Клієнт';
+                    document.getElementById('client-info-block').style.display = 'block';
+                    btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(currentJob.customer_address)}}`;
+                    btnAct.innerText = '✅ Доставив';
+                    btnAct.onclick = () => updateStatus('delivered');
+                }}
+            }}
+
+            async function acceptOrder() {{
+                const jobId = document.getElementById('modal-job-id').value;
+                const fd = new FormData(); fd.append('job_id', jobId);
+                
+                try {{
+                    const res = await fetch('/api/courier/accept_order', {{method:'POST', body:fd}});
+                    const data = await res.json();
+                    closeOrderModal();
+                    if(data.status === 'ok') checkActiveJob();
+                    else alert(data.message);
+                }} catch(e) {{
+                    alert("Помилка при прийнятті. Можливо, замовлення вже забрав інший кур'єр.");
+                    closeOrderModal();
+                }}
+            }}
+
+            async function updateStatus(newStatus) {{
+                if(!currentJob) return;
+                const fd = new FormData();
+                fd.append('job_id', currentJob.id);
+                fd.append('status', newStatus);
+                
+                const res = await fetch('/api/courier/update_job_status', {{method:'POST', body:fd}});
+                if(res.ok) {{
+                    currentJob.status = newStatus;
+                    if(newStatus === 'delivered') {{
+                        alert("Чудова робота! Замовлення завершено.");
+                        currentJob = null;
+                        document.getElementById('job-sheet').classList.remove('active');
+                    }} else {{
+                        renderJobSheet();
+                    }}
+                }}
+            }}
+            
             async function toggleHistory(show) {{
                 const modal = document.getElementById('history-modal');
                 if(show) {{
@@ -1686,102 +1850,6 @@ def get_courier_pwa_html(courier: Courier):
                     modal.classList.add('open');
                 }} else {{
                     modal.classList.remove('open');
-                }}
-            }}
-
-            // --- JOB LOGIC ---
-            
-            async function checkActiveJob() {{
-                const res = await fetch('/api/courier/active_job');
-                const data = await res.json();
-                if(data.active) {{
-                    currentJob = data.job;
-                    renderJobSheet();
-                }} else {{
-                    document.getElementById('job-sheet').classList.remove('active');
-                    currentJob = null;
-                }}
-            }}
-            
-            // Check on load
-            checkActiveJob();
-
-            function renderJobSheet() {{
-                const sheet = document.getElementById('job-sheet');
-                const btnNav = document.getElementById('btn-nav');
-                const btnAct = document.getElementById('btn-action');
-                const steps = [document.getElementById('step-1'), document.getElementById('step-2')];
-                
-                sheet.classList.add('active');
-                document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
-                document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
-                document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
-                document.getElementById('client-phone').innerText = currentJob.customer_phone;
-                document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
-                document.getElementById('job-comment').innerText = currentJob.comment || '';
-
-                // Logic based on status
-                if (currentJob.status === 'assigned') {{
-                    // Phase 1: Go to Restaurant
-                    steps[0].className = 'step active'; steps[1].className = 'step';
-                    document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
-                    document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
-                    document.getElementById('current-target-addr').innerText = currentJob.partner_address;
-                    document.getElementById('current-target-name').innerText = currentJob.partner_name;
-                    
-                    document.getElementById('client-info-block').style.display = 'none';
-                    
-                    // Maps Link to Restaurant
-                    btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(currentJob.partner_address)}}`;
-                    btnAct.innerText = 'Забрав замовлення';
-                    btnAct.onclick = () => updateStatus('picked_up');
-                    
-                }} else if (currentJob.status === 'picked_up') {{
-                    // Phase 2: Go to Client
-                    steps[0].className = 'step done'; steps[1].className = 'step active';
-                    document.getElementById('job-status-desc').innerText = 'Везіть до клієнта';
-                    document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
-                    document.getElementById('current-target-addr').innerText = currentJob.customer_address;
-                    document.getElementById('current-target-name').innerText = 'Клієнт';
-                    
-                    document.getElementById('client-info-block').style.display = 'block';
-
-                    // Maps Link to Client
-                    btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(currentJob.customer_address)}}`;
-                    btnAct.innerText = '✅ Доставив';
-                    btnAct.onclick = () => updateStatus('delivered');
-                }}
-            }}
-
-            async function acceptOrder() {{
-                const jobId = document.getElementById('modal-job-id').value;
-                const fd = new FormData(); fd.append('job_id', jobId);
-                
-                const res = await fetch('/api/courier/accept_order', {{method:'POST', body:fd}});
-                const data = await res.json();
-                
-                document.getElementById('orderModal').style.display = 'none';
-                if(data.status === 'ok') checkActiveJob();
-                else alert(data.message);
-            }}
-
-            async function updateStatus(newStatus) {{
-                if(!currentJob) return;
-                const fd = new FormData();
-                fd.append('job_id', currentJob.id);
-                fd.append('status', newStatus);
-                
-                const res = await fetch('/api/courier/update_job_status', {{method:'POST', body:fd}});
-                if(res.ok) {{
-                    currentJob.status = newStatus;
-                    if(newStatus === 'delivered') {{
-                        alert("Чудова робота! Замовлення завершено.");
-                        currentJob = null;
-                        document.getElementById('job-sheet').classList.remove('active');
-                        // Можно показать конфетти
-                    }} else {{
-                        renderJobSheet();
-                    }}
                 }}
             }}
         </script>

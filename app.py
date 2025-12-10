@@ -23,7 +23,7 @@ import auth
 import templates
 import admin_delivery
 import bot_service
-import order_monitor  # <--- НОВЫЙ ИМПОРТ
+import order_monitor
 
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, 
@@ -59,7 +59,6 @@ async def lifespan(app: FastAPI):
         logging.warning("TG_BOT_TOKEN not set, bot disabled.")
     
     # --- ЗАПУСК МОНИТОРИНГА ЗАВИСШИХ ЗАКАЗОВ ---
-    # Передаем manager (он будет определен ниже, но доступен в момент запуска)
     asyncio.create_task(order_monitor.monitor_stale_orders(manager))
     logging.info("Order Monitor started.")
     # --------------------------------------------
@@ -100,11 +99,16 @@ class ConnectionManager:
 
     async def broadcast_order_to_couriers(self, job_data: dict):
         """Відправляє замовлення всім активним кур'єрам"""
-        for c_id, connection in self.active_couriers.items():
-            try:
-                await connection.send_json({"type": "new_order", "data": job_data})
-            except Exception as e:
-                logging.error(f"WS Error (Courier {c_id}): {e}")
+        # Копируем ключи, чтобы избежать ошибки изменения словаря во время итерации
+        active_ids = list(self.active_couriers.keys())
+        for c_id in active_ids:
+            connection = self.active_couriers.get(c_id)
+            if connection:
+                try:
+                    await connection.send_json({"type": "new_order", "data": job_data})
+                except Exception as e:
+                    logging.error(f"WS Error (Courier {c_id}): {e}")
+                    self.disconnect_courier(c_id)
 
     # --- Методи для ПАРТНЕРІВ (Ресторанів) ---
     async def connect_partner(self, websocket: WebSocket, partner_id: int):
@@ -411,7 +415,7 @@ async def courier_update_location(
     await db.commit()
     return JSONResponse({"status": "ok"})
 
-# --- WebSocket для курьеров ---
+# --- WebSocket для курьеров (FIXED) ---
 @app.websocket("/ws/courier")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -429,10 +433,41 @@ async def websocket_endpoint(
         return
 
     await manager.connect_courier(websocket, courier.id)
+    
+    # --- FIX 1: Send pending orders immediately on connect ---
+    try:
+        result = await db.execute(
+            select(DeliveryJob)
+            .options(joinedload(DeliveryJob.partner))
+            .where(DeliveryJob.status == "pending")
+        )
+        pending_jobs = result.scalars().all()
+        
+        for job in pending_jobs:
+            job_data = {
+                "id": job.id,
+                "address": job.dropoff_address,
+                "restaurant": job.partner.name if job.partner else "Невідомий заклад",
+                "restaurant_address": job.partner.address if job.partner else "",
+                "fee": job.delivery_fee,
+                "price": job.order_price,
+                "comment": job.comment
+            }
+            await websocket.send_json({"type": "new_order", "data": job_data})
+    except Exception as e:
+        logging.error(f"Error syncing pending orders for courier {courier.id}: {e}")
+    # --------------------------------------------------------
+
     try:
         while True:
-            await websocket.receive_text() # Keep alive
+            # --- FIX 2: Handle heartbeat (ping) to prevent timeouts ---
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
     except WebSocketDisconnect:
+        manager.disconnect_courier(courier.id)
+    except Exception as e:
+        logging.error(f"WS Error: {e}")
         manager.disconnect_courier(courier.id)
 
 
