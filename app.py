@@ -430,7 +430,7 @@ async def courier_update_location(
     await db.commit()
     return JSONResponse({"status": "ok"})
 
-# --- ЭНДПОИНТ: Сохранение FCM токена курьера ---
+# --- ЭНДПОИНТ: Сохранение FCM токена курьера (С ЛОГИРОВАНИЕМ) ---
 @app.post("/api/courier/fcm_token")
 async def update_fcm_token(
     token: str = Form(...),
@@ -438,6 +438,9 @@ async def update_fcm_token(
     db: AsyncSession = Depends(get_db)
 ):
     """Зберігає токен пристрою кур'єра для Push-повідомлень"""
+    # --- ЛОГ ---
+    logging.info(f"[PUSH] Кур'єр {courier.id} ({courier.name}) оновив FCM токен: {token[:15]}...")
+    
     courier.fcm_token = token
     await db.commit()
     return JSONResponse({"status": "updated"})
@@ -499,17 +502,28 @@ async def get_firebase_sw():
     """
     return Response(content=content, media_type="application/javascript")
 
+# ... (приблизно рядок 777)
 # --- ФУНКЦИЯ ОТПРАВКИ PUSH ---
 async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str):
     if not courier_tokens: return
     try:
-        message = messaging.MulticastMessage(
-            notification=messaging.Notification(title=title, body=body),
-            tokens=courier_tokens,
-        )
-        response = messaging.send_multicast(message)
-        logging.info(f"Sent {response.success_count} pushes.")
+        success_count = 0
+        # СТІЙКЕ ВИПРАВЛЕННЯ: Ітеруємо і відправляємо по одному, 
+        # використовуючи send(), що є в усіх версіях firebase-admin.
+        # Це обходить проблему старої версії бібліотеки.
+        for token in courier_tokens:
+            message = messaging.Message(
+                notification=messaging.Notification(title=title, body=body),
+                token=token,
+            )
+            # Використовуємо send()
+            messaging.send(message) 
+            success_count += 1 
+
+        logging.info(f"Sent {success_count} pushes.")
     except Exception as e:
+        # Увага: якщо помилка все одно виникає, це означає, що 
+        # firebase_admin.messaging взагалі не було ініціалізовано.
         logging.error(f"Push Error: {e}")
 
 # --- WebSocket для курьеров ---
@@ -895,7 +909,7 @@ async def geocode_address(address: str):
             
     return None, None
 
-# --- ОБНОВЛЕННЫЙ ЭНДПОИНТ СОЗДАНИЯ ЗАКАЗА (С FIREBASE PUSH) ---
+# --- ОБНОВЛЕННЫЙ ЭНДПОИНТ СОЗДАНИЯ ЗАКАЗА (С FIREBASE PUSH + DETAILED DEBUG LOGGING) ---
 @app.post("/api/partner/create_order")
 async def create_partner_order(
     dropoff_address: str = Form(...),
@@ -958,13 +972,18 @@ async def create_partner_order(
     for c in online_couriers_tg:
         asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
 
-    # 5. --- FIREBASE PUSH NOTIFICATION ---
-    # Получаем токены всех онлайн курьеров
-    push_result = await db.execute(select(Courier.fcm_token).where(Courier.is_online == True, Courier.fcm_token != None))
-    # Фильтруем пустые токены
-    tokens = [t for t in push_result.scalars().all() if t]
+    # 5. --- FIREBASE PUSH NOTIFICATION (DEBUG VERSION) ---
+    # 1. Сначала проверим, сколько вообще курьеров онлайн
+    online_couriers_result = await db.execute(select(Courier).where(Courier.is_online == True))
+    online_couriers = online_couriers_result.scalars().all()
+    
+    online_count = len(online_couriers)
+    # Фильтруем тех, у кого есть токен
+    couriers_with_token = [c for c in online_couriers if c.fcm_token]
+    tokens = [c.fcm_token for c in couriers_with_token]
     
     if tokens:
+        logging.info(f"[PUSH] Знайдено {len(tokens)} токенів (всього онлайн: {online_count}). Ініціюю відправку...")
         asyncio.create_task(
             send_push_to_couriers(
                 tokens, 
@@ -972,6 +991,16 @@ async def create_partner_order(
                 f"💰 {delivery_fee} грн | {partner.name} -> {dropoff_address}"
             )
         )
+    else:
+        # --- ДЕТАЛЬНИЙ ЛОГ ПРИЧИНИ ---
+        if online_count > 0:
+             # Курьеры есть, но нет токенов
+             names_without_token = [c.name for c in online_couriers if not c.fcm_token]
+             logging.warning(f"[PUSH] УВАГА: Є {online_count} онлайн-кур'єрів, але ЖОДЕН не має FCM токена! (Імена без токена: {', '.join(names_without_token)})")
+             logging.warning("[PUSH] Можливі причини: 1) Не дали дозвіл на повідомлення. 2) Сайт не на HTTPS. 3) Браузер блокує.")
+        else:
+             # Вообще никого онлайн
+             logging.warning("[PUSH] Не знайдено жодного кур'єра зі статусом 'is_online=True'.")
     # -------------------------------------
 
     return RedirectResponse("/partner/dashboard", status_code=303)

@@ -8,4 +8,4 @@ passlib==1.7.4
 python-jose[cryptography]
 python-multipart
 aiogram==3.10.0
-firebase-admin
+firebase-admin>=5.0.0

@@ -409,7 +409,7 @@ def get_courier_pwa_html(courier: Courier):
 
                     // Используем VAPID ключ для получения токена
                     const token = await messaging.getToken({{ 
-                        vapidKey: '5LdKijxGf7OA5qOAZpVTTAU6ooDZtM7-phrp2kIVzs0',
+                        vapidKey: 'BP5-1Obs3DLFOEXn_H-Vopc2JTmVol72wJ8JmcA0dAYFy3YCozBxSn5hbYPkckt5F0T56kiKQYi01cw0hGMOvIU',
                         serviceWorkerRegistration: registration 
                     }});
                     
