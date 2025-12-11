@@ -350,7 +350,7 @@ def get_courier_pwa_html(courier: Courier):
              <div style="background:white; color:black; padding:30px; border-radius:20px; width:85%; max-width:350px; text-align:center;">
                 <h2 style="margin-top:0;">🔥 Нове замовлення!</h2>
                 <div style="font-size:2.5rem; font-weight:800; color:var(--primary);" id="modal-fee">50 ₴</div>
-                <p id="modal-route" style="color:#555; margin:15px 0;">Ресторан -> Адреса</p>
+                <div id="modal-route" style="color:#555; margin:15px 0; text-align: left;"></div>
                 <input type="hidden" id="modal-job-id">
                 <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
                 <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline;">Закрити</button>
@@ -523,7 +523,20 @@ def get_courier_pwa_html(courier: Courier):
                 if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 
                 document.getElementById('modal-fee').innerText = data.fee + ' ₴';
-                document.getElementById('modal-route').innerText = `${{data.restaurant}} ➝ Клієнт`;
+                // --- МОДИФИКАЦИЯ: Добавляем больше информации в модал ---
+                document.getElementById('modal-route').innerHTML = `
+                    <div style="font-weight: 700; color: #1e293b; margin-bottom: 5px;">Замовлення #${{data.id}}</div>
+                    <div style="font-size: 0.9rem; color: #334155; margin-bottom: 5px;">
+                        <i class="fa-solid fa-store" style="color: #6366f1;"></i> <b>${{data.restaurant}}</b>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #555;">
+                        <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${{data.restaurant_address}} ➝ ${{data.address}}
+                    </div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: #334155; margin-top: 10px;">
+                         Чек клієнта: ${{data.price}} ₴
+                    </div>
+                `;
+                // --------------------------------------------------------
                 document.getElementById('modal-job-id').value = data.id;
                 document.getElementById('orderModal').style.display = 'flex';
             }}
