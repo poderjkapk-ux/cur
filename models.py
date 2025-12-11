@@ -117,7 +117,8 @@ class DeliveryPartner(Base):
     
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    jobs = relationship("DeliveryJob", back_populates="partner")
+    # ИСПРАВЛЕНО: Добавлен cascade="all, delete-orphan" для удаления связанных DeliveryJob
+    jobs = relationship("DeliveryJob", back_populates="partner", cascade="all, delete-orphan")
 
 class DeliveryJob(Base):
     """
