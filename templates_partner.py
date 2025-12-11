@@ -135,7 +135,7 @@ def get_partner_auth_html(is_register=False, message=""):
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
-    Оновлений дашборд партнера з вибором оплати, скасуванням, рейтингом та кнопкою 'Готово'.
+    Оновлений дашборд партнера з вибором оплати, скасуванням, рейтингом та чатом.
     """
     
     # Розділяємо активні та завершені замовлення
@@ -149,8 +149,23 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         # Додаємо кнопку скасування
         cancel_btn = f'<button class="btn-mini danger" onclick="cancelOrder({j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i></button>'
         
+        # Кнопки зв'язку (телефон та чат)
+        comm_btns = ""
+        
         status_color = "#ccc"
         status_text = j.status
+        
+        # Якщо є кур'єр, показуємо кнопки зв'язку
+        courier_info = "—"
+        if j.courier:
+            courier_info = f"🚴 ID {j.courier_id}"
+            
+            # ВАЖЛИВО: j.courier повинен бути завантажений (joinedload) в app.py
+            phone_link = f"tel:{j.courier.phone}"
+            comm_btns = f"""
+            <a href="{phone_link}" class="btn-mini success" title="Зателефонувати"><i class="fa-solid fa-phone"></i></a>
+            <button class="btn-mini info" onclick="openChat({j.id}, 'Кур\\'єр {j.courier.name}')" title="Чат"><i class="fa-solid fa-comments"></i></button>
+            """
         
         if j.status == 'assigned' or j.status == 'picked_up' or j.status == 'ready':
             track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
@@ -169,8 +184,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         elif j.status == 'ready':
             ready_btn = '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
         # --------------------
-
-        courier_info = f"🚴 ID {j.courier_id}" if j.courier_id else "—"
         
         # Відображення типу оплати
         payment_badges = {
@@ -192,6 +205,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <td class="courier-cell">{courier_info}</td>
             <td>
                 <div style="display:flex; gap:5px; align-items:center;">
+                    {comm_btns}
                     {ready_btn}
                     {track_btn}
                     {cancel_btn}
@@ -200,7 +214,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         </tr>
         """
 
-    # --- ТАБЛИЦЯ ІСТОРІЇ (НОВА) ---
+    # --- ТАБЛИЦЯ ІСТОРІЇ ---
     history_rows = ""
     for j in history_jobs:
         # Форматування часу
@@ -252,7 +266,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         th {{ color: var(--text-muted); font-weight: 600; }}
         .header-bar {{ display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto 30px; width: 90%; }}
         
-        .btn-mini {{ border: 1px solid transparent; border-radius: 6px; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; background: rgba(255,255,255,0.05); color: var(--text-muted); }}
+        .btn-mini {{ border: 1px solid transparent; border-radius: 6px; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; background: rgba(255,255,255,0.05); color: var(--text-muted); text-decoration: none; }}
         .btn-mini:hover {{ transform: translateY(-2px); }}
         .btn-mini.info:hover {{ background: #6366f1; color: white; }}
         .btn-mini.danger:hover {{ background: #e11d48; color: white; }}
@@ -266,6 +280,16 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .track-header {{ padding: 15px; background: #0f172a; display: flex; justify-content: space-between; align-items: center; }}
         .close-btn {{ position: absolute; top: 15px; right: 15px; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }}
         
+        /* Стилі чату */
+        .chat-modal {{ height: 80vh; display: flex; flex-direction: column; }}
+        .chat-messages {{ flex: 1; overflow-y: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }}
+        .msg {{ max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.9rem; position: relative; }}
+        .msg.me {{ align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px; }}
+        .msg.other {{ align-self: flex-start; background: var(--bg-card-hover); color: var(--text-main); border-bottom-left-radius: 2px; }}
+        .msg-time {{ font-size: 0.7rem; opacity: 0.7; text-align: right; margin-top: 4px; }}
+        .chat-input-area {{ display: flex; gap: 10px; }}
+        .chat-input-area input {{ margin-bottom: 0; }}
+
         /* Радіо кнопки для оплати */
         .payment-options {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }}
         .payment-option input {{ display: none; }}
@@ -392,6 +416,21 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             </div>
         </div>
 
+        <div id="chatModal" class="modal-overlay">
+            <div class="modal-card chat-modal">
+                <div class="track-header">
+                    <div id="chat-title">Чат</div>
+                    <button class="close-btn" style="position:static" onclick="document.getElementById('chatModal').style.display='none'">×</button>
+                </div>
+                <div id="chat-messages" class="chat-messages"></div>
+                <form class="chat-input-area" onsubmit="sendChatMessage(event)">
+                    <input type="hidden" id="chat_job_id">
+                    <input type="text" id="chat_input" placeholder="Написати повідомлення..." autocomplete="off" required>
+                    <button type="submit" class="btn" style="width:auto;"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+            </div>
+        </div>
+
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
             // --- ЗВУК І TOAST ---
@@ -446,14 +485,83 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             // --- WEBSOCKET ---
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/partner`);
+            
             socket.onmessage = (event) => {{
                 const data = JSON.parse(event.data);
+                
                 if (data.type === 'order_update') {{
                     alertSound.play().catch(e => {{}});
                     showToast(data.message);
                     setTimeout(() => location.reload(), 2000); // Перезавантажуємо для оновлення таблиць
+                }} 
+                else if (data.type === 'chat_message') {{
+                    // Якщо відкритий чат цього замовлення - додаємо повідомлення
+                    const openJobId = document.getElementById('chat_job_id').value;
+                    const modalOpen = document.getElementById('chatModal').style.display === 'flex';
+                    
+                    if (modalOpen && openJobId == data.job_id) {{
+                        const container = document.getElementById('chat-messages');
+                        const div = document.createElement('div');
+                        div.className = 'msg other';
+                        div.innerHTML = `${{data.text}} <div class="msg-time">${{data.time}}</div>`;
+                        container.appendChild(div);
+                        container.scrollTop = container.scrollHeight;
+                    }} else {{
+                         showToast(`💬 Нове повідомлення: ${{data.text}}`);
+                    }}
                 }}
             }};
+
+            // --- CHAT LOGIC ---
+            async function openChat(jobId, title) {{
+                document.getElementById('chatModal').style.display = 'flex';
+                document.getElementById('chat-title').innerText = title;
+                document.getElementById('chat_job_id').value = jobId;
+                document.getElementById('chat-messages').innerHTML = '<div style="text-align:center; color:#888">Завантаження...</div>';
+                
+                try {{
+                    const res = await fetch(`/api/chat/history/${{jobId}}`);
+                    const msgs = await res.json();
+                    renderMessages(msgs);
+                }} catch(e) {{}}
+            }}
+
+            function renderMessages(msgs) {{
+                const container = document.getElementById('chat-messages');
+                container.innerHTML = '';
+                msgs.forEach(m => {{
+                    const div = document.createElement('div');
+                    div.className = `msg ${{m.role === 'partner' ? 'me' : 'other'}}`;
+                    div.innerHTML = `${{m.text}} <div class="msg-time">${{m.time}}</div>`;
+                    container.appendChild(div);
+                }});
+                container.scrollTop = container.scrollHeight;
+            }}
+
+            async function sendChatMessage(e) {{
+                e.preventDefault();
+                const input = document.getElementById('chat_input');
+                const jobId = document.getElementById('chat_job_id').value;
+                const text = input.value.trim();
+                if(!text) return;
+                
+                input.value = '';
+                // Optimistic UI
+                const container = document.getElementById('chat-messages');
+                const div = document.createElement('div');
+                div.className = 'msg me';
+                const time = new Date().toLocaleTimeString([], {{hour: '2-digit', minute:'2-digit'}});
+                div.innerHTML = `${{text}} <div class="msg-time">${{time}}</div>`;
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+
+                const fd = new FormData();
+                fd.append('job_id', jobId);
+                fd.append('message', text);
+                fd.append('role', 'partner');
+                
+                await fetch('/api/chat/send', {{method: 'POST', body: fd}});
+            }}
 
             // --- ЛОГІКА СКАСУВАННЯ ---
             async function cancelOrder(jobId) {{

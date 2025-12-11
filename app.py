@@ -30,7 +30,7 @@ import order_monitor
 
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, 
-    DeliveryPartner, DeliveryJob, PendingVerification,
+    DeliveryPartner, DeliveryJob, PendingVerification, ChatMessage, # <--- ДОБАВЛЕНО
     create_db_tables, get_db
 )
 from auth import check_admin_auth
@@ -203,7 +203,7 @@ def save_config(new_config):
         logging.error(f"Config save error: {e}")
 
 # ==============================================================================
-# 1. ОБЩИЕ РОУТЫ И SAAS (ВИТРИНА) - ВОССТАНОВЛЕНО
+# 1. ОБЩИЕ РОУТЫ И SAAS (ВИТРИНА)
 # ==============================================================================
 
 @app.get("/", response_class=HTMLResponse)
@@ -303,7 +303,7 @@ async def handle_registration(
     return JSONResponse(content={"detail": "User created successfully."})
 
 # ==============================================================================
-# 2. УПРАВЛЕНИЕ ИНСТАНСАМИ (SAAS LOGIC) - ВОССТАНОВЛЕНО ПОЛНОСТЬЮ
+# 2. УПРАВЛЕНИЕ ИНСТАНСАМИ (SAAS LOGIC)
 # ==============================================================================
 
 @app.post("/api/create-instance")
@@ -422,7 +422,7 @@ async def settings_save(request: Request, _ = Depends(check_admin_auth)):
     return templates_saas.get_settings_page_html(config, "Налаштування збережено")
 
 # ==============================================================================
-# 3. DELIVERY LOGIC (COURIER & PARTNER) - ПОЛНОСТЬЮ СОХРАНЕНО
+# 3. DELIVERY LOGIC (COURIER & PARTNER)
 # ==============================================================================
 
 # --- COURIER AUTH ---
@@ -670,6 +670,8 @@ async def get_active_job(
     
     partner_name = job.partner.name if job.partner else "Невідомий заклад"
     partner_address = job.partner.address if job.partner else "Адреса не знайдена"
+    # Добавляем телефон партнера
+    partner_phone = job.partner.phone if job.partner else ""
     
     payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
 
@@ -680,7 +682,7 @@ async def get_active_job(
             "status": job.status,
             "partner_name": partner_name,
             "partner_address": partner_address,
-            "partner_phone": job.partner.phone if job.partner else "",
+            "partner_phone": partner_phone, # <--- ТЕЛЕФОН ПАРТНЕРА
             "customer_address": job.dropoff_address,
             "customer_lat": job.dropoff_lat,
             "customer_lon": job.dropoff_lon,
@@ -767,6 +769,62 @@ async def courier_accept_order(
 
     return JSONResponse({"status": "ok", "message": "Замовлення прийнято!"})
 
+# ==============================================================================
+# CHAT API (НОВАЯ СЕКЦИЯ)
+# ==============================================================================
+
+@app.get("/api/chat/history/{job_id}")
+async def get_chat_history(
+    job_id: int, 
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
+):
+    partner_token = request.cookies.get("partner_token")
+    courier_token = request.cookies.get("courier_token")
+    
+    if not partner_token and not courier_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    messages = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.job_id == job_id)
+        .order_by(ChatMessage.created_at.asc())
+    )
+    return JSONResponse([{
+        "role": m.sender_role,
+        "text": m.message,
+        "time": m.created_at.strftime("%H:%M")
+    } for m in messages.scalars().all()])
+
+@app.post("/api/chat/send")
+async def send_chat_message(
+    request: Request,
+    job_id: int = Form(...),
+    message: str = Form(...),
+    role: str = Form(...), # 'partner' или 'courier'
+    db: AsyncSession = Depends(get_db)
+):
+    msg = ChatMessage(job_id=job_id, sender_role=role, message=message)
+    db.add(msg)
+    
+    job = await db.get(DeliveryJob, job_id)
+    if job:
+        ws_msg = {
+            "type": "chat_message",
+            "job_id": job_id,
+            "role": role,
+            "text": message,
+            "time": datetime.utcnow().strftime("%H:%M")
+        }
+        
+        if role == 'partner' and job.courier_id:
+            await manager.notify_courier(job.courier_id, ws_msg)
+        elif role == 'courier':
+            await manager.notify_partner(job.partner_id, ws_msg)
+            
+    await db.commit()
+    return JSONResponse({"status": "ok"})
+
 # --- PARTNER LOGIC ---
 
 async def get_current_partner(request: Request, db: AsyncSession = Depends(get_db)):
@@ -837,7 +895,14 @@ async def partner_logout():
 async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     try: partner = await get_current_partner(request, db)
     except HTTPException: return RedirectResponse("/partner/login")
-    result = await db.execute(select(DeliveryJob).where(DeliveryJob.partner_id == partner.id).order_by(DeliveryJob.id.desc()))
+    
+    # ИЗМЕНЕНИЕ: Загружаем курьера, чтобы получить его телефон
+    result = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.partner_id == partner.id)
+        .order_by(DeliveryJob.id.desc())
+    )
     return templates_partner.get_partner_dashboard_html(partner, result.scalars().all())
 
 @app.post("/api/partner/create_order")

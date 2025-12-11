@@ -165,6 +165,25 @@ class DeliveryJob(Base):
     
     partner = relationship("DeliveryPartner", back_populates="jobs")
     courier = relationship("Courier")
+    
+    # --- НОВЕ: ЧАТ ---
+    messages = relationship("ChatMessage", back_populates="job", cascade="all, delete-orphan")
+
+class ChatMessage(Base):
+    """
+    Повідомлення в чаті між Партнером і Кур'єром в рамках одного замовлення.
+    """
+    __tablename__ = "chat_messages"
+    
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey("delivery_jobs.id"), nullable=False)
+    
+    sender_role = Column(String(20), nullable=False) # 'partner' або 'courier'
+    message = Column(String(1000), nullable=False)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    job = relationship("DeliveryJob", back_populates="messages")
 
 class PendingVerification(Base):
     """

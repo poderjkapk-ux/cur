@@ -42,7 +42,7 @@ PWA_STYLES = """
         box-shadow: 0 -5px 30px rgba(0,0,0,0.4);
         transform: translateY(110%); /* Скрыта по умолчанию */
         transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        max-height: 80vh;
+        max-height: 85vh;
         overflow-y: auto;
     }
     .bottom-sheet.active { transform: translateY(0); }
@@ -79,6 +79,73 @@ PWA_STYLES = """
     .history-modal.open { transform: translateX(0); }
     .history-item { padding: 15px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
     .history-price { color: var(--status-active); font-weight: bold; }
+
+    /* --- STYLES FOR CHAT (Mobile) --- */
+    .chat-sheet {
+        position: fixed; inset: 0; 
+        background: var(--bg-body); 
+        z-index: 250; 
+        display: flex; flex-direction: column; 
+        transform: translateY(100%); 
+        transition: 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .chat-sheet.open { transform: translateY(0); }
+    
+    .chat-header {
+        padding: 15px; 
+        border-bottom: 1px solid var(--border); 
+        display: flex; align-items: center; justify-content: space-between; 
+        background: var(--bg-card);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .chat-body {
+        flex: 1; 
+        overflow-y: auto; 
+        padding: 15px; 
+        display: flex; flex-direction: column; gap: 10px; 
+        padding-bottom: 20px;
+        background: #0f172a;
+    }
+    
+    .chat-footer {
+        padding: 10px; 
+        background: var(--bg-card); 
+        border-top: 1px solid var(--border); 
+        display: flex; gap: 10px; 
+        align-items: center;
+    }
+    
+    .msg { 
+        max-width: 85%; 
+        padding: 10px 14px; 
+        border-radius: 16px; 
+        font-size: 0.95rem; 
+        color: white; 
+        word-wrap: break-word;
+        position: relative;
+    }
+    .msg.me { 
+        align-self: flex-end; 
+        background: var(--primary); 
+        border-bottom-right-radius: 4px; 
+    }
+    .msg.other { 
+        align-self: flex-start; 
+        background: #334155; 
+        border-bottom-left-radius: 4px; 
+    }
+    
+    .chat-input {
+        flex: 1; 
+        background: #1e293b; 
+        border: 1px solid var(--border); 
+        padding: 12px; 
+        border-radius: 25px; 
+        color: white; 
+        outline: none;
+    }
+    .chat-input:focus { border-color: var(--primary); }
 </style>
 """
 
@@ -262,6 +329,7 @@ def get_courier_pwa_html(courier: Courier):
     """
     Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом.
     Включает отображение маркера клиента и маршрута, а также Push-уведомления (Firebase).
+    ОБНОВЛЕНО: Добавлены Чат и Звонки.
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
@@ -317,6 +385,15 @@ def get_courier_pwa_html(courier: Courier):
             </div>
             <div class="sheet-subtitle" id="job-status-desc">Прямуйте до закладу</div>
 
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+                <a href="#" id="btn-call" class="btn-nav" style="background: #334155; display:none;">
+                    <i class="fa-solid fa-phone"></i> Дзвінок
+                </a>
+                <button id="btn-chat" class="btn-nav" style="background: #334155; cursor: pointer;">
+                    <i class="fa-solid fa-comments"></i> Чат
+                </button>
+            </div>
+
             <div class="info-block">
                 <div class="info-label" id="addr-label">Забрати тут:</div>
                 <div class="info-value" id="current-target-addr">вул. Прикладна, 10</div>
@@ -338,6 +415,19 @@ def get_courier_pwa_html(courier: Courier):
             </div>
         </div>
         
+        <div id="chat-sheet" class="chat-sheet">
+            <div class="chat-header">
+                <button class="icon-btn" onclick="document.getElementById('chat-sheet').classList.remove('open')" style="color:white;"><i class="fa-solid fa-arrow-left"></i></button>
+                <div style="font-weight:bold; font-size:1.1rem; color:white;">Чат з закладом</div>
+                <div style="width:24px"></div>
+            </div>
+            <div id="chat-body" class="chat-body"></div>
+            <form class="chat-footer" onsubmit="sendChatMessage(event)">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Повідомлення..." autocomplete="off" required>
+                <button type="submit" class="icon-btn" style="background:var(--primary); border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center;"><i class="fa-solid fa-paper-plane"></i></button>
+            </form>
+        </div>
+
         <div id="history-modal" class="history-modal">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <h2>Історія замовлень</h2>
@@ -492,12 +582,28 @@ def get_courier_pwa_html(courier: Courier):
                             showNewOrder(msg.data);
                         }}
                     }}
-                    // --- ОБРОБКА ОНОВЛЕННЯ СТАТУСУ (ГОТОВО) ---
                     else if (msg.type === 'job_update') {{
                         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
                         audio.play().catch(e => console.log("Audio play failed"));
                         if (navigator.vibrate) navigator.vibrate([200]);
                         checkActiveJob();
+                    }}
+                    // --- ОБРОБКА ПОВІДОМЛЕНЬ ЧАТУ ---
+                    else if (msg.type === 'chat_message') {{
+                        const sheetOpen = document.getElementById('chat-sheet').classList.contains('open');
+                        
+                        if (sheetOpen && currentJob && currentJob.id == msg.job_id) {{
+                            const container = document.getElementById('chat-body');
+                            const div = document.createElement('div');
+                            div.className = 'msg other';
+                            div.innerText = msg.text;
+                            container.appendChild(div);
+                            container.scrollTop = container.scrollHeight;
+                            if (navigator.vibrate) navigator.vibrate(50);
+                        }} else {{
+                             // Якщо чат закритий - показуємо сповіщення
+                             alert(`💬 Повідомлення від закладу:\n${{msg.text}}`);
+                        }}
                     }}
                 }};
 
@@ -657,6 +763,18 @@ def get_courier_pwa_html(courier: Courier):
                 document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
                 document.getElementById('job-comment').innerText = currentJob.comment || '';
 
+                // --- НАЛАШТУВАННЯ КНОПОК ДЗВІНКА ТА ЧАТУ ---
+                const btnCall = document.getElementById('btn-call');
+                if (currentJob.partner_phone) {{
+                    btnCall.href = `tel:${{currentJob.partner_phone}}`;
+                    btnCall.style.display = 'flex';
+                }} else {{
+                    btnCall.style.display = 'none';
+                }}
+                
+                document.getElementById('btn-chat').onclick = () => openChat();
+                // ---------------------------------------------
+
                 // --- ЛОГИКА ОТОБРАЖЕНИЯ НА КАРТЕ ---
                 
                 // 1. Очищаем старые маркеры назначения
@@ -798,6 +916,54 @@ def get_courier_pwa_html(courier: Courier):
                 }} else {{
                     modal.classList.remove('open');
                 }}
+            }}
+
+            // --- CHAT LOGIC (COURIER SIDE) ---
+            async function openChat() {{
+                if(!currentJob) return;
+                document.getElementById('chat-sheet').classList.add('open');
+                document.getElementById('chat-body').innerHTML = '<div style="text-align:center; padding:20px; color:#888">Завантаження...</div>';
+                
+                try {{
+                    const res = await fetch(`/api/chat/history/${{currentJob.id}}`);
+                    const msgs = await res.json();
+                    renderMessages(msgs);
+                }} catch(e) {{}}
+            }}
+
+            function renderMessages(msgs) {{
+                const container = document.getElementById('chat-body');
+                container.innerHTML = '';
+                msgs.forEach(m => {{
+                    const div = document.createElement('div');
+                    div.className = `msg ${{m.role === 'courier' ? 'me' : 'other'}}`;
+                    div.innerText = m.text;
+                    container.appendChild(div);
+                }});
+                container.scrollTop = container.scrollHeight;
+            }}
+
+            async function sendChatMessage(e) {{
+                e.preventDefault();
+                const input = document.getElementById('chat-input');
+                const text = input.value.trim();
+                if(!text || !currentJob) return;
+                
+                input.value = '';
+                // Optimistic UI
+                const container = document.getElementById('chat-body');
+                const div = document.createElement('div');
+                div.className = 'msg me';
+                div.innerText = text;
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+
+                const fd = new FormData();
+                fd.append('job_id', currentJob.id);
+                fd.append('message', text);
+                fd.append('role', 'courier');
+                
+                await fetch('/api/chat/send', {{method: 'POST', body: fd}});
             }}
         </script>
     </body>
