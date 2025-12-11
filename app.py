@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta
 
-# --- 1. Импорты проекта ---
+# --- 1. Імпорти проекту ---
 import provision
 import auth 
 import templates_saas
@@ -38,57 +38,57 @@ from auth import check_admin_auth
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-# --- 2. Загрузка конфигурации из переменных окружения ---
+# --- 2. Завантаження конфігурації зі змінних оточення ---
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 ROOT_DOMAIN = os.environ.get("ROOT_DOMAIN", "restify.site")
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "Restify_Bot") 
 
-# --- 3. Инициализация FastAPI и Firebase ---
+# --- 3. Ініціалізація FastAPI та Firebase ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
-# Инициализация Firebase Admin SDK
-# Файл firebase_credentials.json должен лежать в той же папке, что и app.py
+# Ініціалізація Firebase Admin SDK
+# Файл firebase_credentials.json повинен лежати в тій же папці, що і app.py
 if not firebase_admin._apps:
     try:
         if os.path.exists("firebase_credentials.json"):
             cred = credentials.Certificate("firebase_credentials.json")
             firebase_admin.initialize_app(cred)
-            logging.info("Firebase Admin Initialized successfully.")
+            logging.info("Firebase Admin ініціалізовано успішно.")
         else:
-            logging.warning("firebase_credentials.json not found! Push notifications will not work.")
+            logging.warning("firebase_credentials.json не знайдено! Push-сповіщення не працюватимуть.")
     except Exception as e:
-        logging.warning(f"Firebase Init Error: {e}")
+        logging.warning(f"Помилка ініціалізації Firebase: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.info("Запуск... Подключение к БД и создание таблиц...")
+    logging.info("Запуск... Підключення до БД та створення таблиць...")
     await create_db_tables()
     
-    # Загрузка конфига (с защитой от сбоев)
+    # Завантаження конфігу (із захистом від збоїв)
     load_config() 
     
     # --- ЗАПУСК TELEGRAM БОТА ---
     if bot_service.bot:
         asyncio.create_task(bot_service.start_bot())
-        logging.info("Telegram Bot Polling started via bot_service.")
+        logging.info("Telegram Bot Polling запущено через bot_service.")
     else:
-        logging.warning("TG_BOT_TOKEN not set, bot disabled.")
+        logging.warning("TG_BOT_TOKEN не встановлено, бот вимкнено.")
     
-    # --- ЗАПУСК МОНИТОРИНГА ЗАВИСШИХ ЗАКАЗОВ ---
+    # --- ЗАПУСК МОНІТОРИНГУ ЗАВИСЛИХ ЗАМОВЛЕНЬ ---
     asyncio.create_task(order_monitor.monitor_stale_orders(manager))
-    logging.info("Order Monitor started.")
+    logging.info("Моніторинг замовлень (Order Monitor) запущено.")
     
-    logging.info("Приложение запущено.")
+    logging.info("Додаток запущено.")
     yield
-    logging.info("Завершение работы.")
+    logging.info("Завершення роботи.")
 
 app = FastAPI(
     title="Restify SaaS Control Plane",
     lifespan=lifespan
 )
 
-# --- ПОДКЛЮЧЕНИЕ РОУТЕРА АДМИНКИ ДОСТАВКИ ---
+# --- ПІДКЛЮЧЕННЯ РОУТЕРА АДМІНКИ ДОСТАВКИ ---
 app.include_router(admin_delivery.router)
 
 os.makedirs("static", exist_ok=True)
@@ -145,7 +145,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# --- 4. Логика витрины (config.json) ---
+# --- 4. Логіка вітрини (config.json) ---
 CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
     "admin_id": "", "bot_token": "", "price_light": "300",
@@ -195,14 +195,14 @@ def save_config(new_config):
     except Exception as e:
         logging.error(f"Не вдалося зберегти config.json: {e}")
 
-# --- 6. Эндпоинты (Роутинг) - ОБЩИЕ ---
+# --- 6. Ендпоінти (Роутинг) - ЗАГАЛЬНІ ---
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     config = load_config()
     return HTMLResponse(content=templates_saas.get_landing_page_html(config))
 
-# === ЛОГИКА ДЛЯ ВЛАДЕЛЬЦЕВ РЕСТОРАНОВ (SAAS USER) ===
+# === ЛОГІКА ДЛЯ ВЛАСНИКІВ РЕСТОРАНІВ (SAAS USER) ===
 
 @app.get("/login", response_class=HTMLResponse)
 async def get_login_form(request: Request, message: str = None, type: str = "error"):
@@ -290,7 +290,7 @@ async def check_verification(token: str, db: AsyncSession = Depends(get_db)):
         
     return JSONResponse({"status": "waiting"})
 
-# --- РЕГИСТРАЦИЯ SAAS ПОЛЬЗОВАТЕЛЯ ---
+# --- РЕЄСТРАЦІЯ SAAS КОРИСТУВАЧА ---
 
 @app.post("/api/register")
 async def handle_registration(
@@ -319,11 +319,11 @@ async def handle_registration(
     return JSONResponse(content={"detail": "User created successfully."})
 
 
-# === ЛОГИКА ДЛЯ КУРЬЕРОВ (COURIER PWA) ===
+# === ЛОГІКА ДЛЯ КУР'ЄРІВ (COURIER PWA) ===
 
 @app.get("/courier/login", response_class=HTMLResponse)
 async def courier_login_page(request: Request, message: str = None, db: AsyncSession = Depends(get_db)):
-    # --- FIX #1: ПРОВЕРКА КУК ПЕРЕД ОТОБРАЖЕНИЕМ ФОРМЫ ---
+    # --- ПЕРЕВІРКА КУК ПЕРЕД ВІДОБРАЖЕННЯМ ФОРМИ ---
     token = request.cookies.get("courier_token")
     if token:
         try:
@@ -331,7 +331,7 @@ async def courier_login_page(request: Request, message: str = None, db: AsyncSes
             if courier:
                 return RedirectResponse(url="/courier/app", status_code=302)
         except Exception:
-            pass # Токен невалиден, показываем форму входа
+            pass # Токен невалідний, показуємо форму входу
     
     return templates_courier.get_courier_login_page(message)
 
@@ -383,16 +383,16 @@ async def api_courier_login(
     
     resp = RedirectResponse("/courier/app", status_code=302)
     
-    # --- FIX #2: БЕЗОПАСНАЯ УСТАНОВКА КУКИ (HTTPS CHECK) ---
-    is_secure = ROOT_DOMAIN.startswith("https") # True, если сайт на HTTPS
+    # --- БЕЗПЕЧНЕ ВСТАНОВЛЕННЯ КУКИ (HTTPS CHECK) ---
+    is_secure = ROOT_DOMAIN.startswith("https") # True, якщо сайт на HTTPS
     
     resp.set_cookie(
         key="courier_token", 
         value=token, 
         httponly=True, 
-        max_age=604800, # 7 дней
+        max_age=604800, # 7 днів
         samesite="lax", 
-        secure=is_secure # Автоматически определяем, нужно ли Secure
+        secure=is_secure 
     )
     return resp
 
@@ -430,7 +430,7 @@ async def courier_update_location(
     await db.commit()
     return JSONResponse({"status": "ok"})
 
-# --- ЭНДПОИНТ: Сохранение FCM токена курьера (С ЛОГИРОВАНИЕМ) ---
+# --- ЕНДПОІНТ: Збереження FCM токена кур'єра ---
 @app.post("/api/courier/fcm_token")
 async def update_fcm_token(
     token: str = Form(...),
@@ -438,17 +438,15 @@ async def update_fcm_token(
     db: AsyncSession = Depends(get_db)
 ):
     """Зберігає токен пристрою кур'єра для Push-повідомлень"""
-    # --- ЛОГ ---
     logging.info(f"[PUSH] Кур'єр {courier.id} ({courier.name}) оновив FCM токен: {token[:15]}...")
     
     courier.fcm_token = token
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- ЭНДПОИНТ: Service Worker для Firebase (ПОЛНОСТЬЮ ПЕРЕПИСАН) ---
+# --- ЕНДПОІНТ: Service Worker для Firebase ---
 @app.get("/firebase-messaging-sw.js")
 async def get_firebase_sw():
-    # --- FIX #3: ПРАВИЛЬНЫЙ ОБРАБОТЧИК ФОНОВЫХ ПУШЕЙ ---
     content = """
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
@@ -464,7 +462,7 @@ async def get_firebase_sw():
 
     const messaging = firebase.messaging();
 
-    // Обработчик фоновых сообщений (когда сайт закрыт)
+    // Обробник фонових повідомлень
     messaging.onBackgroundMessage(function(payload) {
       console.log('[firebase-messaging-sw.js] Received background message ', payload);
       
@@ -473,26 +471,24 @@ async def get_firebase_sw():
         body: payload.notification.body,
         icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png', 
         tag: 'new-order',
-        data: { url: '/courier/app' } // Куда переходить
+        data: { url: '/courier/app' } 
       };
 
       return self.registration.showNotification(notificationTitle, notificationOptions);
     });
 
-    // Обработчик клика по уведомлению
+    // Обробник кліку по сповіщенню
     self.addEventListener('notificationclick', function(event) {
         event.notification.close();
         
         event.waitUntil(
             clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
-                // Если вкладка уже открыта — фокусируемся на ней
                 for (var i = 0; i < windowClients.length; i++) {
                     var client = windowClients[i];
                     if (client.url.indexOf('/courier/app') !== -1 && 'focus' in client) {
                         return client.focus();
                     }
                 }
-                // Если нет — открываем новую
                 if (clients.openWindow) {
                     return clients.openWindow('/courier/app');
                 }
@@ -502,31 +498,24 @@ async def get_firebase_sw():
     """
     return Response(content=content, media_type="application/javascript")
 
-# ... (приблизно рядок 777)
-# --- ФУНКЦИЯ ОТПРАВКИ PUSH ---
+# --- ФУНКЦІЯ ВІДПРАВКИ PUSH ---
 async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str):
     if not courier_tokens: return
     try:
         success_count = 0
-        # СТІЙКЕ ВИПРАВЛЕННЯ: Ітеруємо і відправляємо по одному, 
-        # використовуючи send(), що є в усіх версіях firebase-admin.
-        # Це обходить проблему старої версії бібліотеки.
         for token in courier_tokens:
             message = messaging.Message(
                 notification=messaging.Notification(title=title, body=body),
                 token=token,
             )
-            # Використовуємо send()
             messaging.send(message) 
             success_count += 1 
 
         logging.info(f"Sent {success_count} pushes.")
     except Exception as e:
-        # Увага: якщо помилка все одно виникає, це означає, що 
-        # firebase_admin.messaging взагалі не було ініціалізовано.
         logging.error(f"Push Error: {e}")
 
-# --- WebSocket для курьеров ---
+# --- WebSocket для кур'єрів ---
 @app.websocket("/ws/courier")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -545,7 +534,7 @@ async def websocket_endpoint(
 
     await manager.connect_courier(websocket, courier.id)
     
-    # Sync pending orders
+    # Синхронізація "висячих" замовлень
     try:
         result = await db.execute(
             select(DeliveryJob)
@@ -555,6 +544,12 @@ async def websocket_endpoint(
         pending_jobs = result.scalars().all()
         
         for job in pending_jobs:
+            payment_label = {
+                "prepaid": "✅ Оплачено",
+                "cash": "💵 Готівка від клієнта",
+                "buyout": "💰 Потрібен викуп"
+            }.get(job.payment_type, "Оплата")
+
             job_data = {
                 "id": job.id,
                 "address": job.dropoff_address,
@@ -562,7 +557,7 @@ async def websocket_endpoint(
                 "restaurant_address": job.partner.address if job.partner else "",
                 "fee": job.delivery_fee,
                 "price": job.order_price,
-                "comment": job.comment
+                "comment": f"[{payment_label}] {job.comment or ''}"
             }
             await websocket.send_json({"type": "new_order", "data": job_data})
     except Exception as e:
@@ -625,6 +620,13 @@ async def get_active_job(
     partner_name = job.partner.name if job.partner else "Невідомий заклад (Видалено)"
     partner_address = job.partner.address if job.partner else "Адреса не знайдена"
     partner_phone = job.partner.phone if job.partner else ""
+    
+    # Додаємо інформацію про оплату в коментар для відображення в інтерфейсі кур'єра
+    payment_label = {
+        "prepaid": "✅ Оплачено",
+        "cash": "💵 Готівка від клієнта",
+        "buyout": "💰 Потрібен викуп"
+    }.get(job.payment_type, "Оплата")
 
     return JSONResponse({
         "active": True,
@@ -639,7 +641,7 @@ async def get_active_job(
             "customer_lon": job.dropoff_lon,
             "customer_phone": job.customer_phone,
             "customer_name": job.customer_name,
-            "comment": job.comment,
+            "comment": f"[{payment_label}] {job.comment or ''}",
             "order_price": job.order_price,
             "delivery_fee": job.delivery_fee
         }
@@ -654,9 +656,17 @@ async def update_job_status(
 ):
     job = await db.get(DeliveryJob, job_id)
     if not job or job.courier_id != courier.id:
-        return JSONResponse({"status": "error", "message": "Заказ не найден"}, status_code=404)
+        return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
     job.status = status
+    
+    # --- ОНОВЛЕНО: Фіксація часу ---
+    now = datetime.utcnow()
+    if status == "picked_up":
+        job.picked_up_at = now
+    elif status == "delivered":
+        job.delivered_at = now
+        
     await db.commit()
 
     msg_text = ""
@@ -706,6 +716,10 @@ async def courier_accept_order(
 
     job.status = "assigned"
     job.courier_id = courier.id
+    
+    # --- ОНОВЛЕНО: Фіксація часу прийняття ---
+    job.accepted_at = datetime.utcnow()
+    
     await db.commit()
 
     await manager.notify_partner(job.partner_id, {
@@ -731,7 +745,7 @@ async def courier_accept_order(
     return JSONResponse({"status": "ok", "message": "Замовлення прийнято! Рушайте до закладу."})
 
 
-# === ВНЕШНЕЕ API ДЛЯ РЕСТОРАНОВ ===
+# === ЗОВНІШНЄ API ДЛЯ РЕСТОРАНІВ ===
 
 @app.get("/api/external/couriers/nearby")
 async def get_nearby_couriers(
@@ -757,7 +771,7 @@ async def get_nearby_couriers(
     return JSONResponse(data)
 
 
-# === ЛОГИКА ДЛЯ ПАРТНЕРОВ ===
+# === ЛОГІКА ДЛЯ ПАРТНЕРІВ ===
 
 async def get_current_partner(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("partner_token")
@@ -837,7 +851,6 @@ async def partner_login_action(
     
     token = auth.create_access_token(data={"sub": f"partner:{partner.id}"})
     resp = RedirectResponse("/partner/dashboard", status_code=303)
-    # --- FIX: Добавлен max_age и samesite=lax для сохранения сессии ---
     resp.set_cookie(key="partner_token", value=token, httponly=True, max_age=604800, samesite="lax", secure=True)
     return resp
 
@@ -889,7 +902,7 @@ async def track_courier_location(
 
 # --- ГЕОКОДИНГ ---
 async def geocode_address(address: str):
-    """Преобразует адрес в координаты через Nominatim (OSM)"""
+    """Перетворює адресу в координати через Nominatim (OSM)"""
     url = "https://nominatim.openstreetmap.org/search"
     headers = {"User-Agent": "RestifyDelivery/1.0 (admin@restify.site)"}
     params = {
@@ -909,7 +922,7 @@ async def geocode_address(address: str):
             
     return None, None
 
-# --- ОБНОВЛЕННЫЙ ЭНДПОИНТ СОЗДАНИЯ ЗАКАЗА (С FIREBASE PUSH + DETAILED DEBUG LOGGING) ---
+# --- ОНОВЛЕНИЙ ЕНДПОІНТ СТВОРЕННЯ ЗАМОВЛЕННЯ ---
 @app.post("/api/partner/create_order")
 async def create_partner_order(
     dropoff_address: str = Form(...),
@@ -918,13 +931,14 @@ async def create_partner_order(
     order_price: float = Form(0.0),
     delivery_fee: float = Form(50.0),
     comment: str = Form(""),
+    payment_type: str = Form("prepaid"), # НОВЕ ПОЛЕ: Тип оплати
     db: AsyncSession = Depends(get_db),
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
     # 1. Геокодинг
     lat, lon = await geocode_address(dropoff_address)
 
-    # 2. Создание заказа
+    # 2. Створення замовлення
     job = DeliveryJob(
         partner_id=partner.id,
         dropoff_address=dropoff_address,
@@ -935,13 +949,20 @@ async def create_partner_order(
         order_price=order_price,
         delivery_fee=delivery_fee,
         comment=comment,
+        payment_type=payment_type, # Зберігаємо тип
         status="pending"
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    # 3. WebSocket Broadcast
+    # 3. WebSocket Broadcast (з інформацією про оплату)
+    payment_label = {
+        "prepaid": "✅ Оплачено",
+        "cash": "💵 Готівка від клієнта",
+        "buyout": "💰 Потрібен викуп"
+    }.get(payment_type, "Оплата")
+
     order_data = {
         "id": job.id,
         "address": dropoff_address,
@@ -951,7 +972,8 @@ async def create_partner_order(
         "restaurant_address": partner.address,
         "fee": delivery_fee,
         "price": order_price,
-        "comment": comment
+        # Додаємо мітку оплати в коментар, щоб кур'єр бачив одразу
+        "comment": f"[{payment_label}] {comment}" 
     }
     await manager.broadcast_order_to_couriers(order_data)
 
@@ -964,6 +986,7 @@ async def create_partner_order(
     tg_msg = (
         f"🔥 <b>Нове замовлення!</b>\n"
         f"💵 Дохід: <b>{delivery_fee} грн</b>\n"
+        f"💳 <b>{payment_label}</b>\n"
         f"📍 Звідки: {partner.name} ({partner.address})\n"
         f"🏁 Куди: {dropoff_address}\n\n"
         f"<i>Зайдіть у додаток, щоб прийняти!</i>"
@@ -972,18 +995,15 @@ async def create_partner_order(
     for c in online_couriers_tg:
         asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
 
-    # 5. --- FIREBASE PUSH NOTIFICATION (DEBUG VERSION) ---
-    # 1. Сначала проверим, сколько вообще курьеров онлайн
+    # 5. Firebase Push
     online_couriers_result = await db.execute(select(Courier).where(Courier.is_online == True))
     online_couriers = online_couriers_result.scalars().all()
     
-    online_count = len(online_couriers)
-    # Фильтруем тех, у кого есть токен
     couriers_with_token = [c for c in online_couriers if c.fcm_token]
     tokens = [c.fcm_token for c in couriers_with_token]
     
     if tokens:
-        logging.info(f"[PUSH] Знайдено {len(tokens)} токенів (всього онлайн: {online_count}). Ініціюю відправку...")
+        logging.info(f"[PUSH] Відправка {len(tokens)} повідомлень.")
         asyncio.create_task(
             send_push_to_couriers(
                 tokens, 
@@ -992,18 +1012,67 @@ async def create_partner_order(
             )
         )
     else:
-        # --- ДЕТАЛЬНИЙ ЛОГ ПРИЧИНИ ---
-        if online_count > 0:
-             # Курьеры есть, но нет токенов
-             names_without_token = [c.name for c in online_couriers if not c.fcm_token]
-             logging.warning(f"[PUSH] УВАГА: Є {online_count} онлайн-кур'єрів, але ЖОДЕН не має FCM токена! (Імена без токена: {', '.join(names_without_token)})")
-             logging.warning("[PUSH] Можливі причини: 1) Не дали дозвіл на повідомлення. 2) Сайт не на HTTPS. 3) Браузер блокує.")
-        else:
-             # Вообще никого онлайн
-             logging.warning("[PUSH] Не знайдено жодного кур'єра зі статусом 'is_online=True'.")
-    # -------------------------------------
+        logging.warning("[PUSH] Немає доступних токенів для відправки.")
 
     return RedirectResponse("/partner/dashboard", status_code=303)
+
+# --- НОВЕ: СКАСУВАННЯ ЗАМОВЛЕННЯ (Правило 3 хвилин) ---
+@app.post("/api/partner/cancel_order")
+async def partner_cancel_order(
+    job_id: int = Form(...),
+    partner: DeliveryPartner = Depends(get_current_partner),
+    db: AsyncSession = Depends(get_db)
+):
+    job = await db.get(DeliveryJob, job_id)
+    if not job or job.partner_id != partner.id:
+        return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
+
+    # Якщо замовлення вже доставлено або скасовано
+    if job.status in ["delivered", "cancelled"]:
+         return JSONResponse({"status": "error", "message": "Замовлення вже завершено або скасовано"}, status_code=400)
+
+    # Перевірка часу, якщо кур'єр вже призначений
+    if job.status == "assigned" and job.accepted_at:
+        time_passed = datetime.utcnow() - job.accepted_at
+        if time_passed > timedelta(minutes=3):
+            minutes_passed = int(time_passed.total_seconds() / 60)
+            return JSONResponse({
+                "status": "error", 
+                "message": f"Запізно! Кур'єр прийняв замовлення {minutes_passed} хв тому (ліміт скасування - 3 хв)."
+            }, status_code=400)
+
+    old_status = job.status
+    job.status = "cancelled"
+    await db.commit()
+
+    # Сповіщення (логіка сповіщення кур'єра може бути додана тут)
+    if old_status == "assigned" and job.courier_id:
+        logging.info(f"Замовлення #{job.id} скасовано, кур'єр {job.courier_id} буде сповіщений при оновленні.")
+
+    return JSONResponse({"status": "ok", "message": "Замовлення скасовано."})
+
+# --- НОВЕ: ОЦІНКА КУР'ЄРА ---
+@app.post("/api/partner/rate_courier")
+async def partner_rate_courier(
+    job_id: int = Form(...),
+    rating: int = Form(...),
+    review: str = Form(""),
+    partner: DeliveryPartner = Depends(get_current_partner),
+    db: AsyncSession = Depends(get_db)
+):
+    job = await db.get(DeliveryJob, job_id)
+    if not job or job.partner_id != partner.id:
+        return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
+
+    if job.status != "delivered":
+        return JSONResponse({"status": "error", "message": "Можна оцінювати тільки завершені замовлення"}, status_code=400)
+
+    job.courier_rating = rating
+    job.courier_review = review
+    await db.commit()
+
+    return JSONResponse({"status": "ok", "message": "Дякуємо за оцінку!"})
+
 
 # --- WebSocket для Партнерів ---
 @app.websocket("/ws/partner")
@@ -1035,7 +1104,7 @@ async def websocket_partner_endpoint(
         manager.disconnect_partner(partner_id)
 
 
-# --- 7. ЭНДПОИНТ СОЗДАНИЯ САЙТА (SAAS) ---
+# --- 7. ЕНДПОІНТ СТВОРЕННЯ САЙТУ (SAAS) ---
 
 @app.post("/api/create-instance", response_class=JSONResponse)
 async def handle_instance_creation(
@@ -1097,7 +1166,7 @@ async def handle_instance_creation(
             content={"detail": f"Помилка розгортання: {e}. Перевірте лог."}
         )
 
-# --- 8. ЭНДПОИНТ: Управление проектом ---
+# --- 8. ЕНДПОІНТ: Управління проектом ---
 
 @app.post("/api/instance/control", response_class=JSONResponse)
 async def handle_instance_control(
@@ -1182,7 +1251,7 @@ async def handle_instance_delete(
     return JSONResponse(content={"message": "Проект успішно видалено."})
 
 
-# --- 10. Админка SaaS (SUPER ADMIN) ---
+# --- 10. Адмінка SaaS (SUPER ADMIN) ---
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard(
@@ -1249,7 +1318,7 @@ async def admin_control_instance(
     return RedirectResponse(url=f"/admin?message={msg}", status_code=302)
 
 
-# --- 11. Настройки Витрины ---
+# --- 11. Налаштування Вітрини ---
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(username: str = Depends(check_admin_auth)):
@@ -1275,7 +1344,7 @@ async def settings_save(
     save_config(current_config)
     return templates_saas.get_settings_page_html(current_config, "Збережено успішно!")
 
-# --- 12. API Эндпоинты ---
+# --- 12. API Ендпоінти ---
 
 @app.post("/api/lead")
 async def handle_lead(name: str = Form(...), phone: str = Form(...), interest: str = Form(...)):
