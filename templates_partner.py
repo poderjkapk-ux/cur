@@ -136,6 +136,7 @@ def get_partner_auth_html(is_register=False, message=""):
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
     Оновлений дашборд партнера з вибором оплати, скасуванням, рейтингом та чатом.
+    ВКЛЮЧАЄ ЛОГІКУ ДЛЯ ПОВЕРНЕННЯ КОШТІВ ТА ВИКУПУ.
     """
     
     # Розділяємо активні та завершені замовлення
@@ -192,6 +193,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             "buyout": "<span style='color:#f472b6'>💰 Викуп</span>"
         }
         pay_info = payment_badges.get(j.payment_type, j.payment_type)
+        if getattr(j, 'is_return_required', False):
+            pay_info += "<br><span style='color:#f97316; font-size:0.7rem;'>↺ Повернення</span>"
 
         active_rows += f"""
         <tr id="row-{j.id}">
@@ -324,22 +327,38 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <div class="dashboard-grid">
                 <div class="panel">
                     <h3>📦 Викликати кур'єра</h3>
-                    <form action="/api/partner/create_order" method="post" autocomplete="off">
+                    <form action="/api/partner/create_order" method="post" autocomplete="off" id="orderForm">
                         
-                        <label>Тип оплати</label>
+                        <label>Тип оплати та розрахунку</label>
                         <div class="payment-options">
                             <div class="payment-option">
-                                <input type="radio" name="payment_type" id="pay_prepaid" value="prepaid" checked>
+                                <input type="radio" name="payment_type" id="pay_prepaid" value="prepaid" checked onchange="updateFormLogic()">
                                 <label for="pay_prepaid">✅ Оплачено</label>
                             </div>
                             <div class="payment-option">
-                                <input type="radio" name="payment_type" id="pay_cash" value="cash">
+                                <input type="radio" name="payment_type" id="pay_cash" value="cash" onchange="updateFormLogic()">
                                 <label for="pay_cash">💵 Готівка</label>
                             </div>
                             <div class="payment-option">
-                                <input type="radio" name="payment_type" id="pay_buyout" value="buyout">
+                                <input type="radio" name="payment_type" id="pay_buyout" value="buyout" onchange="updateFormLogic()">
                                 <label for="pay_buyout">💰 Викуп</label>
                             </div>
+                        </div>
+
+                        <div id="cash-options" style="display:none; background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border);">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <input type="checkbox" id="return_check" name="is_return_required" value="true" style="width:auto; margin:0;" onchange="toggleReturnFee()">
+                                <label for="return_check" style="margin:0; cursor:pointer;">
+                                    Кур'єр має повернути гроші в заклад? (+40 грн)
+                                </label>
+                            </div>
+                            <p style="font-size:0.8rem; color:var(--text-muted); margin:5px 0 0 0;">
+                                Кур'єр забере гроші у клієнта і привезе їх вам назад.
+                            </p>
+                        </div>
+
+                        <div id="buyout-hint" style="display:none; margin-bottom:15px; color:#f472b6; font-size:0.9rem; border:1px dashed #f472b6; padding:10px; border-radius:8px;">
+                            <i class="fa-solid fa-circle-info"></i> <b>Порада:</b> При викупі кур'єр витрачає свої кошти. Рекомендуємо збільшити вартість доставки на 20-30 грн, щоб замовлення забрали швидше.
                         </div>
 
                         <div class="autocomplete-wrapper">
@@ -352,8 +371,14 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         <input type="tel" name="customer_phone" placeholder="0XX XXX XX XX" required>
                         
                         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                            <div><label>Чек (грн)</label><input type="number" step="0.01" name="order_price" value="0"></div>
-                            <div><label>Доставка</label><input type="number" step="0.01" name="delivery_fee" value="50"></div>
+                            <div>
+                                <label>Чек (грн)</label>
+                                <input type="number" step="0.01" name="order_price" id="order_price" value="0">
+                            </div>
+                            <div>
+                                <label>Доставка (грн)</label>
+                                <input type="number" step="0.01" name="delivery_fee" id="delivery_fee" value="50">
+                            </div>
                         </div>
                         
                         <label>Коментар</label>
@@ -433,6 +458,44 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
+            // --- ЛОГІКА ФОРМИ ЗАМОВЛЕННЯ ---
+            const baseFee = 50; 
+            const returnFee = 40; // Ціна за повернення коштів
+
+            function updateFormLogic() {{
+                const type = document.querySelector('input[name="payment_type"]:checked').value;
+                const cashBlock = document.getElementById('cash-options');
+                const buyoutHint = document.getElementById('buyout-hint');
+                const returnCheck = document.getElementById('return_check');
+
+                // Скидання
+                cashBlock.style.display = 'none';
+                buyoutHint.style.display = 'none';
+
+                if (type === 'cash') {{
+                    cashBlock.style.display = 'block';
+                }} else if (type === 'buyout') {{
+                    buyoutHint.style.display = 'block';
+                    returnCheck.checked = false; 
+                }} else {{
+                    returnCheck.checked = false;
+                }}
+                toggleReturnFee(); 
+            }}
+
+            function toggleReturnFee() {{
+                const returnCheck = document.getElementById('return_check');
+                const feeInput = document.getElementById('delivery_fee');
+                
+                let currentFee = parseFloat(feeInput.value) || baseFee;
+                
+                if (returnCheck.checked) {{
+                    if (currentFee < baseFee + returnFee) {{
+                        feeInput.value = baseFee + returnFee;
+                    }}
+                }}
+            }}
+            
             // --- ЗВУК І TOAST ---
             const alertSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
             function showToast(text) {{
@@ -463,7 +526,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                 const div = document.createElement('div');
                                 div.className = 'autocomplete-item';
                                 let cleanName = item.display_name;
-                                // Проста очистка адреси
                                 if (item.address && item.address.road) {{
                                      let parts = [];
                                      if (item.address.city) parts.push(item.address.city);
@@ -492,10 +554,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 if (data.type === 'order_update') {{
                     alertSound.play().catch(e => {{}});
                     showToast(data.message);
-                    setTimeout(() => location.reload(), 2000); // Перезавантажуємо для оновлення таблиць
+                    setTimeout(() => location.reload(), 2000); 
                 }} 
                 else if (data.type === 'chat_message') {{
-                    // Якщо відкритий чат цього замовлення - додаємо повідомлення
                     const openJobId = document.getElementById('chat_job_id').value;
                     const modalOpen = document.getElementById('chatModal').style.display === 'flex';
                     
@@ -546,7 +607,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 if(!text) return;
                 
                 input.value = '';
-                // Optimistic UI
                 const container = document.getElementById('chat-messages');
                 const div = document.createElement('div');
                 div.className = 'msg me';

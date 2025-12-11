@@ -30,7 +30,7 @@ import order_monitor
 
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, 
-    DeliveryPartner, DeliveryJob, PendingVerification, ChatMessage, # <--- ДОБАВЛЕНО
+    DeliveryPartner, DeliveryJob, PendingVerification, ChatMessage, 
     create_db_tables, get_db
 )
 from auth import check_admin_auth
@@ -449,7 +449,7 @@ async def api_courier_register(
 ):
     verif = await db.get(PendingVerification, verification_token)
     if not verif or verif.status != "verified":
-         return JSONResponse(status_code=400, content={"detail": "Номер телефону не підтверджено."})
+         return JSONResponse(status_code=400, content={"detail": "Номер телефона не підтверджено."})
 
     if await auth.get_courier_by_phone(db, verif.phone):
         return JSONResponse(status_code=400, content={"detail": "Цей номер вже зареєстрований"})
@@ -612,7 +612,10 @@ async def websocket_endpoint(
                 "price": job.order_price,
                 "comment": job.comment,
                 "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
-                "dist_rest_to_client": dist_rest_to_client
+                "dist_rest_to_client": dist_rest_to_client,
+                # Добавляем новые поля в синхронизацию
+                "payment_type": job.payment_type,
+                "is_return": job.is_return_required
             }
             await websocket.send_json({"type": "new_order", "data": job_data})
             
@@ -670,7 +673,6 @@ async def get_active_job(
     
     partner_name = job.partner.name if job.partner else "Невідомий заклад"
     partner_address = job.partner.address if job.partner else "Адреса не знайдена"
-    # Добавляем телефон партнера
     partner_phone = job.partner.phone if job.partner else ""
     
     payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
@@ -682,7 +684,7 @@ async def get_active_job(
             "status": job.status,
             "partner_name": partner_name,
             "partner_address": partner_address,
-            "partner_phone": partner_phone, # <--- ТЕЛЕФОН ПАРТНЕРА
+            "partner_phone": partner_phone, 
             "customer_address": job.dropoff_address,
             "customer_lat": job.dropoff_lat,
             "customer_lon": job.dropoff_lon,
@@ -690,7 +692,10 @@ async def get_active_job(
             "customer_name": job.customer_name,
             "comment": f"[{payment_label}] {job.comment or ''}",
             "order_price": job.order_price,
-            "delivery_fee": job.delivery_fee
+            "delivery_fee": job.delivery_fee,
+            # Добавлена информация для PWA курьера
+            "payment_type": job.payment_type,
+            "is_return_required": job.is_return_required
         }
     })
 
@@ -770,7 +775,7 @@ async def courier_accept_order(
     return JSONResponse({"status": "ok", "message": "Замовлення прийнято!"})
 
 # ==============================================================================
-# CHAT API (НОВАЯ СЕКЦИЯ)
+# CHAT API
 # ==============================================================================
 
 @app.get("/api/chat/history/{job_id}")
@@ -896,7 +901,6 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
     try: partner = await get_current_partner(request, db)
     except HTTPException: return RedirectResponse("/partner/login")
     
-    # ИЗМЕНЕНИЕ: Загружаем курьера, чтобы получить его телефон
     result = await db.execute(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.courier))
@@ -905,16 +909,27 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
     )
     return templates_partner.get_partner_dashboard_html(partner, result.scalars().all())
 
+# --- ОНОВЛЕНИЙ РОУТ СТВОРЕННЯ ЗАМОВЛЕННЯ ---
 @app.post("/api/partner/create_order")
 async def create_partner_order(
     dropoff_address: str = Form(...), customer_phone: str = Form(...), customer_name: str = Form(""),
     order_price: float = Form(0.0), delivery_fee: float = Form(50.0), comment: str = Form(""),
-    payment_type: str = Form("prepaid"), db: AsyncSession = Depends(get_db), 
+    payment_type: str = Form("prepaid"), 
+    # НОВИЙ ПАРАМЕТР
+    is_return_required: bool = Form(False),
+    db: AsyncSession = Depends(get_db), 
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
     # 1. Geocoding
     client_lat, client_lon = await geocode_address(dropoff_address)
     rest_lat, rest_lon = await geocode_address(partner.address)
+
+    # Автоматичне доповнення коментаря
+    full_comment = comment
+    if is_return_required:
+        full_comment = f"⚠️ ПОВЕРНЕННЯ КОШТІВ! {full_comment}"
+    if payment_type == 'buyout':
+        full_comment = f"💰 ВИКУП ({order_price} грн)! {full_comment}"
 
     # 2. Create Job
     job = DeliveryJob(
@@ -922,7 +937,10 @@ async def create_partner_order(
         dropoff_lat=client_lat, dropoff_lon=client_lon,
         customer_phone=customer_phone, customer_name=customer_name,
         order_price=order_price, delivery_fee=delivery_fee,
-        comment=comment, payment_type=payment_type, status="pending"
+        comment=full_comment, payment_type=payment_type,
+        # Зберігаємо прапорець повернення
+        is_return_required=is_return_required,
+        status="pending"
     )
     db.add(job)
     await db.commit()
@@ -941,8 +959,11 @@ async def create_partner_order(
         personal_data = {
             "id": job.id, "address": dropoff_address, 
             "restaurant": partner.name, "restaurant_address": partner.address,
-            "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {comment}",
-            "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?"
+            "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
+            "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
+            # Додаємо прапорці для PWA
+            "is_return": is_return_required,
+            "payment_type": payment_type
         }
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
         if courier.fcm_token:

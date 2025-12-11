@@ -149,6 +149,10 @@ class DeliveryJob(Base):
     # Статус: pending, assigned, ready, picked_up, delivered, cancelled
     status = Column(String(20), default="pending")
     
+    # --- НОВЕ ПОЛЕ: ПОВЕРНЕННЯ КОШТІВ ---
+    # True, якщо кур'єр має забрати готівку у клієнта і повернути її в ресторан
+    is_return_required = Column(Boolean, default=False) 
+    
     # Прив'язка кур'єра
     courier_id = Column(Integer, ForeignKey("couriers.id"), nullable=True)
     

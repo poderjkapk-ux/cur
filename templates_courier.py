@@ -328,8 +328,7 @@ def get_courier_register_page():
 def get_courier_pwa_html(courier: Courier):
     """
     Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом.
-    Включает отображение маркера клиента и маршрута, а также Push-уведомления (Firebase).
-    ОБНОВЛЕНО: Добавлены Чат и Звонки.
+    ОБНОВЛЕНО: Поддержка ВИКУПА и ВОЗВРАТА НАЛИЧНЫХ.
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
@@ -440,6 +439,9 @@ def get_courier_pwa_html(courier: Courier):
              <div style="background:white; color:black; padding:30px; border-radius:20px; width:85%; max-width:350px; text-align:center;">
                 <h2 style="margin-top:0;">🔥 Нове замовлення!</h2>
                 <div style="font-size:2.5rem; font-weight:800; color:var(--primary);" id="modal-fee">50 ₴</div>
+                
+                <div id="warning-placeholder"></div>
+
                 <div id="modal-route" style="color:#555; margin:15px 0;"></div>
                 <input type="hidden" id="modal-job-id">
                 <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
@@ -638,6 +640,15 @@ def get_courier_pwa_html(courier: Courier):
 
                 document.getElementById('modal-fee').innerText = data.fee + ' ₴';
                 
+                // --- ЛОГИКА ПРЕДУПРЕЖДЕНИЙ О ВЫКУПЕ/ВОЗВРАТЕ ---
+                let warningHtml = "";
+                if (data.payment_type === 'buyout') {{
+                    warningHtml = `<div style="background:#fce7f3; color:#db2777; padding:10px; border-radius:8px; margin-bottom:10px; font-weight:bold; border:1px solid #fbcfe8;">💰 ПОТРІБЕН ВИКУП: ${{data.price}} грн</div>`;
+                }} else if (data.is_return) {{
+                    warningHtml = `<div style="background:#fff7ed; color:#ea580c; padding:10px; border-radius:8px; margin-bottom:10px; font-weight:bold; border:1px solid #fed7aa;">🔄 ПОТРІБНЕ ПОВЕРНЕННЯ КОШТІВ</div>`;
+                }}
+                document.getElementById('warning-placeholder').innerHTML = warningHtml;
+                
                 // --- ОБНОВЛЕННЫЙ HTML МОДАЛЬНОГО ОКНА (С ДИСТАНЦИЕЙ) ---
                 document.getElementById('modal-route').innerHTML = `
                     <div style="text-align:left; margin-top:10px;">
@@ -758,6 +769,8 @@ def get_courier_pwa_html(courier: Courier):
                 sheet.classList.add('active');
                 document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
                 document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
+                document.getElementById('job-price').style.color = 'var(--status-active)'; // Сброс цвета
+
                 document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
                 document.getElementById('client-phone').innerText = currentJob.customer_phone;
                 document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
@@ -820,7 +833,17 @@ def get_courier_pwa_html(courier: Courier):
                     steps[0].className = 'step done'; steps[1].className = 'step active';
                     steps[0].style.background = ''; // Сброс стиля
 
-                    document.getElementById('job-status-desc').innerText = 'Везіть до клієнта';
+                    // --- СПЕЦИАЛЬНЫЕ СТАТУСЫ ---
+                    let statusText = 'Везіть до клієнта';
+                    if (currentJob.payment_type === 'buyout') {{
+                        statusText = '💰 ВІЗЬМІТЬ ГРОШІ ЗА ЗАМОВЛЕННЯ!';
+                        document.getElementById('job-price').style.color = '#f472b6';
+                    }}
+                    if (currentJob.payment_type === 'cash') {{
+                        statusText = '💵 ОТРИМАЙТЕ ГРОШІ ВІД КЛІЄНТА!';
+                    }}
+
+                    document.getElementById('job-status-desc').innerText = statusText;
                     document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
                     document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('current-target-name').innerText = 'Клієнт';
@@ -854,8 +877,19 @@ def get_courier_pwa_html(courier: Courier):
                         btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
                     }}
 
-                    btnAct.innerText = '✅ Доставив';
-                    btnAct.onclick = () => updateStatus('delivered');
+                    // --- ЛОГИКА ЗАВЕРШЕНИЯ (ВОЗВРАТ ДЕНЕГ) ---
+                    if (currentJob.is_return_required) {{
+                        btnAct.innerText = '✅ Віддав клієнту (Повернути гроші)';
+                        btnAct.onclick = () => {{
+                            if(confirm("Ви отримали готівку від клієнта? Тепер везіть її в заклад.")) {{
+                                 alert("⚠️ УВАГА! НЕ ЗАБУДЬТЕ ЗАВЕЗТИ ГРОШІ В ЗАКЛАД!");
+                                 updateStatus('delivered'); 
+                            }}
+                        }};
+                    }} else {{
+                        btnAct.innerText = '✅ Доставив';
+                        btnAct.onclick = () => updateStatus('delivered');
+                    }}
                 }}
             }}
 
