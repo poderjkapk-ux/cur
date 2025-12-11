@@ -1,17 +1,14 @@
 import os
 from typing import List, Dict
-
-# Импорт моделей для типизации (с заглушкой на случай циклических импортов)
+# Эти модели нужны для подсказок типов в функциях
 try:
-    from models import User, Instance, Courier, DeliveryPartner, DeliveryJob
+    from models import User, Instance
 except ImportError:
+    # Простая заглушка, если models.py еще не доступен
     class User: pass
     class Instance: pass
-    class Courier: pass
-    class DeliveryPartner: pass
-    class DeliveryJob: pass
 
-# --- 1. Глобальные стили ---
+# --- 1. Глобальные стили (Из app.py) ---
 GLOBAL_STYLES = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -30,9 +27,9 @@ GLOBAL_STYLES = """
         --radius: 16px;
         --font: 'Inter', sans-serif;
         --transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-        --status-active: #4ade80; 
-        --status-suspended: #f87171; 
-        --status-delete: #e11d48; 
+        --status-active: #4ade80; /* Зеленый */
+        --status-suspended: #f87171; /* Красный */
+        --status-delete: #e11d48; /* Ярко-красный */
     }
     body { 
         font-family: var(--font); 
@@ -42,7 +39,7 @@ GLOBAL_STYLES = """
         background-color: var(--bg-body); 
         color: var(--text-main); 
         margin: 0; 
-        padding: 20px 0; 
+        padding: 20px 0; /* Добавлен отступ для дашборда */
     }
     .container { 
         background: var(--bg-card); 
@@ -65,7 +62,7 @@ GLOBAL_STYLES = """
         font-weight: 700;
         margin-bottom: 30px;
     }
-    input, textarea { 
+    input, textarea { /* Добавлена textarea */
         width: 100%; 
         padding: 14px; 
         margin-bottom: 15px; 
@@ -105,9 +102,6 @@ GLOBAL_STYLES = """
         width: 100%; 
         transition: var(--transition);
         box-shadow: 0 4px 20px -5px rgba(99, 102, 241, 0.5);
-        text-align: center;
-        display: inline-block;
-        text-decoration: none;
     }
     .btn:hover {
         transform: translateY(-3px);
@@ -117,7 +111,7 @@ GLOBAL_STYLES = """
         background: #555;
         box-shadow: none;
         transform: none;
-        cursor: not-allowed; 
+        cursor: not-allowed; /* Курсор "недоступно" */
     }
     a { 
         color: var(--primary); 
@@ -135,12 +129,13 @@ GLOBAL_STYLES = """
     hr { border:none; border-top: 1px solid var(--border); margin: 25px 0; }
     p { color: var(--text-muted); line-height: 1.6; }
     
+    /* Стили для подсказок в форме дашборда */
     .form-hint {
         font-size: 0.85rem;
         color: var(--text-muted);
         text-align: left;
-        margin-top: -10px; 
-        margin-bottom: 15px; 
+        margin-top: -10px; /* Ближе к input'у */
+        margin-bottom: 15px; /* Отступ до следующего label */
     }
     .form-hint code {
         background: var(--bg-body);
@@ -156,243 +151,52 @@ GLOBAL_STYLES = """
 </style>
 """
 
-# Добавляем стили специально для карты и PWA
-PWA_STYLES = """
-<style>
-    /* Отключаем скролл страницы, чтобы ощущалось как Native App */
-    body, html { height: 100%; overflow: hidden; overscroll-behavior: none; }
-    
-    /* Карта на весь фон */
-    #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-    
-    /* Верхняя панель (Header) */
-    .app-header {
-        position: absolute; top: 0; left: 0; right: 0;
-        background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(10px);
-        padding: 15px 20px; z-index: 100;
-        display: flex; justify-content: space-between; align-items: center;
-        border-bottom: 1px solid var(--border);
-        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    }
-    .status-indicator { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.9rem; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; box-shadow: 0 0 10px currentColor; }
-    .dot.online { background: var(--status-active); color: var(--status-active); }
-    .dot.offline { background: var(--status-delete); color: var(--status-delete); }
-
-    /* Кнопки меню */
-    .icon-btn { background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 5px; }
-
-    /* ШТОРКА ЗАКАЗА (Bottom Sheet) */
-    .bottom-sheet {
-        position: absolute; bottom: 0; left: 0; right: 0;
-        background: var(--bg-card);
-        border-radius: 20px 20px 0 0;
-        padding: 25px;
-        z-index: 200;
-        box-shadow: 0 -5px 30px rgba(0,0,0,0.4);
-        transform: translateY(110%); /* Скрыта по умолчанию */
-        transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        max-height: 80vh;
-        overflow-y: auto;
-    }
-    .bottom-sheet.active { transform: translateY(0); }
-    
-    .drag-handle { width: 40px; height: 5px; background: rgba(255,255,255,0.2); border-radius: 5px; margin: 0 auto 20px; }
-
-    /* Этапы заказа */
-    .stepper { display: flex; margin-bottom: 20px; }
-    .step { flex: 1; height: 4px; background: #334155; margin-right: 5px; border-radius: 2px; }
-    .step.active { background: var(--primary); }
-    .step.done { background: var(--status-active); }
-
-    .sheet-title { font-size: 1.4rem; font-weight: 800; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
-    .sheet-subtitle { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px; }
-    
-    .info-block { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid var(--border); }
-    .info-label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
-    .info-value { font-size: 1.1rem; font-weight: 600; color: #f8fafc; }
-    .info-value i { color: var(--primary); width: 20px; }
-
-    /* Большие кнопки действий */
-    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-    .btn-nav { background: #3b82f6; color: white; border: none; padding: 15px; border-radius: 12px; font-weight: 600; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; font-size: 1rem; }
-    .btn-main { background: var(--status-active); color: #0f172a; border: none; padding: 15px; border-radius: 12px; font-weight: 700; width: 100%; font-size: 1.1rem; cursor: pointer; }
-    
-    /* Модалка истории */
-    .history-modal {
-        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-        background: var(--bg-body); z-index: 300;
-        padding: 20px;
-        transform: translateX(100%); transition: 0.3s;
-        overflow-y: auto;
-    }
-    .history-modal.open { transform: translateX(0); }
-    .history-item { padding: 15px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
-    .history-price { color: var(--status-active); font-weight: bold; }
-</style>
-"""
-
-# --- 2. Шаблоны страниц Авторизации (ДЛЯ ВЛАДЕЛЬЦЕВ SaaS) ---
+# --- 2. Шаблоны страниц Авторизации (Из app.py) ---
 
 def get_login_page(message: str = "", msg_type: str = "error"):
     """HTML для страницы входа /login"""
     return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Вхід</title>{GLOBAL_STYLES}</head>
+    <!DOCTYPE html><html lang="ru"><head><title>Вход</title>{GLOBAL_STYLES}</head>
     <body><div class="container">
         <img src="/static/logo.png" alt="Restify Logo" class="logo-img">
-        <h1>Вхід у Restify</h1>
+        <h1>Вход в Restify</h1>
         <form method="post" action="/token">
             <input type="email" name="username" placeholder="Ваш Email" required>
             <input type="password" name="password" placeholder="Ваш пароль" required>
-            <button type="submit" class="btn">Увійти</button>
+            <button type="submit" class="btn">Войти</button>
         </form>
         {f"<div class='message {msg_type}'>{message}</div>" if message else ""}
-        <a href="/register">У мене немає акаунта</a>
-        <a href="/" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 15px;">← На головну</a>
+        <a href="/register">У меня нет аккаунта</a>
+        <a href="/" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 15px;">&larr; На главную</a>
     </div></body></html>
     """
 
 def get_register_page():
-    """HTML для сторінки реєстрації з Telegram Verification"""
+    """HTML для страницы регистрации /register"""
     return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Реєстрація</title>{GLOBAL_STYLES}
-    <style>
-        .tg-verify-box {{
-            border: 2px dashed var(--border);
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            text-align: center;
-            background: rgba(255,255,255,0.02);
-            transition: 0.3s;
-        }}
-        .tg-verify-box.verified {{
-            border-color: var(--status-active);
-            background: rgba(74, 222, 128, 0.1);
-        }}
-        .tg-btn {{
-            background: #24A1DE;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 600;
-            margin-top: 10px;
-            transition: 0.2s;
-        }}
-        .tg-btn:hover {{ background: #1b8bbf; transform: translateY(-2px); }}
-        .hidden {{ display: none; }}
-        
-        .spinner {{ display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }}
-        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-    </style>
-    </head>
+    <!DOCTYPE html><html lang="ru"><head><title>Регистрация</title>{GLOBAL_STYLES}</head>
     <body><div class="container">
         <img src="/static/logo.png" alt="Restify Logo" class="logo-img">
-        <h1>Створити акаунт</h1>
+        <h1>Регистрация</h1>
+        <p style="margin-top: -20px; margin-bottom: 20px;">Создайте свой аккаунт для входа в дашборд.</p>
         
         <form id="registerForm" method="post" action="/api/register">
-            <input type="email" name="email" placeholder="Ваш Email" required>
+            <input type="email" name="email" placeholder="Ваш Email (это будет ваш логин)" required>
             <input type="password" name="password" placeholder="Придумайте пароль" required>
-            
-            <div id="tg-step" class="tg-verify-box">
-                <div id="tg-initial">
-                    <p style="margin:0 0 10px 0; color:var(--text-muted);">Для захисту від ботів, підтвердіть номер:</p>
-                    <a href="#" id="tg-link" target="_blank" class="tg-btn">
-                        <i class="fa-brands fa-telegram"></i> Підтвердити в Telegram
-                    </a>
-                </div>
-                
-                <div id="tg-waiting" class="hidden">
-                    <p style="margin:0; color:var(--text-muted);">
-                        <span class="spinner"></span> Очікуємо підтвердження...
-                    </p>
-                    <small style="color:#666">Натисніть "Start" та "Share Contact" у боті</small>
-                </div>
-
-                <div id="tg-success" class="hidden">
-                    <div style="color: var(--status-active); font-size: 1.2rem; margin-bottom: 5px;">
-                        <i class="fa-solid fa-circle-check"></i> Підтверджено!
-                    </div>
-                    <div id="user-phone" style="font-weight:bold; color:white;"></div>
-                </div>
-            </div>
-
-            <input type="hidden" name="verification_token" id="verification_token">
-
-            <button type="submit" class="btn" id="submitBtn" disabled>Зареєструватися</button>
+            <button type="submit" class="btn" id="submitBtn">Зарегистрироваться</button>
             <div id="response-msg" class="message" style="display: none;"></div>
         </form>
-        <a href="/login">У мене вже є акаунт</a>
+        <a href="/login">У меня уже есть аккаунт</a>
     </div>
     
     <script>
-        let verificationToken = "";
-        let pollInterval = null;
-
-        // 1. Ініціалізація: Отримуємо токен і посилання на бота
-        async function initVerification() {{
-            try {{
-                const res = await fetch('/api/auth/init_verification', {{ method: 'POST' }});
-                const data = await res.json();
-                
-                verificationToken = data.token;
-                document.getElementById('verification_token').value = verificationToken;
-                
-                const linkBtn = document.getElementById('tg-link');
-                linkBtn.href = data.link;
-                
-                // Коли юзер клікає на посилання -> починаємо опитування
-                linkBtn.addEventListener('click', () => {{
-                    document.getElementById('tg-initial').classList.add('hidden');
-                    document.getElementById('tg-waiting').classList.remove('hidden');
-                    startPolling();
-                }});
-                
-            }} catch(e) {{ console.error("Error init verification", e); }}
-        }}
-
-        // 2. Опитування статусу (Polling)
-        function startPolling() {{
-            pollInterval = setInterval(async () => {{
-                try {{
-                    const res = await fetch(`/api/auth/check_verification/${{verificationToken}}`);
-                    const data = await res.json();
-                    
-                    if(data.status === 'verified') {{
-                        clearInterval(pollInterval);
-                        showSuccess(data.phone);
-                    }}
-                }} catch(e) {{ console.error("Polling error", e); }}
-            }}, 2000); // Перевіряємо кожні 2 секунди
-        }}
-
-        // 3. Успіх
-        function showSuccess(phone) {{
-            document.getElementById('tg-waiting').classList.add('hidden');
-            document.getElementById('tg-success').classList.remove('hidden');
-            
-            const box = document.querySelector('.tg-verify-box');
-            box.classList.add('verified');
-            
-            document.getElementById('user-phone').innerText = phone;
-            document.getElementById('submitBtn').disabled = false; // Розблокуємо кнопку
-        }}
-
-        // Запускаємо при завантаженні
-        initVerification();
-
-        // 4. Стандартна відправка форми
         document.getElementById('registerForm').addEventListener('submit', async (e) => {{
             e.preventDefault();
             const form = e.target;
             const btn = document.getElementById('submitBtn');
             const msgEl = document.getElementById('response-msg');
-            btn.disabled = true; btn.textContent = 'Реєстрація...';
-            msgEl.style.display = 'none';
+            btn.disabled = true; btn.textContent = 'Регистрация...';
+            msgEl.style.display = 'none'; msgEl.textContent = '';
             
             try {{
                 const response = await fetch('/api/register', {{
@@ -404,482 +208,35 @@ def get_register_page():
                 
                 if (response.ok) {{
                     msgEl.className = 'message success';
-                    msgEl.innerHTML = `✅ <strong>Успішно!</strong> Перенаправляємо...`;
-                    setTimeout(() => {{ window.location.href = '/login?message=Акаунт створено!&type=success'; }}, 2000);
+                    msgEl.innerHTML = `✅ <strong>Регистрация успешна!</strong><br>Перенаправляем на страницу входа...`;
+                    form.reset();
+                    setTimeout(() => {{
+                        window.location.href = '/login?message=Регистрация прошла успешно! Теперь вы можете войти.&type=success';
+                    }}, 2000);
                 }} else {{
                     msgEl.className = 'message error';
-                    msgEl.textContent = result.detail || 'Помилка.';
-                    btn.disabled = false; btn.textContent = 'Зареєструватися';
+                    msgEl.textContent = `Ошибка: ${{result.detail || 'Не удалось создать аккаунт.'}}`;
+                    btn.disabled = false; btn.textContent = 'Зарегистрироваться';
                 }}
             }} catch (err) {{
-                msgEl.style.display = 'block'; msgEl.className = 'message error';
-                msgEl.textContent = 'Помилка мережі.';
-                btn.disabled = false; btn.textContent = 'Зареєструватися';
+                msgEl.style.display = 'block';
+                msgEl.className = 'message error';
+                msgEl.textContent = 'Ошибка сети. Попробуйте снова.';
+                btn.disabled = false; btn.textContent = 'Зарегистрироваться';
             }}
         }});
     </script>
     </body></html>
     """
-
-# --- 3. Шаблоны для ПАРТНЕРОВ (Рестораны без сайта) ---
-
-def get_partner_auth_html(is_register=False, message=""):
-    """Страница входа/регистрации для Партнеров (с верификацией при регистрации)"""
-    title = "Реєстрація Партнера" if is_register else "Вхід для Партнерів"
-    action = "/partner/register" if is_register else "/partner/login"
-    pwa_meta = '<link rel="manifest" href="/partner/manifest.json">'
     
-    verify_script = ""
-    verify_style = ""
-    verify_block = ""
-    phone_input = '<input type="text" name="phone" placeholder="Телефон" required>' 
-    submit_attr = ""
-
-    # Если регистрация - добавляем логику верификации
-    if is_register:
-        verify_style = """
-        <style>
-            .tg-verify-box { border: 2px dashed var(--border); padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center; background: rgba(255,255,255,0.02); transition: 0.3s; }
-            .tg-verify-box.verified { border-color: var(--status-active); background: rgba(74, 222, 128, 0.1); }
-            .tg-btn { background: #24A1DE; color: white; padding: 12px 20px; border-radius: 8px; text-decoration: none; display: inline-flex; align-items: center; gap: 10px; font-weight: 600; margin-top: 10px; transition: 0.2s; }
-            .tg-btn:hover { background: #1b8bbf; transform: translateY(-2px); }
-            .hidden { display: none; }
-            .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }
-            @keyframes spin { to { transform: rotate(360deg); } }
-        </style>
-        """
-        
-        # Инпут телефона заменяем на скрытые поля
-        phone_input = '<input type="hidden" name="phone" id="real_phone"><input type="hidden" name="verification_token" id="verification_token">'
-        
-        verify_block = """
-        <div id="tg-step" class="tg-verify-box">
-            <div id="tg-initial">
-                <p style="margin:0 0 10px 0; color:var(--text-muted);">Підтвердіть номер через Telegram:</p>
-                <a href="#" id="tg-link" target="_blank" class="tg-btn"><i class="fa-brands fa-telegram"></i> Підтвердити</a>
-            </div>
-            <div id="tg-waiting" class="hidden">
-                <p style="margin:0; color:var(--text-muted);"><span class="spinner"></span> Очікуємо...</p>
-                <small style="color:#666">Натисніть Start -> Share Contact</small>
-            </div>
-            <div id="tg-success" class="hidden">
-                <div style="color: var(--status-active); font-size: 1.1rem; margin-bottom:5px;"><i class="fa-solid fa-circle-check"></i> Успішно!</div>
-                <div id="user-phone-display" style="font-weight:bold; color:white;"></div>
-            </div>
-        </div>
-        """
-        submit_attr = "disabled"
-
-        # JS скрипт
-        verify_script = """
-        <script>
-            let verificationToken = "";
-            let pollInterval = null;
-            
-            async function initVerification() {
-                try {
-                    const res = await fetch('/api/auth/init_verification', { method: 'POST' });
-                    const data = await res.json();
-                    verificationToken = data.token;
-                    document.getElementById('verification_token').value = verificationToken;
-                    
-                    const linkBtn = document.getElementById('tg-link');
-                    linkBtn.href = data.link;
-                    
-                    linkBtn.addEventListener('click', () => {
-                        document.getElementById('tg-initial').classList.add('hidden');
-                        document.getElementById('tg-waiting').classList.remove('hidden');
-                        pollInterval = setInterval(checkStatus, 2000);
-                    });
-                } catch(e) { console.error(e); }
-            }
-            
-            async function checkStatus() {
-                try {
-                    const res = await fetch(`/api/auth/check_verification/${verificationToken}`);
-                    const data = await res.json();
-                    if(data.status === 'verified') {
-                        clearInterval(pollInterval);
-                        document.getElementById('tg-waiting').classList.add('hidden');
-                        document.getElementById('tg-success').classList.remove('hidden');
-                        document.querySelector('.tg-verify-box').classList.add('verified');
-                        
-                        document.getElementById('user-phone-display').innerText = data.phone;
-                        document.getElementById('real_phone').value = data.phone;
-                        document.getElementById('submit-btn').disabled = false;
-                    }
-                } catch(e) {}
-            }
-            
-            window.onload = initVerification;
-        </script>
-        """
-
-    extra_fields = ""
-    if is_register:
-        extra_fields = f"""
-        <input type="text" name="name" placeholder="Назва закладу" required>
-        {phone_input}
-        {verify_block}
-        <input type="text" name="address" placeholder="Адреса закладу (місце забору)" required>
-        """
-    
-    toggle_link = f'<a href="/partner/login">Вже є акаунт? Увійти</a>' if is_register else f'<a href="/partner/register">Стати партнером</a>'
-
-    return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>{title}</title>{GLOBAL_STYLES}{pwa_meta}{verify_style}</head>
-    <body><div class="container">
-        <h1>🚴 Delivery Partner</h1>
-        <p style="margin-top:-20px; margin-bottom:20px;">Кабінет для виклику кур'єрів</p>
-        <form method="post" action="{action}">
-            {extra_fields}
-            <input type="email" name="email" placeholder="Email" required>
-            <input type="password" name="password" placeholder="Пароль" required>
-            <button type="submit" class="btn" id="submit-btn" {submit_attr}>Продовжити</button>
-        </form>
-        {f"<div class='message error'>{message}</div>" if message else ""}
-        {toggle_link}
-        <a href="/" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 15px;">← На головну</a>
-    </div>
-    {verify_script}
-    </body></html>
-    """
-
-def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
-    """
-    Обновленный дашборд партнера с картой трекинга, WebSocket уведомлениями и автоподстановкой адресов (OSM)
-    """
-    
-    # Генерация таблицы с кнопкой "Следить"
-    jobs_rows = ""
-    for j in sorted(jobs, key=lambda x: x.id, reverse=True):
-        track_btn = ""
-        status_color = "#ccc"
-        
-        if j.status == 'assigned' or j.status == 'picked_up':
-            track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
-            status_color = "#fef08a" if j.status == 'assigned' else "#bfdbfe"
-        
-        courier_name = f"ID {j.courier_id}" if j.courier_id else "—"
-
-        jobs_rows += f"""
-        <tr id="row-{j.id}">
-            <td>#{j.id}</td>
-            <td>{j.dropoff_address}</td>
-            <td>{j.order_price} грн</td>
-            <td><span class="status-badge" style="background:{status_color}; padding:3px 8px; border-radius:4px; font-size:0.8rem;">{j.status}</span></td>
-            <td class="courier-cell">{courier_name}</td>
-            <td>{track_btn}</td>
-        </tr>
-        """
-
-    # --- PWA META (Manifest) ---
-    pwa_meta = '<link rel="manifest" href="/partner/manifest.json">'
-    # ---------------------------
-
-    return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Кабінет Партнера</title>{GLOBAL_STYLES}{pwa_meta}
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <style>
-        .dashboard-grid {{ display: grid; grid-template-columns: 1fr 2fr; gap: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }}
-        @media (max-width: 768px) {{ .dashboard-grid {{ grid-template-columns: 1fr; }} }}
-        .panel {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 25px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }}
-        th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid var(--border); color: var(--text-main); }}
-        th {{ color: var(--text-muted); font-weight: 600; }}
-        .header-bar {{ display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto 30px; width: 90%; }}
-        
-        .btn-mini {{
-            border: 1px solid transparent;
-            border-radius: 6px;
-            width: 32px;
-            height: 32px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: 0.2s;
-            background: rgba(255,255,255,0.05);
-            color: var(--text-muted);
-        }}
-        .btn-mini:hover {{ transform: translateY(-2px); }}
-        .btn-mini.info:hover {{ background: #6366f1; color: white; }}
-
-        /* Модальное окно карты */
-        .track-modal {{
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.8); z-index: 2000;
-            display: none; align-items: center; justify-content: center;
-        }}
-        .track-card {{
-            background: #1e293b; width: 90%; max-width: 800px; height: 60vh;
-            border-radius: 16px; overflow: hidden; display: flex; flex-direction: column;
-            position: relative;
-        }}
-        #track-map {{ flex: 1; width: 100%; }}
-        .track-header {{ padding: 15px; background: #0f172a; display: flex; justify-content: space-between; align-items: center; }}
-        .close-btn {{ background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }}
-        
-        /* Стилі для спливаючих повідомлень (Toasts) */
-        #toast-container {{
-            position: fixed; top: 20px; right: 20px; z-index: 3000;
-        }}
-        .toast {{
-            background: #1e293b; color: white; padding: 15px 20px; 
-            border-left: 5px solid var(--primary);
-            border-radius: 8px; margin-bottom: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-            display: flex; align-items: center; gap: 15px;
-            animation: slideIn 0.3s ease-out;
-            min-width: 300px;
-        }}
-        @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
-
-        /* --- STYLES FOR AUTOCOMPLETE (OSM) --- */
-        .autocomplete-wrapper {{ position: relative; }}
-        .autocomplete-results {{
-            position: absolute; top: 100%; left: 0; right: 0;
-            background: #1e293b; border: 1px solid var(--border);
-            border-top: none; border-radius: 0 0 10px 10px;
-            max-height: 200px; overflow-y: auto; z-index: 1000;
-            display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }}
-        .autocomplete-item {{
-            padding: 10px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: #cbd5e1;
-        }}
-        .autocomplete-item:hover {{ background: var(--primary); color: white; }}
-        .autocomplete-item:last-child {{ border-bottom: none; }}
-    </style>
-    </head>
-    <body>
-        <div id="toast-container"></div>
-        
-        <div style="width: 100%; padding: 20px;">
-            <div class="header-bar">
-                <div>
-                    <h2 style="margin:0;">{partner.name}</h2>
-                    <span style="color: var(--text-muted); font-size:0.9rem;">📍 {partner.address}</span>
-                </div>
-                <a href="/partner/logout" class="btn" style="width:auto; padding: 8px 20px; background: #334155;">Вийти</a>
-            </div>
-
-            <div class="dashboard-grid">
-                <div class="panel">
-                    <h3>📦 Викликати кур'єра</h3>
-                    <form action="/api/partner/create_order" method="post" autocomplete="off">
-                        
-                        <div class="autocomplete-wrapper">
-                            <label>Куди везти (Адреса клієнта)</label>
-                            <input type="text" id="addr_input" name="dropoff_address" placeholder="Вулиця, будинок, під'їзд" required>
-                            <div id="addr_results" class="autocomplete-results"></div>
-                        </div>
-                        
-                        <label>Телефон клієнта</label>
-                        <input type="tel" name="customer_phone" placeholder="0XX XXX XX XX" required>
-                        
-                        <label>Ім'я клієнта</label>
-                        <input type="text" name="customer_name" placeholder="Ім'я">
-                        
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                            <div>
-                                <label>Сума чеку (грн)</label>
-                                <input type="number" step="0.01" name="order_price" value="0">
-                            </div>
-                            <div>
-                                <label>Доставка (грн)</label>
-                                <input type="number" step="0.01" name="delivery_fee" value="50">
-                            </div>
-                        </div>
-                        
-                        <label>Коментар для кур'єра</label>
-                        <input type="text" name="comment" placeholder="Код домофону, поверх...">
-                        
-                        <button type="submit" class="btn">🚀 Знайти кур'єра</button>
-                    </form>
-                </div>
-
-                <div class="panel">
-                    <h3>📋 Активні доставки</h3>
-                    <div style="overflow-x:auto;">
-                        <table>
-                            <thead>
-                                <tr><th>ID</th><th>Адреса</th><th>Сума</th><th>Статус</th><th>Кур'єр</th><th>Дія</th></tr>
-                            </thead>
-                            <tbody>
-                                {jobs_rows}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="trackModal" class="track-modal">
-            <div class="track-card">
-                <div class="track-header">
-                    <div id="track-info">Пошук курь'єра...</div>
-                    <button class="close-btn" onclick="closeTrackModal()">×</button>
-                </div>
-                <div id="track-map"></div>
-            </div>
-        </div>
-
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <script>
-            // --- ЗВУК ПОВІДОМЛЕННЯ ---
-            const alertSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-
-            // --- AUTOCOMPLETE (OPENSTREETMAP) ---
-            const addrInput = document.getElementById('addr_input');
-            const addrResults = document.getElementById('addr_results');
-            let searchTimeout = null;
-
-            addrInput.addEventListener('input', function() {{
-                clearTimeout(searchTimeout);
-                const query = this.value;
-                
-                if(query.length < 3) {{
-                    addrResults.style.display = 'none';
-                    return;
-                }}
-                
-                searchTimeout = setTimeout(async () => {{
-                    try {{
-                        // Шукаємо в Україні (countrycodes=ua)
-                        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&countrycodes=ua&limit=5&accept-language=uk`;
-                        const res = await fetch(url);
-                        const data = await res.json();
-                        
-                        addrResults.innerHTML = '';
-                        if(data.length > 0) {{
-                            data.forEach(item => {{
-                                const div = document.createElement('div');
-                                div.className = 'autocomplete-item';
-                                // Беремо скорочену назву або повну
-                                const displayName = item.display_name;
-                                div.innerText = displayName; 
-                                div.onclick = () => {{
-                                    addrInput.value = displayName;
-                                    addrResults.style.display = 'none';
-                                }};
-                                addrResults.appendChild(div);
-                            }});
-                            addrResults.style.display = 'block';
-                        }} else {{
-                            addrResults.style.display = 'none';
-                        }}
-                    }} catch(e) {{ console.error("OSM Error:", e); }}
-                }}, 500); // Затримка 500мс (debounce)
-            }});
-
-            // Закриття списку при кліку поза ним
-            document.addEventListener('click', (e) => {{
-                if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) {{
-                    addrResults.style.display = 'none';
-                }}
-            }});
-
-            // --- WEBSOCKET ДЛЯ ПАРТНЕРА ---
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/partner`);
-
-            socket.onopen = () => console.log("Connected to Partner WS");
-            
-            socket.onmessage = (event) => {{
-                const data = JSON.parse(event.data);
-                
-                if (data.type === 'order_update') {{
-                    alertSound.play().catch(e => console.log('Audio error:', e));
-                    showToast(data.message);
-                    updateTableRow(data);
-                }}
-            }};
-
-            function showToast(text) {{
-                const container = document.getElementById('toast-container');
-                const toast = document.createElement('div');
-                toast.className = 'toast';
-                toast.innerHTML = `<i class="fa-solid fa-bell" style="color:#6366f1"></i> <div>${{text}}</div>`;
-                container.appendChild(toast);
-                setTimeout(() => {{
-                    toast.style.opacity = '0';
-                    setTimeout(() => toast.remove(), 300);
-                }}, 5000);
-            }}
-
-            function updateTableRow(data) {{
-                const row = document.getElementById(`row-${{data.job_id}}`);
-                if (row) {{
-                    const statusSpan = row.cells[3].querySelector('.status-badge');
-                    if(statusSpan) {{
-                        statusSpan.innerText = data.status_text;
-                        statusSpan.style.background = data.status_color;
-                    }}
-                    if(data.courier_name) {{
-                         const courierCell = row.cells[4];
-                         if (courierCell) courierCell.innerText = `🚴 ${{data.courier_name}}`;
-                    }}
-                }}
-            }}
-
-            let map, courierMarker;
-            let trackInterval;
-
-            function openTrackModal(jobId) {{
-                document.getElementById('trackModal').style.display = 'flex';
-                
-                if(!map) {{
-                    map = L.map('track-map').setView([50.45, 30.52], 13);
-                    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
-                }}
-                
-                fetchLocation(jobId);
-                trackInterval = setInterval(() => fetchLocation(jobId), 5000);
-            }}
-
-            function closeTrackModal() {{
-                document.getElementById('trackModal').style.display = 'none';
-                clearInterval(trackInterval);
-            }}
-
-            async function fetchLocation(jobId) {{
-                try {{
-                    const res = await fetch(`/api/partner/track_courier/${{jobId}}`);
-                    const data = await res.json();
-                    
-                    const infoDiv = document.getElementById('track-info');
-                    
-                    if(data.status === 'waiting') {{
-                        infoDiv.innerText = "Кур'єр ще не призначений";
-                        return;
-                    }}
-                    
-                    if(data.status === 'ok' && data.lat) {{
-                        infoDiv.innerHTML = `🚴 <b>${{data.name}}</b> (${{data.phone}}) • Статус: ${{data.job_status}}`;
-                        const pos = [data.lat, data.lon];
-                        
-                        if(!courierMarker) {{
-                            courierMarker = L.marker(pos).addTo(map).bindPopup("Кур'єр тут");
-                        }} else {{
-                            courierMarker.setLatLng(pos);
-                        }}
-                        map.setView(pos, 15);
-                    }}
-                }} catch(e) {{ console.error(e); }}
-            }}
-        </script>
-    </body>
-    </html>
-    """
-
-# --- 4. Шаблон Дашборда (ДЛЯ ВЛАДЕЛЬЦЕВ SaaS) ---
+# --- 3. Шаблон Дашборда (Из app.py) ---
 
 def get_dashboard_html(user: User, instances: List[Instance]):
-    """HTML для Личного Кабинета Клиента SaaS (/dashboard)"""
+    """HTML для Личного Кабинета Клиента (/dashboard)"""
     
     project_cards_html = ""
     if not instances:
-        project_cards_html = "<p style='text-align: center; color: var(--text-muted);'>У вас поки немає проектів. Створіть свій перший проект, використовуючи форму вище.</p>"
+        project_cards_html = "<p style='text-align: center; color: var(--text-muted);'>У вас пока нет проектов. Создайте свой первый проект, используя форму выше.</p>"
     else:
         # Сортируем: сначала новые
         for instance in sorted(instances, key=lambda x: x.created_at, reverse=True):
@@ -898,10 +255,10 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                     </span>
                 </div>
                 <div class="project-body">
-                    <p><strong>Адмінка:</strong> <a href="{instance.url}/admin" target="_blank">{instance.url}/admin</a></p>
-                    <p><strong>Логін:</strong> admin</p>
+                    <p><strong>Админка:</strong> <a href="{instance.url}/admin" target="_blank">{instance.url}/admin</a></p>
+                    <p><strong>Логин:</strong> admin</p>
                     <p><strong>Пароль:</strong> {instance.admin_pass}</p>
-                    <p><strong>Оплачено до:</strong> {instance.next_payment_due.strftime('%Y-%m-%d')}</p>
+                    <p><strong>Оплачен до:</strong> {instance.next_payment_due.strftime('%Y-%m-%d')}</p>
                 </div>
                 <div class="project-footer">
                     <button class="btn-action" onclick="controlInstance({instance.id}, 'stop')" id="btn-stop-{instance.id}" {stop_disabled}>
@@ -911,22 +268,22 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                         <i class="fa-solid fa-play"></i> Start
                     </button>
                     <button class="btn-action btn-renew" disabled>
-                        <i class="fa-solid fa-credit-card"></i> Продовжити
+                        <i class="fa-solid fa-credit-card"></i> Продлить
                     </button>
                     <button class="btn-action btn-delete" onclick="deleteInstance({instance.id}, '{instance.subdomain}')">
-                        <i class="fa-solid fa-trash"></i> Видалити
+                        <i class="fa-solid fa-trash"></i> Удалить
                     </button>
                 </div>
             </div>
             """
 
     return f"""
-    <!DOCTYPE html><html lang="uk">
+    <!DOCTYPE html><html lang="ru">
     <head>
-        <title>Особистий кабінет</title>
+        <title>Личный кабинет</title>
         {GLOBAL_STYLES}
         <style>
-            /* Перевизначення стилів для дашборда */
+            /* Переопределяем стили для дашборда */
             body {{ display: block; padding: 20px; }}
             .dashboard-container {{
                 margin: 0 auto;
@@ -942,7 +299,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             .dashboard-header h1 {{ margin: 0; font-size: 1.8rem; }}
             .dashboard-header a {{ margin: 0; font-size: 0.9rem; color: #f87171; }}
             
-            /* Стилі для картки створення */
+            /* Стили для карточки создания */
             .create-card {{
                 background: var(--bg-card); 
                 border: 1px solid var(--border);
@@ -953,7 +310,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             .create-card h2 {{ margin-top: 0; }}
             .create-card form {{ text-align: left; }}
             .create-card .btn {{ margin-top: 15px; }}
-            /* Поділ полів токенів */
+            /* Разделение полей токенов */
             .token-fields {{
                 display: grid;
                 grid-template-columns: 1fr;
@@ -963,7 +320,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                 .token-fields {{ grid-template-columns: 1fr 1fr; }}
             }}
 
-            /* Стилі для списку проектів */
+            /* Стили для списка проектов */
             .projects-grid {{
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
@@ -1048,10 +405,10 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             .btn-action.btn-renew:hover:not(:disabled) {{ background: var(--primary-hover); }}
             
             .btn-action.btn-delete {{
-                background: rgba(225, 29, 72, 0.1);
+                background: rgba(225, 29, 72, 0.1); /* bg-rose-900/10 */
                 border-color: rgba(225, 29, 72, 0.3);
                 color: var(--status-delete);
-                flex-grow: 0;
+                flex-grow: 0; /* Не растягивать */
                 padding: 10px 15px;
             }}
             .btn-action.btn-delete:hover:not(:disabled) {{
@@ -1065,56 +422,56 @@ def get_dashboard_html(user: User, instances: List[Instance]):
     <body>
         <div class="dashboard-container">
             <div class="dashboard-header">
-                <h1>Вітаю, {user.email}!</h1>
-                <a href="/logout">Вийти</a>
+                <h1>Здравствуйте, {user.email}!</h1>
+                <a href="/logout">Выйти</a>
             </div>
 
             <div class="create-card">
-                <h2><i class="fa-solid fa-plus" style="color: var(--primary);"></i> Створити новий проект</h2>
+                <h2><i class="fa-solid fa-plus" style="color: var(--primary);"></i> Создать новый проект</h2>
                 <form id="createInstanceForm" method="post" action="/api/create-instance">
                     
-                    <label for="name">Назва проекту (Тільки латиниця, без пробілів)</label>
-                    <input type="text" name="name" id="name" placeholder="Наприклад: 'moybiznes' або 'romashka'" required>
-                    <p class="form-hint">Ця назва буде використана для створення вашого унікального домену: <code>moybiznes.restify.site</code></p>
+                    <label for="name">Название проекта (Только латиница, без пробелов)</label>
+                    <input type="text" name="name" id="name" placeholder="Например: 'moybiznes' или 'romashka'" required>
+                    <p class="form-hint">Это название будет использовано для создания вашего уникального домена: <code>moybiznes.restify.site</code></p>
                     
-                    <label for="phone">Ваш контактний телефон</label>
-                    <input type="tel" name="phone" id="phone" placeholder="Ми повідомимо, коли проект буде готовий" required>
-                    <p class="form-hint">Використовується тільки для повідомлень вам про статус створення.</p>
+                    <label for="phone">Ваш контактный телефон</label>
+                    <input type="tel" name="phone" id="phone" placeholder="Мы сообщим, когда проект будет готов" required>
+                    <p class="form-hint">Используется только для уведомлений вам о статусе создания.</p>
 
                     <hr>
-                    <h3>Налаштування Telegram Ботів</h3>
-                    <p class="form-hint" style="margin-top: 0; margin-bottom: 20px;">Введіть токени ваших ботів, отримані від <code>@BotFather</code>. Ви зможете змінити їх пізніше в адмін-панелі вашого проекту.</p>
+                    <h3>Настройка Telegram Ботов</h3>
+                    <p class="form-hint" style="margin-top: 0; margin-bottom: 20px;">Введите токены ваших ботов, полученные от <code>@BotFather</code>. Вы сможете изменить их позже в админ-панели вашего проекта.</p>
                     
                     <div class="token-fields">
                         <div>
-                            <label for="client_bot_token">Токен Клієнт-Бота (для замовлень)</label>
+                            <label for="client_bot_token">Токен Клиент-Бота (для заказов)</label>
                             <input type="text" name="client_bot_token" id="client_bot_token" placeholder="123456:ABC-..." required>
                         </div>
                         <div>
-                            <label for="admin_bot_token">Токен Адмін-Бота (для персоналу)</label>
+                            <label for="admin_bot_token">Токен Админ-Бота (для персонала)</label>
                             <input type="text" name="admin_bot_token" id="admin_bot_token" placeholder="789123:XYZ-..." required>
                         </div>
                     </div>
                     
-                    <label for="admin_chat_id">Admin Chat ID (для сповіщень)</label>
+                    <label for="admin_chat_id">Admin Chat ID (для уведомлений)</label>
                     <input type="text" name="admin_chat_id" id="admin_chat_id" placeholder="-100123..." required>
-                    <p class="form-hint">ID вашого Telegram-каналу або групи, куди будуть приходити замовлення. (Дізнайтеся у <code>@GetMyID_bot</code>)</p>
+                    <p class="form-hint">ID вашего Telegram-канала или группы, куда будут приходить заказы. (Узнайте у <code>@GetMyID_bot</code>)</p>
                     
-                    <button type="submit" class="btn" id="submitBtn">🚀 Запустити проект</button>
+                    <button type="submit" class="btn" id="submitBtn">🚀 Запустить проект</button>
                     <div id="response-msg" class="message" style="display: none; margin-top: 20px;"></div>
                 </form>
             </div>
 
             <hr>
             
-            <h2 style="margin-bottom: 20px;">Ваші проекти</h2>
+            <h2 style="margin-bottom: 20px;">Ваши проекты</h2>
             <div class="projects-grid" id="projects-grid-container">
                 {project_cards_html}
             </div>
         </div>
 
         <script>
-        // --- JS для форми створення ---
+        // --- JS для формы создания ---
         const form = document.getElementById('createInstanceForm');
         if (form) {{
             form.addEventListener('submit', async (e) => {{
@@ -1122,7 +479,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                 const btn = document.getElementById('submitBtn');
                 const msgEl = document.getElementById('response-msg');
                 btn.disabled = true;
-                btn.textContent = 'Запускаємо... (Це може зайняти 2-3 хвилини)';
+                btn.textContent = 'Запускаем... (Это может занять 2-3 минуты)';
                 msgEl.style.display = 'none'; msgEl.textContent = '';
                 
                 try {{
@@ -1134,25 +491,25 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                     if (response.ok) {{
                         msgEl.style.display = 'block';
                         msgEl.className = 'message success';
-                        msgEl.innerHTML = `✅ <strong>УСПІХ! Ваш сайт створено.</strong><br>Адреса: <strong>${{result.url}}</strong><br>Пароль: <strong>${{result.password}}</strong><br><br>Перезавантажуємо сторінку...`;
-                        // Перезавантажуємо сторінку, щоб показати нову картку
+                        msgEl.innerHTML = `✅ <strong>УСПЕХ! Ваш сайт создан.</strong><br>Адрес: <strong>${{result.url}}</strong><br>Пароль: <strong>${{result.password}}</strong><br><br>Перезагружаем страницу...`;
+                        // Перезагружаем страницу, чтобы показать новую карточку
                         setTimeout(() => {{ window.location.reload(); }}, 3000);
                     }} else {{
                         msgEl.style.display = 'block';
                         msgEl.className = 'message error';
-                        msgEl.textContent = `Помилка: ${{result.detail || 'Не вдалося створити сайт.'}}`;
-                        btn.disabled = false; btn.textContent = '🚀 Запустити проект';
+                        msgEl.textContent = `Ошибка: ${{result.detail || 'Не удалось создать сайт.'}}`;
+                        btn.disabled = false; btn.textContent = '🚀 Запустить проект';
                     }}
                 }} catch (err) {{
                     msgEl.style.display = 'block';
                     msgEl.className = 'message error';
-                    msgEl.textContent = 'Помилка мережі. Спробуйте ще раз.';
-                    btn.disabled = false; btn.textContent = '🚀 Запустити проект';
+                    msgEl.textContent = 'Ошибка сети. Попробуйте снова.';
+                    btn.disabled = false; btn.textContent = '🚀 Запустить проект';
                 }}
             }});
         }}
 
-        // --- JS для управління (Stop/Start) ---
+        // --- JS для управления (Stop/Start) ---
         async function controlInstance(instanceId, action) {{
             const stopBtn = document.getElementById(`btn-stop-${{instanceId}}`);
             const startBtn = document.getElementById(`btn-start-${{instanceId}}`);
@@ -1161,7 +518,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
 
             stopBtn.disabled = true;
             startBtn.disabled = true;
-            statusBadge.textContent = 'обробка...';
+            statusBadge.textContent = 'обработка...';
             
             const formData = new FormData();
             formData.append('instance_id', instanceId);
@@ -1189,7 +546,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                          alert(result.message);
                     }}
                 }} else {{
-                    alert(`Помилка: ${{result.detail}}`);
+                    alert(`Ошибка: ${{result.detail}}`);
                     statusBadge.textContent = currentStatus; 
                     if (currentStatus === 'active') {{
                          stopBtn.disabled = false;
@@ -1200,7 +557,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                     }}
                 }}
             }} catch (err) {{
-                alert('Мережева помилка. Не вдалося виконати дію.');
+                alert('Сетевая ошибка. Не удалось выполнить действие.');
                 statusBadge.textContent = currentStatus;
                 if (currentStatus === 'active') {{
                      stopBtn.disabled = false;
@@ -1212,9 +569,9 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             }}
         }}
 
-        // --- JS: Управління Видаленням ---
+        // --- JS: Управление Удалением ---
         async function deleteInstance(instanceId, subdomain) {{
-            const message = `Ви впевнені, що хочете ПОВНІСТЮ видалити проект '${{subdomain}}'?\\n\\nЦя дія незворотна. Контейнер та база даних будуть видалені.`
+            const message = `Вы уверены, что хотите ПОЛНОСТЬЮ удалить проект '${{subdomain}}'?\n\nЭто действие необратимо. Контейнер и база данных будут стерты.`
             if (!confirm(message)) {{
                 return;
             }}
@@ -1222,7 +579,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             const card = document.getElementById(`instance-card-${{instanceId}}`);
             const deleteBtn = card.querySelector('.btn-delete');
             deleteBtn.disabled = true;
-            deleteBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Видалення...';
+            deleteBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Удаление...';
             
             const formData = new FormData();
             formData.append('instance_id', instanceId);
@@ -1235,7 +592,7 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                 const result = await response.json();
 
                 if (response.ok) {{
-                    alert(result.message || 'Проект успішно видалений.');
+                    alert(result.message || 'Проект успешно удален.');
                     card.style.transition = 'opacity 0.5s, transform 0.5s';
                     card.style.opacity = '0';
                     card.style.transform = 'scale(0.9)';
@@ -1243,28 +600,28 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                         card.remove();
                         const grid = document.getElementById('projects-grid-container');
                         if (grid.children.length === 0) {{
-                            grid.innerHTML = "<p style='text-align: center; color: var(--text-muted);'>У вас поки немає проектів. Створіть свій перший проект, використовуючи форму вище.</p>";
+                            grid.innerHTML = "<p style='text-align: center; color: var(--text-muted);'>У вас пока нет проектов. Создайте свой первый проект, используя форму выше.</p>";
                         }}
                     }}, 500);
                 }} else {{
-                    alert(`Помилка видалення: ${{result.detail}}`);
+                    alert(`Ошибка удаления: ${{result.detail}}`);
                     deleteBtn.disabled = false;
-                    deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Видалити';
+                    deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Удалить';
                 }}
             }} catch (err) {{
-                alert('Мережева помилка. Не вдалося видалити проект.');
+                alert('Сетевая ошибка. Не удалось удалить проект.');
                 deleteBtn.disabled = false;
-                deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Видалити';
+                deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Удалить';
             }}
         }}
         </script>
     </body></html>
     """
 
-# --- 5. Шаблоны Админ-панели (ДЛЯ SUPER ADMIN) ---
+# --- 4. Шаблоны Админ-панели (Из app.py) ---
 
 def get_admin_dashboard_html(clients: list, message: str = "", msg_type: str = "success"):
-    """HTML для Админки (/admin)"""
+    """HTML для Вашей Админки (/admin)"""
     rows = ""
     for user, instance in clients:
         if instance:
@@ -1275,37 +632,25 @@ def get_admin_dashboard_html(clients: list, message: str = "", msg_type: str = "
                 <td>{user.email}</td>
                 <td>{url_link}</td>
                 <td>{instance.container_name}</td>
-                <td>
-                    <span style="padding: 4px 8px; border-radius: 4px; background: {'rgba(74, 222, 128, 0.1)' if instance.status == 'active' else 'rgba(248, 113, 113, 0.1)'}; color: {'#4ade80' if instance.status == 'active' else '#f87171'}; font-size: 0.85rem;">
-                        {instance.status}
-                    </span>
-                </td>
+                <td>{instance.status}</td>
                 <td>{instance.next_payment_due.strftime('%Y-%m-%d')}</td>
                 <td>
-                    <form action="/admin/control" method="post" style="display:flex; gap: 10px; align-items: center;">
+                    <form action="/admin/control" method="post" style="display:inline;">
                         <input type="hidden" name="instance_id" value="{instance.id}">
                         {
-                            '<button type="submit" name="action" value="stop" class="btn-mini warn" title="Зупинити"><i class="fa-solid fa-pause"></i></button>' 
+                            '<button type="submit" name="action" value="stop" class="btn-link error">Отключить</button>' 
                             if instance.status == 'active' else 
-                            '<button type="submit" name="action" value="start" class="btn-mini success" title="Запустити"><i class="fa-solid fa-play"></i></button>'
+                            '<button type="submit" name="action" value="start" class="btn-link success">Включить</button>'
                         }
-                        
-                        <button type="submit" name="action" value="update" class="btn-mini info" title="Оновити код контейнера" onclick="return confirm('Ви перезібрали образ crm-template? Контейнер буде перезапущено.');">
-                            <i class="fa-solid fa-rotate"></i>
-                        </button>
-
-                        <button type="submit" name="action" value="force_delete" class="btn-mini danger" title="Видалити назавжди" onclick="return confirm('УВАГА: Це видалить базу даних клієнта та контейнер НАЗАВЖДИ. Продовжити?');">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
                     </form>
                 </td>
             </tr>
             """
         else:
-            rows += f"<tr><td>{user.id}</td><td>{user.email}</td><td colspan='5'><i>(Екземпляр не створено)</i></td></tr>"
+            rows += f"<tr><td>{user.id}</td><td>{user.email}</td><td colspan='5'><i>(Экземпляр не создан)</i></td></tr>"
 
     return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Admin Panel</title>{GLOBAL_STYLES}</head>
+    <!DOCTYPE html><html lang="ru"><head><title>Admin Panel</title>{GLOBAL_STYLES}</head>
     <style>
         body {{ display: block; padding: 20px; }}
         .container {{ max-width: 1200px; width: 100%; text-align: left; margin: 0 auto; }}
@@ -1313,52 +658,39 @@ def get_admin_dashboard_html(clients: list, message: str = "", msg_type: str = "
         th, td {{ padding: 12px 15px; border: 1px solid var(--border); text-align: left; font-size: 0.9rem; }}
         th {{ background: var(--bg-card-hover); font-weight: 600; }}
         tr:nth-child(even) {{ background: rgba(255,255,255,0.02); }}
-        
-        .btn-mini {{
-            border: 1px solid transparent;
-            border-radius: 6px;
-            width: 32px;
-            height: 32px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: 0.2s;
-            background: rgba(255,255,255,0.05);
-            color: var(--text-muted);
-        }}
-        .btn-mini:hover {{ transform: translateY(-2px); }}
-        .btn-mini.warn:hover {{ background: #f59e0b; color: white; }}
-        .btn-mini.success:hover {{ background: #4ade80; color: white; }}
-        .btn-mini.info:hover {{ background: #6366f1; color: white; }}
-        .btn-mini.danger:hover {{ background: #e11d48; color: white; }}
-
+        .btn-link {{ background:none; border:none; cursor:pointer; padding: 0; margin: 0; text-decoration: underline; font-family: var(--font); font-size: 0.9rem; }}
+        .btn-link.error {{ color: #f87171; }}
+        .btn-link.success {{ color: #4ade80; }}
         .header-nav {{ display: flex; justify-content: space-between; align-items: center; }}
         .nav-link {{ background: var(--primary); color: white; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 0.9rem; margin-top: 0; }}
         .nav-link:hover {{ background: var(--primary-hover); }}
     </style>
     <body><div class="container">
         <div class="header-nav">
-            <h1>Панель Адміністратора</h1>
-            <a href="/settings" class="nav-link">Налаштування Вітрини</a>
+            <h1>Панель Администратора</h1>
+            <a href="/settings" class="nav-link">Настройки Витрины</a>
         </div>
         {f"<div class='message {msg_type}'>{message}</div>" if message else ""}
-        <h2>Клієнти SaaS</h2>
+        <h2>Клиенты SaaS</h2>
         <table>
             <thead>
-                <tr><th>ID Юзера</th><th>Email</th><th>Піддомен</th><th>Контейнер</th><th>Статус</th><th>Оплачено до</th><th>Дія</th></tr>
+                <tr><th>ID Юзера</th><th>Email</th><th>Поддомен</th><th>Контейнер</th><th>Статус</th><th>Оплачен до</th><th>Действие</th></tr>
             </thead>
             <tbody>
-                {rows or "<tr><td colspan='7'>Немає клієнтів</td></tr>"}
+                {rows or "<tr><td colspan='7'>Нет клиентов</td></tr>"}
             </tbody>
         </table>
     </div></body></html>
     """
 
 def get_settings_page_html(config, message=""):
-    """HTML для настройки витрины (/settings)"""
-    custom_btn_text = config.get('custom_btn_text', '').replace('"', '"')
-    custom_btn_content = config.get('custom_btn_content', '').replace('<', '<').replace('>', '>')
+    """
+    HTML для страницы настроек витрины (/settings)
+    ИЗМЕНЕНИЕ: Добавлены поля для custom_btn_text и custom_btn_content
+    """
+    # Экранируем кавычки и HTML-сущности для безопасного встраивания в value="" и <textarea>
+    custom_btn_text = config.get('custom_btn_text', '').replace('"', '&quot;')
+    custom_btn_content = config.get('custom_btn_content', '').replace('<', '&lt;').replace('>', '&gt;')
     
     return f"""
     <!DOCTYPE html><html><head><title>Restify Admin</title>{GLOBAL_STYLES}</head>
@@ -1368,13 +700,13 @@ def get_settings_page_html(config, message=""):
     </style>
     <body>
         <div class="container">
-            <h1 style="text-align:center;">Налаштування Вітрини</h1>
+            <h1 style="text-align:center;">Настройки Витрины</h1>
             {f'<div class="message success" style="text-align:center">{message}</div>' if message else ''}
             <form method="post" action="/settings">
-                <label>Символ валюти</label><input type="text" name="currency" value="{config.get('currency', '$')}">
+                <label>Currency Symbol</label><input type="text" name="currency" value="{config.get('currency', '$')}">
                 
                 <input type="hidden" name="price_light" value="{config.get('price_light', '300')}">
-                <label>Ціна (Pro) / місяць</label><input type="number" name="price_full" value="{config.get('price_full', '600')}">
+                <label>Price (Pro) / month</label><input type="number" name="price_full" value="{config.get('price_full', '600')}">
                 
                 <hr>
                 <label>Admin Telegram ID (для заявок)</label><input type="text" name="admin_id" value="{config.get('admin_id', '')}">
@@ -1382,736 +714,1083 @@ def get_settings_page_html(config, message=""):
                 
                 <hr>
                 <label>Текст кнопки (в меню)</label>
-                <input type="text" name="custom_btn_text" value="{custom_btn_text}" placeholder="Напр: Політика">
-                <p class="form-hint" style="margin-top: 5px; margin-bottom: 15px;">Залиште порожнім, щоб приховати кнопку.</p>
+                <input type="text" name="custom_btn_text" value="{custom_btn_text}" placeholder="Напр: Политика">
+                <p class="form-hint" style="margin-top: 5px; margin-bottom: 15px;">Оставьте пустым, чтобы скрыть кнопку.</p>
                 
-                <label>Вміст вікна (HTML)</label>
+                <label>Содержимое окна (HTML)</label>
                 <textarea name="custom_btn_content" placeholder="<p>Ваш текст...</p>">{custom_btn_content}</textarea>
-                <button type="submit" class="btn">Зберегти</button>
+                <button type="submit" class="btn">Сохранить</button>
             </form>
-            <a href="/admin" style="text-align:center;">← Назад до Клієнтів</a>
+            <a href="/admin" style="text-align:center;">&larr; Назад к Клиентам</a>
         </div>
     </body></html>
     """
 
-# --- 6. Шаблоны для КУРЬЕРОВ ---
 
-def get_courier_login_page(message="", msg_type="error"):
-    """Страница входа для курьеров"""
-    
-    # --- PWA META (Manifest) ---
-    pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
-    # ---------------------------
-
-    return f"""
-    <!DOCTYPE html><html lang="uk"><head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Вхід для кур'єрів</title>{GLOBAL_STYLES}{pwa_meta}</head>
-    <body><div class="container">
-        <h1>🚴 Courier App</h1>
-        <form method="post" action="/api/courier/login">
-            <input type="tel" name="phone" placeholder="Телефон" required>
-            <input type="password" name="password" placeholder="Пароль" required>
-            <button type="submit" class="btn">Почати зміну</button>
-        </form>
-        {f"<div class='message {msg_type}'>{message}</div>" if message else ""}
-        <a href="/courier/register">Стати кур'єром</a>
-    </div></body></html>
-    """
-
-def get_courier_register_page():
-    """Страница регистрации для курьеров с Telegram Verification"""
-    return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Реєстрація кур'єра</title>{GLOBAL_STYLES}
-    <style>
-        .tg-verify-box {{
-            border: 2px dashed var(--border);
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            text-align: center;
-            background: rgba(255,255,255,0.02);
-            transition: 0.3s;
-        }}
-        .tg-verify-box.verified {{
-            border-color: var(--status-active);
-            background: rgba(74, 222, 128, 0.1);
-        }}
-        .tg-btn {{
-            background: #24A1DE;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 600;
-            margin-top: 10px;
-            transition: 0.2s;
-        }}
-        .tg-btn:hover {{ background: #1b8bbf; transform: translateY(-2px); }}
-        .hidden {{ display: none; }}
-        
-        .spinner {{ display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }}
-        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-    </style>
-    </head>
-    <body><div class="container">
-        <h1>Реєстрація Кур'єра</h1>
-        <form id="regForm" method="post" action="/api/courier/register">
-            <input type="text" name="name" placeholder="Ваше Ім'я" required>
-            <input type="password" name="password" placeholder="Пароль" required>
-            
-            <div id="tg-step" class="tg-verify-box">
-                <div id="tg-initial">
-                    <p style="margin:0 0 10px 0; color:var(--text-muted);">Підтвердіть телефон через Telegram:</p>
-                    <a href="#" id="tg-link" target="_blank" class="tg-btn">
-                        <i class="fa-brands fa-telegram"></i> Підтвердити
-                    </a>
-                </div>
-                
-                <div id="tg-waiting" class="hidden">
-                    <p style="margin:0; color:var(--text-muted);">
-                        <span class="spinner"></span> Очікуємо підтвердження...
-                    </p>
-                    <small style="color:#666">Натисніть "Start" та "Share Contact" у боті</small>
-                </div>
-
-                <div id="tg-success" class="hidden">
-                    <div style="color: var(--status-active); font-size: 1.2rem; margin-bottom: 5px;">
-                        <i class="fa-solid fa-circle-check"></i> Підтверджено!
-                    </div>
-                    <div id="user-phone-display" style="font-weight:bold; color:white;"></div>
-                </div>
-            </div>
-
-            <input type="hidden" name="phone" id="real_phone">
-            <input type="hidden" name="verification_token" id="verification_token">
-
-            <button type="submit" class="btn" id="submitBtn" disabled>Зареєструватися</button>
-        </form>
-        <div id="msg" class="message" style="display:none"></div>
-    </div>
-    <script>
-        let verificationToken = "";
-        let pollInterval = null;
-
-        async function initVerification() {{
-            try {{
-                const res = await fetch('/api/auth/init_verification', {{ method: 'POST' }});
-                const data = await res.json();
-                verificationToken = data.token;
-                document.getElementById('verification_token').value = verificationToken;
-                
-                const linkBtn = document.getElementById('tg-link');
-                linkBtn.href = data.link;
-                
-                linkBtn.addEventListener('click', () => {{
-                    document.getElementById('tg-initial').classList.add('hidden');
-                    document.getElementById('tg-waiting').classList.remove('hidden');
-                    startPolling();
-                }});
-            }} catch(e) {{ console.error(e); }}
-        }}
-
-        function startPolling() {{
-            pollInterval = setInterval(async () => {{
-                try {{
-                    const res = await fetch(`/api/auth/check_verification/${{verificationToken}}`);
-                    const data = await res.json();
-                    if(data.status === 'verified') {{
-                        clearInterval(pollInterval);
-                        showSuccess(data.phone);
-                    }}
-                }} catch(e) {{ }}
-            }}, 2000);
-        }}
-
-        function showSuccess(phone) {{
-            document.getElementById('tg-waiting').classList.add('hidden');
-            document.getElementById('tg-success').classList.remove('hidden');
-            document.querySelector('.tg-verify-box').classList.add('verified');
-            
-            document.getElementById('user-phone-display').innerText = phone;
-            document.getElementById('real_phone').value = phone;
-            document.getElementById('submitBtn').disabled = false;
-        }}
-
-        initVerification();
-
-        document.getElementById('regForm').addEventListener('submit', async (e) => {{
-            e.preventDefault();
-            const btn = document.getElementById('submitBtn');
-            btn.disabled = true; btn.innerText = "Обробка...";
-            
-            const form = new FormData(e.target);
-            const msgEl = document.getElementById('msg');
-            msgEl.style.display = 'none';
-
-            try {{
-                const resp = await fetch('/api/courier/register', {{ method: 'POST', body: form }});
-                const resData = await resp.json();
-
-                if(resp.ok) {{
-                    window.location.href='/courier/login?message=Успішно! Увійдіть.&type=success';
-                }} else {{
-                    msgEl.style.display = 'block';
-                    msgEl.className = 'message error';
-                    msgEl.innerText = resData.detail || 'Помилка реєстрації';
-                    btn.disabled = false; btn.innerText = "Зареєструватися";
-                }}
-            }} catch (err) {{
-                 msgEl.style.display = 'block'; msgEl.innerText = "Помилка мережі";
-                 btn.disabled = false; btn.innerText = "Зареєструватися";
-            }}
-        }});
-    </script>
-    </body></html>
-    """
-
-def get_courier_pwa_html(courier: Courier):
-    """
-    Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом.
-    Включает отображение маркера клиента и маршрута.
-    """
-    status_class = "online" if courier.is_online else "offline"
-    status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
-    
-    # --- PWA META (Manifest) ---
-    pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
-
-    return f"""
-    <!DOCTYPE html>
-    <html lang="uk">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Courier App</title>
-        {GLOBAL_STYLES}
-        {PWA_STYLES}
-        {pwa_meta}
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    </head>
-    <body>
-        <div id="map"></div>
-
-        <div class="app-header">
-            <button class="icon-btn" onclick="toggleHistory(true)"><i class="fa-solid fa-clock-rotate-left"></i></button>
-            <div class="status-indicator" onclick="toggleShift()" style="position: relative;">
-                <div id="connection-dot" style="position: absolute; top:-2px; right:-2px; width:6px; height:6px; border-radius:50%; background:red; border:1px solid #0f172a;" title="Connection Status"></div>
-                <div id="status-dot" class="dot {status_class}"></div>
-                <span id="status-text">{status_text}</span>
-            </div>
-            <a href="/courier/logout" class="icon-btn"><i class="fa-solid fa-right-from-bracket"></i></a>
-        </div>
-
-        <div id="offline-msg" style="display: { 'none' if courier.is_online else 'flex' }; position: absolute; inset:0; background:rgba(15,23,42,0.8); z-index: 50; align-items:center; justify-content:center; flex-direction:column; backdrop-filter:blur(3px);">
-            <h2>Ви зараз офлайн</h2>
-            <button class="btn" style="width:200px" onclick="toggleShift()">Вийти на лінію</button>
-        </div>
-
-        <div id="job-sheet" class="bottom-sheet">
-            <div class="drag-handle"></div>
-            
-            <div class="stepper">
-                <div id="step-1" class="step"></div> <div id="step-2" class="step"></div> </div>
-
-            <div class="sheet-title">
-                <span id="job-title">Замовлення #000</span>
-                <span id="job-price" style="color: var(--status-active)">+0 ₴</span>
-            </div>
-            <div class="sheet-subtitle" id="job-status-desc">Прямуйте до закладу</div>
-
-            <div class="info-block">
-                <div class="info-label" id="addr-label">Забрати тут:</div>
-                <div class="info-value" id="current-target-addr">вул. Прикладна, 10</div>
-                <div style="margin-top:5px; color:var(--text-muted); font-size:0.9rem;" id="current-target-name">Ресторан</div>
-            </div>
-
-            <div class="info-block" id="client-info-block" style="display:none;">
-                <div class="info-label">Клієнт</div>
-                <div class="info-value"><i class="fa-solid fa-user"></i> <span id="client-name">Іван</span></div>
-                <div class="info-value"><i class="fa-solid fa-phone"></i> <a href="#" id="client-phone" style="color:white; text-decoration:none;">000</a></div>
-                <div style="margin-top:5px; color:var(--accent);" id="job-comment">Код 123</div>
-            </div>
-
-            <div class="action-grid">
-                <a href="#" id="btn-nav" target="_blank" class="btn-nav">
-                    <i class="fa-solid fa-location-arrow"></i> Маршрут
-                </a>
-                <button id="btn-action" class="btn-main" onclick="advanceJobState()">Прибув</button>
-            </div>
-        </div>
-        
-        <div id="history-modal" class="history-modal">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2>Історія замовлень</h2>
-                <button class="icon-btn" onclick="toggleHistory(false)"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div id="history-list"></div>
-        </div>
-
-        <div id="orderModal" class="order-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(5px);">
-             <div style="background:white; color:black; padding:30px; border-radius:20px; width:85%; max-width:350px; text-align:center;">
-                <h2 style="margin-top:0;">🔥 Нове замовлення!</h2>
-                <div style="font-size:2.5rem; font-weight:800; color:var(--primary);" id="modal-fee">50 ₴</div>
-                <p id="modal-route" style="color:#555; margin:15px 0;">Ресторан -> Адреса</p>
-                <input type="hidden" id="modal-job-id">
-                <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
-                <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline;">Закрити</button>
-             </div>
-        </div>
-
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <script>
-            // --- State ---
-            let currentJob = null;
-            let isOnline = {str(courier.is_online).lower()};
-            let socket = null;
-            let pingInterval = null;
-            let isReconnecting = false;
-            
-            // --- Map Init ---
-            const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
-            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
-            
-            let marker = null;       // Маркер курьера
-            let targetMarker = null; // Маркер назначения (НОВОЕ)
-            let routeLine = null;    // Линия маршрута (НОВОЕ)
-
-            // --- Wake Lock (Щоб екран не гас) ---
-            async function requestWakeLock() {{
-                try {{
-                    if ('wakeLock' in navigator) {{
-                        await navigator.wakeLock.request('screen');
-                        console.log('Wake Lock active');
-                    }}
-                }} catch (err) {{ console.error(err); }}
-            }}
-            if(isOnline) requestWakeLock();
-
-            // --- WebSocket Manager (Robust) ---
-            function connectWS() {{
-                if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
-
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/courier`);
-
-                socket.onopen = () => {{
-                    console.log("WS Connected");
-                    document.getElementById('connection-dot').style.background = '#4ade80'; // Green
-                    isReconnecting = false;
-                    
-                    // Start Heartbeat (Ping) каждые 15 сек
-                    clearInterval(pingInterval);
-                    pingInterval = setInterval(() => {{
-                        if (socket.readyState === WebSocket.OPEN) socket.send("ping");
-                    }}, 15000);
-                }};
-
-                socket.onmessage = (e) => {{
-                    if (e.data === "pong") return; 
-                    const msg = JSON.parse(e.data);
-                    if(msg.type === 'new_order') {{
-                        // Проверяем, не показываем ли мы уже этот заказ
-                        const currentModalId = document.getElementById('modal-job-id').value;
-                        if (currentModalId != msg.data.id) {{
-                            showNewOrder(msg.data);
-                        }}
-                    }}
-                }};
-
-                socket.onclose = (e) => {{
-                    console.log("WS Closed", e);
-                    document.getElementById('connection-dot').style.background = 'red';
-                    clearInterval(pingInterval);
-                    
-                    // Авто-реконнект, если мы на смене
-                    if (isOnline) {{
-                        isReconnecting = true;
-                        setTimeout(connectWS, 3000); // Пробуем каждые 3 сек
-                    }}
-                }};
-                
-                socket.onerror = (err) => {{
-                    console.error("WS Error", err);
-                    socket.close();
-                }};
-            }}
-            
-            if(isOnline) connectWS();
-
-            // --- UI Functions ---
-            function showNewOrder(data) {{
-                // Проигрываем звук (нужно взаимодействие с пользователем сначала)
-                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-                audio.play().catch(e => console.log("Audio play failed (need interaction)"));
-
-                // Вибрация (для Android)
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-
-                document.getElementById('modal-fee').innerText = data.fee + ' ₴';
-                document.getElementById('modal-route').innerText = `${{data.restaurant}} ➝ Клієнт`;
-                document.getElementById('modal-job-id').value = data.id;
-                document.getElementById('orderModal').style.display = 'flex';
-            }}
-            
-            function closeOrderModal() {{
-                document.getElementById('orderModal').style.display = 'none';
-                document.getElementById('modal-job-id').value = '';
-            }}
-
-            // --- Geolocation ---
-            if (navigator.geolocation) {{
-                navigator.geolocation.watchPosition((pos) => {{
-                    const {{ latitude, longitude }} = pos.coords;
-                    if (!marker) {{
-                        marker = L.marker([latitude, longitude]).addTo(map);
-                        map.setView([latitude, longitude], 15);
-                    }} else {{
-                        marker.setLatLng([latitude, longitude]);
-                    }}
-                    
-                    // Отправляем локацию, если онлайн и сокет открыт
-                    if(isOnline && socket && socket.readyState === WebSocket.OPEN) {{
-                        const fd = new FormData();
-                        fd.append('lat', latitude);
-                        fd.append('lon', longitude);
-                        navigator.sendBeacon('/api/courier/location', fd);
-                    }}
-                }}, console.error, {{ enableHighAccuracy: true }});
-            }}
-
-            // --- Shift Logic ---
-            async function toggleShift() {{
-                try {{
-                    const res = await fetch('/api/courier/toggle_status', {{method:'POST'}});
-                    const data = await res.json();
-                    isOnline = data.is_online;
-                    
-                    document.getElementById('offline-msg').style.display = isOnline ? 'none' : 'flex';
-                    document.getElementById('status-dot').className = isOnline ? 'dot online' : 'dot offline';
-                    document.getElementById('status-text').innerText = isOnline ? 'НА ЗМІНІ' : 'ОФЛАЙН';
-                    
-                    if(isOnline) {{
-                        requestWakeLock();
-                        connectWS();
-                    }} else {{
-                        if(socket) socket.close();
-                    }}
-                }} catch(e) {{
-                    alert("Помилка з'єднання. Перевірте інтернет.");
-                }}
-            }}
-
-            // --- Job Logic (Existing) ---
-            async function checkActiveJob() {{
-                try {{
-                    const res = await fetch('/api/courier/active_job');
-                    if (!res.ok) throw new Error("Server Error");
-                    const data = await res.json();
-                    if(data.active) {{
-                        currentJob = data.job;
-                        renderJobSheet();
-                    }} else {{
-                        document.getElementById('job-sheet').classList.remove('active');
-                        currentJob = null;
-                        
-                        // Очистка карты при отсутствии заказа
-                        if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
-                        if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
-                    }}
-                }} catch(e) {{
-                     console.error(e);
-                     alert("Не вдалося завантажити деталі замовлення. Спробуйте оновити сторінку.");
-                }}
-            }}
-            checkActiveJob();
-
-            function renderJobSheet() {{
-                const sheet = document.getElementById('job-sheet');
-                const btnNav = document.getElementById('btn-nav');
-                const btnAct = document.getElementById('btn-action');
-                const steps = [document.getElementById('step-1'), document.getElementById('step-2')];
-                
-                sheet.classList.add('active');
-                document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
-                document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
-                document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
-                document.getElementById('client-phone').innerText = currentJob.customer_phone;
-                document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
-                document.getElementById('job-comment').innerText = currentJob.comment || '';
-
-                // --- ЛОГИКА ОТОБРАЖЕНИЯ НА КАРТЕ ---
-                
-                // 1. Очищаем старые маркеры назначения
-                if (targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
-                if (routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
-
-                let destLat = null;
-                let destLon = null;
-                let destAddr = "";
-
-                if (currentJob.status === 'assigned') {{
-                    // Едем в РЕСТОРАН. Координат ресторана у нас в БД пока нет (обычно), 
-                    // поэтому используем поиск по тексту для ссылки на карты.
-                    destAddr = currentJob.partner_address;
-                    
-                    steps[0].className = 'step active'; steps[1].className = 'step';
-                    document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
-                    document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
-                    document.getElementById('current-target-addr').innerText = destAddr;
-                    document.getElementById('current-target-name').innerText = currentJob.partner_name;
-                    document.getElementById('client-info-block').style.display = 'none';
-                    
-                    // Ссылка на навигатор (по адресу)
-                    btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
-                    
-                    btnAct.innerText = 'Забрав замовлення';
-                    btnAct.onclick = () => updateStatus('picked_up');
-                    
-                }} else if (currentJob.status === 'picked_up') {{
-                    // Едем к КЛИЕНТУ. Тут у нас есть координаты!
-                    destLat = currentJob.customer_lat;
-                    destLon = currentJob.customer_lon;
-                    destAddr = currentJob.customer_address;
-
-                    steps[0].className = 'step done'; steps[1].className = 'step active';
-                    document.getElementById('job-status-desc').innerText = 'Везіть до клієнта';
-                    document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
-                    document.getElementById('current-target-addr').innerText = destAddr;
-                    document.getElementById('current-target-name').innerText = 'Клієнт';
-                    document.getElementById('client-info-block').style.display = 'block';
-                    
-                    // Если есть координаты - ставим маркер и строим линию
-                    if (destLat && destLon) {{
-                        // Красный маркер для клиента
-                        const redIcon = new L.Icon({{
-                            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-                            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
-                        }});
-                        
-                        targetMarker = L.marker([destLat, destLon], {{icon: redIcon}}).addTo(map)
-                            .bindPopup("Клієнт: " + destAddr).openPopup();
-
-                        // Если курьер тоже на карте, рисуем линию
-                        if (marker) {{
-                            const courierPos = marker.getLatLng();
-                            const targetPos = [destLat, destLon];
-                            routeLine = L.polyline([courierPos, targetPos], {{color: '#6366f1', weight: 4, dashArray: '10, 10'}}).addTo(map);
-                            map.fitBounds(routeLine.getBounds(), {{padding: [50, 50]}});
-                        }} else {{
-                             map.setView([destLat, destLon], 14);
-                        }}
-
-                        // Ссылка на навигатор (по координатам - это точнее!)
-                        btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{destLat}},${{destLon}}`;
-                    }} else {{
-                        // Если координат нет (старый заказ), используем адрес
-                        btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
-                    }}
-
-                    btnAct.innerText = '✅ Доставив';
-                    btnAct.onclick = () => updateStatus('delivered');
-                }}
-            }}
-
-            async function acceptOrder() {{
-                const jobId = document.getElementById('modal-job-id').value;
-                const fd = new FormData(); fd.append('job_id', jobId);
-                
-                try {{
-                    const res = await fetch('/api/courier/accept_order', {{method:'POST', body:fd}});
-                    const data = await res.json();
-                    closeOrderModal();
-                    if(data.status === 'ok') checkActiveJob();
-                    else alert(data.message);
-                }} catch(e) {{
-                    alert("Помилка при прийнятті. Можливо, замовлення вже забрав інший кур'єр.");
-                    closeOrderModal();
-                }}
-            }}
-
-            async function updateStatus(newStatus) {{
-                if(!currentJob) return;
-                const fd = new FormData();
-                fd.append('job_id', currentJob.id);
-                fd.append('status', newStatus);
-                
-                const res = await fetch('/api/courier/update_job_status', {{method:'POST', body:fd}});
-                if(res.ok) {{
-                    currentJob.status = newStatus;
-                    if(newStatus === 'delivered') {{
-                        alert("Чудова робота! Замовлення завершено.");
-                        currentJob = null;
-                        document.getElementById('job-sheet').classList.remove('active');
-                        // Удаляем маркеры
-                        if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
-                        if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
-                    }} else {{
-                        renderJobSheet();
-                    }}
-                }}
-            }}
-            
-            async function toggleHistory(show) {{
-                const modal = document.getElementById('history-modal');
-                if(show) {{
-                    const res = await fetch('/api/courier/history');
-                    const jobs = await res.json();
-                    const list = document.getElementById('history-list');
-                    list.innerHTML = jobs.map(j => `
-                        <div class="history-item">
-                            <div>
-                                <div style="font-weight:bold;">#${{j.id}} - ${{j.address}}</div>
-                                <div style="font-size:0.8rem; color:#888;">${{j.date}}</div>
-                            </div>
-                            <div class="history-price">+${{j.price}}₴</div>
-                        </div>
-                    `).join('');
-                    modal.classList.add('open');
-                }} else {{
-                    modal.classList.remove('open');
-                }}
-            }}
-        </script>
-    </body>
-    </html>
-    """
-
-# --- 7. Landing Page (SaaS + Partner) ---
+# --- 5. Шаблон Главной Страницы (С ИЗМЕНЕНИЯМИ) ---
 
 def get_landing_page_html(config: Dict[str, str]):
     """
-    ОБНОВЛЕННАЯ Главная страница (Lander).
-    Содержит две основные опции: Создать SaaS проект или Стать Партнером.
+    HTML для главной страницы (витрины).
+    ВКЛЮЧАЕТ ИЗМЕНЕНИЯ:
+    1. Тексты "48 часов" заменены на "мгновенный запуск".
+    2. Добавлена кастомная кнопка в меню и модальное окно (HTML/CSS/JS).
     """
     
+    # Готовим кастомную кнопку. Она будет добавлена, только если текст для нее задан в config.
     custom_button_html = ""
     if config.get("custom_btn_text"):
-        button_text = config["custom_btn_text"].replace('<', '<').replace('>', '>')
-        custom_button_html = f'<a href="#" id="custom-modal-btn">{button_text}</a>'
+        # Экранируем текст для безопасного встраивания
+        button_text = config["custom_btn_text"].replace('<', '&lt;').replace('>', '&gt;')
+        custom_button_html = f"""
+            <a href="#" id="custom-modal-btn">{button_text}</a>
+        """
         
+    # Готовим контент для модального окна.
+    # Здесь мы доверяем HTML-контенту из админки.
     modal_content_html = config.get("custom_btn_content", "")
 
     return f"""
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Restify | Платформа для ресторанів</title>
+    <title>Restify | Digital Restaurant System</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
     <style>
-        :root {{ --bg: #0f172a; --text: #f8fafc; --primary: #6366f1; --accent: #ec4899; }}
-        body {{ font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.6; }}
-        .container {{ max-width: 1200px; margin: 0 auto; padding: 0 20px; }}
-        a {{ text-decoration: none; color: inherit; transition: 0.3s; }}
-        
-        /* Nav */
-        .navbar {{ padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.1); position: sticky; top: 0; background: rgba(15,23,42,0.9); backdrop-filter: blur(10px); z-index: 100; }}
-        .nav-inner {{ display: flex; justify-content: space-between; align-items: center; }}
-        .logo {{ font-weight: 800; font-size: 1.5rem; display: flex; align-items: center; gap: 10px; }}
-        .auth-btns {{ display: flex; gap: 15px; }}
-        .btn-sm {{ padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; }}
-        .btn-outline {{ border: 1px solid rgba(255,255,255,0.3); }}
-        .btn-outline:hover {{ border-color: var(--primary); color: var(--primary); }}
-        
-        /* Hero */
-        .hero {{ text-align: center; padding: 100px 0 60px; }}
-        h1 {{ font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 800; margin-bottom: 20px; line-height: 1.1; }}
-        .gradient-text {{ background: linear-gradient(135deg, var(--primary), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
-        .subtitle {{ font-size: 1.2rem; color: #94a3b8; max-width: 600px; margin: 0 auto 50px; }}
-        
-        /* Split Section */
-        .split-container {{ display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; }}
-        @media(max-width: 768px) {{ .split-container {{ grid-template-columns: 1fr; }} }}
-        
-        .choice-card {{ 
-            background: #1e293b; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 40px; 
-            text-align: left; transition: 0.4s; position: relative; overflow: hidden;
+        :root {{
+            --bg-body: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --primary: #6366f1; /* Indigo */
+            --primary-hover: #4f46e5;
+            --accent: #ec4899; /* Pink */
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+            --radius: 16px;
+            --font: 'Inter', sans-serif;
+            --transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
         }}
-        .choice-card:hover {{ transform: translateY(-10px); border-color: var(--primary); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }}
-        .card-icon {{ width: 60px; height: 60px; background: rgba(99, 102, 241, 0.1); color: var(--primary); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; margin-bottom: 25px; }}
-        .choice-card h3 {{ font-size: 1.8rem; margin: 0 0 15px; }}
-        .choice-card p {{ color: #94a3b8; margin-bottom: 30px; min-height: 80px; }}
+
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        html {{ scroll-behavior: smooth; }}
+        body {{
+            font-family: var(--font);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+            display: block;
+            min-height: auto;
+            padding: 0;
+        }}
         
-        .btn-block {{ display: block; width: 100%; text-align: center; padding: 15px; border-radius: 12px; font-weight: 700; background: var(--primary); color: white; border: none; cursor: pointer; }}
-        .btn-block:hover {{ background: #4f46e5; }}
-        .btn-secondary {{ background: #334155; }}
-        .btn-secondary:hover {{ background: #475569; }}
+        .container {{ 
+            width: 100%; 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 0 20px; 
+            background: none;
+            border: none;
+            box-shadow: none;
+            max-width: 1200px;
+        }}
         
-        /* Features List */
-        .features li {{ display: flex; align-items: center; gap: 10px; margin-bottom: 10px; color: #cbd5e1; }}
-        .features i {{ color: var(--accent); }}
+        h1, h2, h3 {{ line-height: 1.2; font-weight: 800; letter-spacing: -0.02em; }}
+        h1 {{ margin-bottom: 0; }}
         
-        /* Modal */
-        .modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }}
-        .modal-overlay.visible {{ display: flex; }}
-        .modal-content {{ background: #1e293b; padding: 40px; border-radius: 20px; max-width: 600px; width: 90%; color: #fff; position: relative; }}
-        .close-btn {{ position: absolute; top: 20px; right: 20px; cursor: pointer; font-size: 1.5rem; color: #94a3b8; }}
+        .gradient-text {{
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-size: 200% 200%;
+            animation: gradientMove 5s ease infinite;
+        }}
+        @keyframes gradientMove {{ 0% {{background-position:0% 50%}} 50% {{background-position:100% 50%}} 100% {{background-position:0% 50%}} }}
+
+        /* Buttons */
+        .btn {{
+            display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+            padding: 14px 28px; border-radius: 12px; font-weight: 600; cursor: pointer;
+            text-decoration: none; transition: var(--transition); border: none; font-size: 1rem;
+            position: relative; overflow: hidden;
+            width: auto; 
+            margin-bottom: 0;
+        }}
+        .btn-primary {{
+            background: linear-gradient(135deg, var(--primary), var(--accent)); color: white;
+            box-shadow: 0 4px 20px -5px rgba(99, 102, 241, 0.5);
+        }}
+        .btn-primary:hover {{ transform: translateY(-3px) scale(1.02); box-shadow: 0 15px 30px -5px rgba(99, 102, 241, 0.7); }}
+        .btn-outline {{
+            background: transparent; border: 1px solid var(--border); color: white;
+        }}
+        .btn-outline:hover {{ border-color: var(--primary); background: rgba(255,255,255,0.05); transform: translateY(-3px); }}
+
+        /* Navbar */
+        .navbar {{
+            position: fixed; top: 0; width: 100%; z-index: 1000;
+            background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border); transition: all 0.3s;
+        }}
+        .nav-inner {{ 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            height: 80px; 
+        }}
+        .logo {{ 
+            font-size: 1.5rem; 
+            font-weight: 800; 
+            color: white; 
+            text-decoration: none; 
+            display: flex; 
+            align-items: center; 
+            gap: 8px; 
+        }}
+        .logo img {{
+            height: 60px; 
+            width: 60px;
+            filter: invert(0.9);
+            margin-right: 5px;
+        }}
+        
+        .nav-links {{ 
+            display: flex; 
+            gap: 25px; 
+            align-items: center; 
+        }}
+        .nav-links a {{ 
+            color: var(--text-muted); text-decoration: none; font-weight: 500; font-size: 0.95rem; 
+            transition: var(--transition); position: relative; 
+            display: inline; margin: 0;
+            cursor: pointer; /* Для кастомной кнопки */
+        }}
+        .nav-links a:hover {{ color: white; transform: translateY(-2px); text-decoration: none; }}
+        .nav-links a::after {{
+            content: ''; position: absolute; width: 0; height: 2px; bottom: -4px; left: 0;
+            background-color: var(--primary); transition: width 0.3s;
+        }}
+        .nav-links a:hover::after {{ width: 100%; }}
+
+        .nav-right {{ display: flex; align-items: center; gap: 20px; }}
+        
+        .lang-dropdown {{ position: relative; }}
+        .lang-btn {{ 
+            background: transparent; color: var(--text-muted); border: 1px solid var(--border); 
+            padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; 
+            display: flex; align-items: center; gap: 6px; transition: var(--transition);
+        }}
+        .lang-btn:hover {{ color: white; border-color: var(--text-muted); background: rgba(255,255,255,0.05); }}
+        .lang-menu {{
+            display: none; position: absolute; top: 100%; right: 0; margin-top: 10px;
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+            width: 180px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden;
+            transform-origin: top right; animation: scaleIn 0.2s ease;
+        }}
+        @keyframes scaleIn {{ from {{ opacity: 0; transform: scale(0.9); }} to {{ opacity: 1; transform: scale(1); }} }}
+        .lang-dropdown:hover .lang-menu {{ display: block; }}
+        .lang-item {{
+            display: flex; align-items: center; gap: 10px; padding: 10px 15px; color: var(--text-muted);
+            text-decoration: none; transition: 0.2s; cursor: pointer; font-size: 0.9rem;
+        }}
+        .lang-item:hover {{ background: var(--bg-card-hover); color: white; padding-left: 20px; }}
+        .flag {{ font-size: 1.2rem; }}
+
+        /* Hero */
+        .hero {{ padding: 180px 0 120px; text-align: center; position: relative; overflow: hidden; perspective: 1000px; }}
+        .hero-bg {{
+            position: absolute; width: 120%; height: 120%; top: -10%; left: -10%; z-index: -1;
+            background: radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 60%);
+            transition: transform 0.1s ease-out;
+        }}
+        .hero-content {{ position: relative; z-index: 1; }}
+        .hero h1 {{ font-size: clamp(2.5rem, 6vw, 4.5rem); margin-bottom: 24px; opacity: 0; animation: fadeUp 0.8s ease forwards 0.2s; }}
+        .hero p {{ font-size: 1.2rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 40px; opacity: 0; animation: fadeUp 0.8s ease forwards 0.4s; }}
+        .hero-btns {{ opacity: 0; animation: fadeUp 0.8s ease forwards 0.6s; display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }}
+
+        /* Features */
+        .section {{ padding: 100px 0; }}
+        .section-header {{ text-align: center; margin-bottom: 60px; max-width: 700px; margin-inline: auto; opacity: 0; transform: translateY(20px); transition: all 0.8s ease; }}
+        .section-header.visible {{ opacity: 1; transform: translateY(0); }}
+        .section-header h2 {{ font-size: 2.5rem; margin-bottom: 16px; }}
+        
+        .grid-3 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }}
+        
+        .feature-card {{
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 40px; border-radius: var(--radius);
+            border: 1px solid var(--border); transition: var(--transition);
+            opacity: 0; transform: translateY(30px);
+            position: relative; overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }}
+        .feature-card::after {{
+            content: ""; position: absolute; inset: 0; border-radius: var(--radius); padding: 2px;
+            background: linear-gradient(45deg, transparent, rgba(99, 102, 241, 0.3), transparent);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
+        }}
+        .feature-card:hover {{ transform: translateY(-10px); border-color: rgba(99, 102, 241, 0.5); box-shadow: 0 20px 40px -10px rgba(99, 102, 241, 0.2); }}
+        
+        .icon-box {{
+            width: 60px; height: 60px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(236, 72, 153, 0.1)); 
+            border-radius: 16px; display: flex; align-items: center; justify-content: center; color: var(--primary);
+            font-size: 1.8rem; margin-bottom: 24px; transition: var(--transition); border: 1px solid rgba(255,255,255,0.05);
+        }}
+        .feature-card:hover .icon-box {{ transform: scale(1.1) rotate(5deg); background: var(--primary); color: white; border-color: var(--primary); }}
+        .feature-card h3 {{ font-size: 1.25rem; margin-bottom: 10px; }}
+        .feature-card p {{ color: var(--text-muted); line-height: 1.6; }}
+
+        /* Process */
+        .process-section {{ background: #0b0f19; position: relative; }}
+        .process-steps {{
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px;
+            position: relative; margin-top: 60px;
+        }}
+        .process-steps::before {{
+            content: ''; position: absolute; top: 40px; left: 50px; right: 50px; height: 2px;
+            background: linear-gradient(90deg, var(--bg-card), var(--primary), var(--bg-card));
+            z-index: 0; opacity: 0.3; width: 0; transition: width 1.5s ease;
+        }}
+        .process-steps.visible::before {{ width: calc(100% - 100px); }}
+        
+        .step-card {{
+            position: relative; z-index: 1; background: var(--bg-card);
+            border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 30px; text-align: center; transition: var(--transition);
+            opacity: 0; transform: translateX(-30px);
+        }}
+        .step-card:hover {{ transform: translateY(-10px) scale(1.05); border-color: var(--primary); box-shadow: 0 10px 30px rgba(99, 102, 241, 0.15); }}
+        .step-icon {{
+            width: 80px; height: 80px; margin: 0 auto 20px; background: var(--bg-body);
+            border: 2px solid var(--border); border-radius: 50%; display: flex;
+            align-items: center; justify-content: center; font-size: 1.8rem;
+            color: var(--primary); position: relative; z-index: 2; transition: var(--transition);
+        }}
+        .step-card:hover .step-icon {{ background: var(--primary); color: white; border-color: var(--primary); transform: rotateY(180deg); }}
+        .step-card:hover .step-icon i {{ transform: rotateY(-180deg); }} 
+        
+        .step-num {{
+            position: absolute; top: -5px; right: -5px; width: 30px; height: 30px;
+            background: var(--accent); color: white; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center; font-weight: bold;
+            border: 4px solid var(--bg-card); box-shadow: 0 5px 15px rgba(236, 72, 153, 0.4);
+        }}
+
+        /* Стили Тарифа */
+        .pro-pricing-card {{
+            display: grid;
+            grid-template-columns: 2fr 1fr; /* 2/3 под фичи, 1/3 под цену */
+            background: var(--bg-card);
+            border: 1px solid var(--primary); /* Сразу выделяем */
+            border-radius: var(--radius);
+            margin: 0 auto;
+            max-width: 900px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px -10px rgba(99, 102, 241, 0.2);
+            opacity: 0; 
+            transform: scale(0.9); /* Для анимации */
+        }}
+        .pro-features {{
+            padding: 50px;
+        }}
+        .pro-features h3 {{
+            font-size: 1.8rem;
+            margin-bottom: 30px;
+            color: white;
+        }}
+        .pro-check-list {{
+            list-style: none;
+            text-align: left;
+        }}
+        .pro-check-list li {{
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }}
+        .pro-check-list li i {{
+            color: var(--accent);
+            font-size: 1.3rem;
+        }}
+        .pro-check-list li span {{
+            color: var(--text-main);
+        }}
+        .pro-check-list li i.fa-bolt {{ 
+            color: #f59e0b; /* yellow */
+        }}
+
+        .pro-price-box {{
+            background: linear-gradient(180deg, rgba(99, 102, 241, 0.05), var(--bg-card));
+            border-left: 1px solid var(--border);
+            padding: 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            text-align: center;
+        }}
+        .pro-price-box .price {{
+            font-size: 3.5rem; /* Крупнее */
+            font-weight: 800;
+            margin-bottom: 10px;
+            color: white; /* Убедимся, что цвет белый */
+        }}
+        .pro-price-box .price span {{
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }}
+        .pro-price-box .price-note {{
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 30px;
+            line-height: 1.4;
+        }}
+        .pro-price-box .btn {{
+            width: 100%; /* Растянуть кнопку */
+        }}
+
+
+        /* FAQ */
+        .faq-container {{ max-width: 800px; margin: 0 auto; }}
+        .faq-item {{
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+            margin-bottom: 15px; overflow: hidden; transition: all 0.3s ease;
+            opacity: 0; transform: translateY(20px);
+        }}
+        .faq-item:hover {{ border-color: var(--primary); }}
+        .faq-question {{
+            padding: 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+            font-weight: 600; font-size: 1.1rem; color: white; transition: background 0.3s;
+        }}
+        .faq-question:hover {{ background: rgba(255,255,255,0.02); }}
+        .faq-question i {{ transition: transform 0.3s ease; color: var(--primary); }}
+        .faq-answer {{
+            max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+            padding: 0 20px; color: var(--text-muted); font-size: 0.95rem; line-height: 1.6;
+        }}
+        .faq-item.active {{ border-color: var(--primary); box-shadow: 0 4px 20px rgba(99, 102, 241, 0.1); }}
+        .faq-item.active .faq-question i {{ transform: rotate(180deg); color: var(--accent); }}
+        .faq-item.active .faq-answer {{ padding-bottom: 20px; max-height: 200px; }}
+
+        /* Contact */
+        .contact-wrap {{ 
+            background: var(--bg-card); padding: 50px; border-radius: var(--radius); 
+            border: 1px solid var(--border); max-width: 600px; margin: 0 auto; 
+            opacity: 0; transform: translateY(50px);
+        }}
+        .form-input {{
+            width: 100%; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+            border-radius: 10px; color: white; margin-bottom: 15px; font-family: var(--font); transition: 0.3s;
+        }}
+        .form-input:focus {{ outline: none; border-color: var(--primary); background: rgba(99, 102, 241, 0.05); transform: scale(1.02); }}
+        .form-input.btn {{
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            box-shadow: 0 4px 20px -5px rgba(99, 102, 241, 0.5);
+            width: 100%;
+        }}
+        
+        input {{
+            width: auto;
+            padding: 0;
+            margin-bottom: 0;
+            border: none;
+            border-radius: 0;
+            background: none;
+            color: inherit;
+        }}
+        /* Восстанавливаем стили для input и textarea в формах */
+        .form-input, .container textarea {{
+            width: 100%; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+            border-radius: 10px; color: white; margin-bottom: 15px; font-family: var(--font); transition: 0.3s;
+        }}
+        .form-input:focus, .container textarea:focus {{ 
+            outline: none; border-color: var(--primary); background: rgba(99, 102, 241, 0.05); 
+        }}
+        .container textarea {{ min-height: 150px; line-height: 1.6; }}
+
+
+        /* === ИЗМЕНЕНИЕ: Стили для модального окна === */
+        .modal-overlay {{
+            display: none; /* Скрыто по умолчанию */
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }}
+        .modal-content {{
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 40px;
+            max-width: 700px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            /* Анимация появления */
+            transform: scale(0.9);
+            opacity: 0;
+            transition: all 0.3s ease;
+        }}
+        .modal-overlay.visible {{
+            display: flex;
+        }}
+        .modal-overlay.visible .modal-content {{
+            transform: scale(1);
+            opacity: 1;
+        }}
+        .modal-close-btn {{
+            position: absolute;
+            top: 15px; right: 20px;
+            font-size: 2rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: var(--transition);
+        }}
+        .modal-close-btn:hover {{
+            color: var(--text-main);
+            transform: rotate(90deg);
+        }}
+        /* Стили для контента внутри окна */
+        .modal-body p {{
+            margin-bottom: 15px;
+            line-height: 1.7;
+        }}
+        .modal-body h1, .modal-body h2, .modal-body h3 {{
+            color: var(--text-main);
+            margin-bottom: 15px;
+        }}
+        .modal-body ul {{
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }}
+        /* === КОНЕЦ СТИЛЕЙ МОДАЛЬНОГО ОКНА === */
+        
+        @keyframes fadeUp {{ from {{ opacity: 0; transform: translateY(30px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+        
+        .visible {{ opacity: 1 !important; transform: none !important; }}
+
+        /* Мобильная навигация */
+        @media (max-width: 1024px) {{ 
+            .process-steps {{ grid-template-columns: repeat(2, 1fr); }} 
+            .process-steps::before {{ display: none; }} 
+        }}
+        @media (max-width: 768px) {{ 
+            .hero h1 {{ font-size: 2.5rem; }} 
+            .process-steps {{ grid-template-columns: 1fr; }} 
+            .nav-right {{ gap: 10px; }} 
+            .nav-inner {{ 
+                flex-wrap: wrap; 
+                height: auto; 
+                padding: 15px 0; 
+            }}
+            .nav-links {{ 
+                order: 3; 
+                width: 100%; 
+                justify-content: center; 
+                margin-top: 15px; 
+                border-top: 1px solid var(--border); 
+                padding-top: 15px; 
+                gap: 20px; 
+            }}
+            .logo {{ order: 1; }}
+            .nav-right {{ order: 2; }}
+            
+            .pro-pricing-card {{
+                grid-template-columns: 1fr; /* Стек */
+            }}
+            .pro-price-box {{
+                border-left: none;
+                border-top: 1px solid var(--border);
+            }}
+            .pro-features {{ padding: 30px; }}
+            .pro-price-box {{ padding: 40px 30px; }}
+            .pro-check-list li {{ font-size: 1rem; }}
+        }}
     </style>
 </head>
 <body>
 
     <nav class="navbar">
         <div class="container nav-inner">
-            <div class="logo"><img src="/static/logo.png" height="40" style="filter:invert(1)"> Restify</div>
-            <div class="auth-btns">
-                <a href="/login" class="btn-sm btn-outline">Вхід (SaaS)</a>
-                <a href="/partner/login" class="btn-sm btn-outline" style="border-color: var(--accent); color: var(--accent);">Вхід (Партнер)</a>
+            <a href="#" class="logo">
+                <img src="/static/logo.png" alt="Restify Logo">
+                Restify
+            </a>
+            
+            <div class="nav-links">
+                <a href="#features" data-i18n="nav_feat">Features</a>
+                <a href="#process" data-i18n="nav_proc">Process</a>
+                <a href="#pricing" data-i18n="nav_price">Pricing</a>
+                <a href="#faq" data-i18n="nav_faq">FAQ</a>
+                <a href="#contact" data-i18n="nav_contact">Contact</a>
+                {custom_button_html}
+            </div>
+
+            <div class="nav-right">
+                <div class="lang-dropdown">
+                    <button class="lang-btn"><span class="flag" id="cur-flag">🇬🇧</span> <span id="cur-lang">EN</span> <i class="fa-solid fa-chevron-down" style="font-size: 0.7rem;"></i></button>
+                    <div class="lang-menu">
+                        <div class="lang-item" onclick="setLang('en')"><span class="flag">🇬🇧</span> English</div>
+                        <div class="lang-item" onclick="setLang('uk')"><span class="flag">🇺🇦</span> Українська</div>
+                        <div class="lang-item" onclick="setLang('ru')"><span class="flag">🇷🇺</span> Русский</div>
+                        <div class="lang-item" onclick="setLang('ro')"><span class="flag">🇷🇴</span> Română</div>
+                        <div class="lang-item" onclick="setLang('fr')"><span class="flag">🇫🇷</span> Français</div>
+                        <div class="lang-item" onclick="setLang('es')"><span class="flag">🇪🇸</span> Español</div>
+                        <div class="lang-item" onclick="setLang('it')"><span class="flag">🇮🇹</span> Italiano</div>
+                    </div>
+                </div>
+                <a href="/login" class="btn btn-outline login-btn" style="padding: 8px 20px; font-size: 0.9rem;" data-i18n="login">Login</a>
             </div>
         </div>
     </nav>
 
-    <div class="container hero">
-        <h1>Оберіть свій формат <br><span class="gradient-text">роботи з доставкою</span></h1>
-        <p class="subtitle">Ми пропонуємо два рішення: повна автоматизація закладу "під ключ" або просто швидкий виклик наших кур'єрів.</p>
-        
-        <div class="split-container">
-            <div class="choice-card">
-                <div class="card-icon"><i class="fa-solid fa-rocket"></i></div>
-                <h3>Власний Сайт + Бот</h3>
-                <p>Повне рішення: свій сайт доставки, Telegram-бот, QR-меню в залі, CRM система та адмін-панель. Ідеально для побудови бренду.</p>
-                <ul class="features">
-                    <li><i class="fa-solid fa-check"></i> Персональний домен та сайт</li>
-                    <li><i class="fa-solid fa-check"></i> Власна база клієнтів</li>
-                    <li><i class="fa-solid fa-check"></i> QR-меню та виклик офіціанта</li>
-                </ul>
-                <a href="/register" class="btn-block">Створити проект (SaaS)</a>
-            </div>
-
-            <div class="choice-card" style="border-color: rgba(236, 72, 153, 0.3);">
-                <div class="card-icon" style="background: rgba(236, 72, 153, 0.1); color: var(--accent);"><i class="fa-solid fa-motorcycle"></i></div>
-                <h3>Тільки Кур'єри</h3>
-                <p>Вам не потрібен сайт? Просто викликайте наших кур'єрів, коли у вас з'являється замовлення. Швидка реєстрація та прозорі тарифи.</p>
-                <ul class="features">
-                    <li><i class="fa-solid fa-check"></i> Виклик кур'єра в 1 клік</li>
-                    <li><i class="fa-solid fa-check"></i> Без абонплати за софт</li>
-                    <li><i class="fa-solid fa-check"></i> Трекінг доставки</li>
-                </ul>
-                <a href="/partner/register" class="btn-block btn-secondary">Стати Партнером</a>
+    <section class="hero">
+        <div class="hero-bg" id="hero-bg"></div>
+        <div class="container hero-content">
+            <h1 data-i18n="title" style="margin-top: 40px;">Your Restaurant in Smartphone <br><span class="gradient-text">Turnkey Automation</span></h1>
+            <p data-i18n="subtitle">Own delivery system, QR-menu for dine-in, and staff management. No commissions. Instant project launch.</p>
+            <div class="hero-btns">
+                <a href="/register" class="btn btn-primary" data-i18n="btn_start">Start Project</a>
+                <a href="#process" class="btn btn-outline" data-i18n="btn_how">How it works?</a>
             </div>
         </div>
-    </div>
+    </section>
 
-    <footer style="text-align:center; padding: 40px; color: #64748b; font-size: 0.9rem;">
-        © 2025 Restify. {custom_button_html}
+    <section id="features" class="section">
+        <div class="container">
+            <div class="section-header">
+                <h2 data-i18n="feat_h">A Complete Ecosystem</h2>
+                <p data-i18n="feat_sub">Four key modules for full automation of your restaurant.</p>
+            </div>
+            <div class="grid-3">
+                <div class="feature-card stagger-card">
+                    <div class="icon-box"><i class="fa-solid fa-store"></i></div>
+                    <h3 data-i18n="f1_t">Multi-Channel Orders</h3>
+                    <p data-i18n="f1_d">Website and Telegram bot for delivery and pickup orders.</p>
+                </div>
+                <div class="feature-card stagger-card">
+                    <div class="icon-box"><i class="fa-solid fa-qrcode"></i></div>
+                    <h3 data-i18n="f2_t">QR-Menu for Dine-In</h3>
+                    <p data-i18n="f2_d">Guest can scan QR, call waiter, ask for bill, or send order to kitchen.</p>
+                </div>
+                <div class="feature-card stagger-card">
+                    <div class="icon-box"><i class="fa-brands fa-telegram"></i></div>
+                    <h3 data-i18n="f3_t">Mobile Hub for Staff</h3>
+                    <p data-i18n="f3_d">Waiters and couriers manage orders directly in their Telegram bot.</p>
+                </div>
+                <div class="feature-card stagger-card">
+                    <div class="icon-box"><i class="fa-solid fa-laptop-code"></i></div>
+                    <h3 data-i18n="f4_t">Powerful Admin Panel</h3>
+                    <p data-i18n="f4_d">Full management of menu, clients (CRM), staff, and site design.</p>
+                </div>
+                <div class="feature-card stagger-card">
+                    <div class="icon-box"><i class="fa-solid fa-users-gear"></i></div>
+                    <h3 data-i18n="f5_t">Flexible Roles & Shifts</h3>
+                    <p data-i18n="f5_d">Assign roles (Courier, Waiter) and track who is on shift.</p>
+                </div>
+                <div class="feature-card stagger-card">
+                    <div class="icon-box"><i class="fa-solid fa-paint-roller"></i></div>
+                    <h3 data-i18n="f6_t">Branding & Customization</h3>
+                    <p data-i18n="f6_d">Change colors, logos, and fonts directly from the admin panel.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="process" class="process-section section">
+        <div class="container">
+            <div class="section-header">
+                <h2 data-i18n="proc_h">Order Process</h2>
+                <p data-i18n="proc_sub">Automated path from guest to staff.</p>
+            </div>
+            <div class="process-steps">
+                <div class="step-card">
+                    <div class="step-icon"><i class="fa-solid fa-mobile-screen"></i></div>
+                    <div class="step-num">1</div>
+                    <h3 data-i18n="s1_t">Choice</h3>
+                    <p data-i18n="s1_d">Guest scans QR or enters bot. Views menu.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-icon"><i class="fa-solid fa-cart-shopping"></i></div>
+                    <div class="step-num">2</div>
+                    <h3 data-i18n="s2_t">Order</h3>
+                    <p data-i18n="s2_d">Places order, selects payment and delivery.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-icon"><i class="fa-solid fa-server"></i></div>
+                    <div class="step-num">3</div>
+                    <h3 data-i18n="s3_t">System</h3>
+                    <p data-i18n="s3_d">Order created in Admin and saved to DB.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-icon"><i class="fa-solid fa-bell"></i></div>
+                    <div class="step-num">4</div>
+                    <h3 data-i18n="s4_t">Notification</h3>
+                    <p data-i18n="s4_d">Staff gets instant Telegram message.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="pricing" class="section">
+        <div class="container">
+            <div class="section-header">
+                <h2 data-i18n="price_h">All-Inclusive Plan</h2>
+                <p data-i18n="price_sub">Get all features for one monthly price.</p>
+            </div>
+            
+            <div class="pro-pricing-card stagger-card">
+                <div class="pro-features">
+                    <h3 data-i18n="p2_t">Pro System</h3>
+                    <ul class="pro-check-list">
+                        <li><i class="fa-solid fa-check"></i> <span data-i18n="p2_1">Telegram Bot + Website</span></li>
+                        <li><i class="fa-solid fa-check"></i> <span data-i18n="p2_2">QR-Menu (In-House)</span></li>
+                        <li><i class="fa-solid fa-check"></i> <span data-i18n="p2_3">Staff & Courier Apps</span></li>
+                        <li><i class="fa-solid fa-check"></i> <span data-i18n="p2_4">Advanced CRM & Stats</span></li>
+                        <li><i class="fa-solid fa-bolt"></i> <span data-i18n="p2_5">Instant project launch</span></li>
+                    </ul>
+                </div>
+                
+                <div class="pro-price-box">
+                    <div class="price">
+                        {config['currency']}{config['price_full']}
+                        <span>/ <span data-i18n="month">month</span></span>
+                    </div>
+                    <p class="price-note" data-i18n="price_note">Price is set in the admin panel</p>
+                    <a href="/register" class="btn btn-primary" data-i18n="btn_ord">Order Pro</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="faq" class="section" style="background: #0b0f19;">
+        <div class="container">
+            <div class="section-header">
+                <h2 data-i18n="faq_h">Common Questions</h2>
+            </div>
+            <div class="faq-container">
+                <div class="faq-item stagger-card">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span data-i18n="faq_q1">Do I need expensive hardware?</span>
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        <p data-i18n="faq_a1">No, the system works on any smartphone or tablet. You don't need to buy expensive POS terminals. Everything is in the cloud.</p>
+                    </div>
+                </div>
+                <div class="faq-item stagger-card">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span data-i18n="faq_q2">How fast is the launch?</span>
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        <p data-i18n="faq_a2">Launch is instant. After registration and filling in the data, your project is immediately ready to work.</p>
+                    </div>
+                </div>
+                <div class="faq-item stagger-card">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span data-i18n="faq_q3">Can I update the menu myself?</span>
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        <p data-i18n="faq_a3">Yes, you get a full Admin Panel where you can change prices, add dishes, and manage staff instantly.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="contact" class="section contact-section">
+        <div class="container">
+            <div class="section-header">
+                <h2 data-i18n="form_h">Discuss Project</h2>
+                <p data-i18n="form_sub">Leave a request, we will contact you.</p>
+            </div>
+            <div class="contact-wrap">
+                <form id="leadForm">
+                    <label style="display:block; margin-bottom:8px; color:var(--text-muted); font-size:0.9rem;" data-i18n="lbl_name">Your Name</label>
+                    <input type="text" name="name" class="form-input" required>
+                    
+                    <label style="display:block; margin-bottom:8px; color:var(--text-muted); font-size:0.9rem;" data-i18n="lbl_phone">Phone / Telegram</label>
+                    <input type="text" name="phone" class="form-input" required>
+                    
+                    <label style="display:block; margin-bottom:8px; color:var(--text-muted); font-size:0.9rem;" data-i18n="lbl_int">Interest</label>
+                    <select name="interest" class="form-input" style="background: var(--bg-body);">
+                        <option value="Pro">Pro System</option>
+                        <option value="Consultation">Consultation</option>
+                    </select>
+                    
+                    <button type="submit" class="btn btn-primary form-input" data-i18n="btn_send">Send Request</button>
+                    <div id="leadResponse" style="text-align: center; margin-top: 15px;"></div>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <footer style="text-align: center; padding: 40px 0; color: var(--text-muted); border-top: 1px solid var(--border); margin-top: 50px;">
+        <p>&copy; 2025 Restify. <span data-i18n="foot">IT Solutions for HoReCa.</span></p>
     </footer>
 
     <div id="customModal" class="modal-overlay">
         <div class="modal-content">
-            <span class="close-btn" onclick="document.getElementById('customModal').classList.remove('visible')">×</span>
-            <div class="modal-body">{modal_content_html}</div>
+            <span id="custom-modal-close-btn" class="modal-close-btn">&times;</span>
+            <div class="modal-body">
+                {modal_content_html}
+            </div>
         </div>
     </div>
-
     <script>
-        const btn = document.getElementById('custom-modal-btn');
-        if(btn) btn.onclick = (e) => {{ e.preventDefault(); document.getElementById('customModal').classList.add('visible'); }};
+        // === ИЗМЕНЕНИЕ: Обновлен блок i18n ===
+        const flags = {{
+            en: "🇬🇧", uk: "🇺🇦", ru: "🇷🇺", ro: "🇷🇴", 
+            fr: "🇫🇷", es: "🇪🇸", it: "🇮🇹"
+        }};
+        
+        const i18n = {{
+            en: {{
+                nav_feat: "Features", nav_proc: "Process", nav_price: "Pricing", nav_faq: "FAQ", nav_contact: "Contact", login: "Login",
+                title: "Your Restaurant in Smartphone <br><span class='gradient-text'>Turnkey Automation</span>",
+                subtitle: "Own delivery system, QR-menu for dine-in, and staff management. No commissions. Instant project launch.",
+                btn_start: "Start Project", btn_how: "How it works?",
+                feat_h: "A Complete Ecosystem", feat_sub: "Four key modules for full automation of your restaurant.",
+                f1_t: "Multi-Channel Orders", f1_d: "Website and Telegram bot for delivery and pickup orders.",
+                f2_t: "QR-Menu for Dine-In", f2_d: "Guest can scan QR, call waiter, ask for bill, or send order to kitchen.",
+                f3_t: "Mobile Hub for Staff", f3_d: "Waiters and couriers manage orders directly in their Telegram bot.",
+                f4_t: "Powerful Admin Panel", f4_d: "Full management of menu, clients (CRM), staff, and site design.",
+                f5_t: "Flexible Roles & Shifts", f5_d: "Assign roles (Courier, Waiter) and track who is on shift.",
+                f6_t: "Branding & Customization", f6_d: "Change colors, logos, and fonts directly from the admin panel.",
+                proc_h: "Order Process", proc_sub: "Automated path from guest to staff.",
+                s1_t: "Choice", s1_d: "Guest scans QR or enters bot. Views menu.",
+                s2_t: "Order", s2_d: "Places order, selects payment and delivery.",
+                s3_t: "System", s3_d: "Order created in Admin and saved to DB.",
+                s4_t: "Notification", s4_d: "Staff gets instant Telegram message.",
+                price_h: "All-Inclusive Plan", price_sub: "Get all features for one monthly price.",
+                p2_t: "Pro System", p2_1: "Telegram Bot + Website", p2_2: "QR-Menu (In-House)", p2_3: "Staff & Courier Apps", p2_4: "Advanced CRM & Stats", p2_5: "Instant project launch",
+                btn_ord: "Order Pro", month: "month", price_note: "Price is set in the admin panel",
+                faq_h: "Common Questions",
+                faq_q1: "Do I need expensive hardware?", faq_a1: "No, the system works on any smartphone or tablet. You don't need to buy expensive POS terminals. Everything is in the cloud.",
+                faq_q2: "How fast is the launch?", faq_a2: "Launch is instant. After registration and filling in the data, your project is immediately ready to work.",
+                faq_q3: "Can I update the menu myself?", faq_a3: "Yes, you get a full Admin Panel where you can change prices, add dishes, and manage staff instantly.",
+                form_h: "Discuss Project", form_sub: "Leave a request, we will contact you.",
+                lbl_name: "Your Name", lbl_phone: "Phone / Telegram", lbl_int: "Interest", btn_send: "Send Request",
+                foot: "IT Solutions for HoReCa."
+            }},
+            uk: {{
+                nav_feat: "Переваги", nav_proc: "Процес", nav_price: "Тариф", nav_faq: "FAQ", nav_contact: "Контакти", login: "Увійти",
+                title: "Ваш ресторан у смартфоні <br><span class='gradient-text'>Автоматизація під ключ</span>",
+                subtitle: "Власна система доставки, QR-меню для залу та управління персоналом. Без комісій. Миттєвий запуск проекту.",
+                btn_start: "Почати проект", btn_how: "Як це працює?",
+                feat_h: "Повноцінна Екосистема", feat_sub: "Чотири ключові модулі для повної автоматизації вашого ресторану.",
+                f1_t: "Прийом Замовлень", f1_d: "Веб-сайт та Telegram-бот для прийому замовлень на доставку та самовивіз.",
+                f2_t: "QR-Меню в Залі", f2_d: "Гість сканує QR, викликає офіціанта, просить рахунок або сам відправляє замовлення на кухню.",
+                f3_t: "Хаб для Персоналу", f3_d: "Офіціанти та кур'єри керують замовленнями прямо у своєму Telegram-боті.",
+                f4_t: "Потужна Веб-Панель", f4_d: "Повне керування меню, клієнтами (CRM), персоналом та дизайном сайту.",
+                f5_t: "Гнучкі Ролі та Зміни", f5_d: "Призначайте ролі (Кур'єр, Офіціант) та відстежуйте, хто на зміні.",
+                f6_t: "Брендинг та Кастомізація", f6_d: "Змінюйте кольори, логотипи та шрифти прямо з адмін-панелі.",
+                proc_h: "Як відбувається замовлення?", proc_sub: "Автоматизований шлях від гостя до персоналу.",
+                s1_t: "Вибір", s1_d: "Гість сканує QR або заходить у бот. Бачить меню.",
+                s2_t: "Замовлення", s2_d: "Оформляє замовлення, обирає оплату та доставку.",
+                s3_t: "Система", s3_d: "Замовлення створюється в Адмінці та зберігається в базі.",
+                s4_t: "Сповіщення", s4_d: "Персонал отримує миттєве повідомлення в Telegram.",
+                price_h: "Єдиний Тариф", price_sub: "Отримайте всі функції за єдину місячну плату.",
+                p2_t: "Pro System", p2_1: "Telegram Бот + Веб-сайт", p2_2: "QR-Меню (в залі)", p2_3: "Додатки для персоналу", p2_4: "Розширена CRM та статистика", p2_5: "Миттєвий запуск проекту",
+                btn_ord: "Замовити Pro", month: "місяць", price_note: "Вартість налаштовується в адмін-панелі",
+                faq_h: "Часті запитання",
+                faq_q1: "Чи потрібне дороге обладнання?", faq_a1: "Ні, система працює на будь-якому смартфоні чи планшеті. Не потрібно купувати дорогі POS-термінали.",
+                faq_q2: "Як швидко запуск?", faq_a2: "Запуск миттєвий. Після реєстрації та заповнення даних ваш проект одразу готовий до роботи.",
+                faq_q3: "Чи можу я змінювати меню?", faq_a3: "Так, у вас є повна Адмін-панель, де ви можете змінювати ціни, додавати страви та керувати персоналом.",
+                form_h: "Обговорити проект", form_sub: "Залиште заявку, ми зв'яжемося з вами.",
+                lbl_name: "Ваше Ім'я", lbl_phone: "Телефон / Telegram", lbl_int: "Інтерес", btn_send: "Відправити заявку",
+                foot: "IT рішення для HoReCa."
+            }},
+            ru: {{
+                nav_feat: "Возможности", nav_proc: "Процесс", nav_price: "Тариф", nav_faq: "FAQ", nav_contact: "Контакты", login: "Вход",
+                title: "Ваш ресторан в смартфоне <br><span class='gradient-text'>Автоматизация под ключ</span>",
+                subtitle: "Собственная система доставки, QR-меню для зала и управление персоналом. Без комиссий. Моментальный запуск проекта.",
+                btn_start: "Начать проект", btn_how: "Как это работает?",
+                feat_h: "Полноценная Экосистема", feat_sub: "Четыре ключевых модуля для полной автоматизации вашего ресторана.",
+                f1_t: "Прием Заказов", f1_d: "Веб-сайт и Telegram-бот для приема заказов на доставку и самовывоз.",
+                f2_t: "QR-Меню в Зале", f2_d: "Гость сканирует QR, вызывает официанта, просит счет или отправляет заказ на кухню.",
+                f3_t: "Хаб для Персонала", f3_d: "Официанты и курьеры управляют заказами прямо в своем Telegram-боте.",
+                f4_t: "Мощная Админ-Панель", f4_d: "Полное управление меню, клиентами (CRM), персоналом и дизайном сайта.",
+                f5_t: "Гибкие Роли и Смены", f5_d: "Назначайте роли (Курьер, Официант) и отслеживайте, кто на смене.",
+                f6_t: "Брендинг и Настройка", f6_d: "Меняйте цвета, логотипы и шрифты прямо из админ-панели.",
+                proc_h: "Процесс Заказа", proc_sub: "Автоматизированный путь от гостя до персонала.",
+                s1_t: "Выбор", s1_d: "Гость сканирует QR или заходит в бот. Видит меню.",
+                s2_t: "Заказ", s2_d: "Оформляет заказ, выбирает оплату и доставку.",
+                s3_t: "Система", s3_d: "Заказ создается в Админке и сохраняется в базе.",
+                s4_t: "Уведомление", s4_d: "Персонал получает мгновенное сообщение в Telegram.",
+                price_h: "Единый Тариф", price_sub: "Получите все функции за единую месячную плату.",
+                p2_t: "Pro System", p2_1: "Telegram Бот + Веб-сайт", p2_2: "QR-Меню (в зале)", p2_3: "Приложения для персонала", p2_4: "Расширенная CRM и статистика", p2_5: "Моментальный запуск проекта",
+                btn_ord: "Заказать Pro", month: "месяц", price_note: "Стоимость настраивается в админ-панели",
+                faq_h: "Частые Вопросы",
+                faq_q1: "Нужно ли дорогое оборудование?", faq_a1: "Нет, система работает на любом смартфоне или планшете. Не нужно покупать дорогие POS-терминалы. Все в облаке.",
+                faq_q2: "Как быстро происходит запуск?", faq_a2: "Запуск моментальный. После регистрации и заполнения данных ваш проект сразу готов к работе.",
+                faq_q3: "Я могу сам обновлять меню?", faq_a3: "Да, вы получаете полную Админ-панель, где можете мгновенно менять цены, добавлять блюда и управлять персоналом.",
+                form_h: "Обсудить проект", form_sub: "Оставьте заявку, мы свяжемся с вами.",
+                lbl_name: "Ваше Имя", lbl_phone: "Телефон / Telegram", lbl_int: "Интерес", btn_send: "Отправить заявку",
+                foot: "IT-решения для HoReCa."
+            }},
+            ro: {{
+                nav_feat: "Avantaje", nav_proc: "Proces", nav_price: "Preț", nav_faq: "FAQ", nav_contact: "Contact", login: "Intrare",
+                title: "Restaurantul tău în smartphone <br><span class='gradient-text'>Automatizare la cheie</span>",
+                subtitle: "Sistem propriu de livrare, meniu QR și gestionare personal. Fără comisioane. Lansare instantanee a proiectului.",
+                btn_start: "Începe", btn_how: "Cum funcționează?",
+                feat_h: "Ecosistem Complet", feat_sub: "Patru module cheie pentru automatizarea completă.",
+                f1_t: "Comenzi Multi-Canal", f1_d: "Site web și bot Telegram pentru comenzi de livrare și preluare.",
+                f2_t: "Meniu QR", f2_d: "Oaspetele scanează QR, cheamă chelnerul, cere nota sau trimite comanda.",
+                f3_t: "Hub Mobil Personal", f3_d: "Chelnerii și curierii gestionează comenzile direct în Telegram.",
+                f4_t: "Panou Admin Puternic", f4_d: "Management complet al meniului, clienților (CRM), personalului și designului.",
+                f5_t: "Roluri Flexibile", f5_d: "Atribuiți roluri (Curier, Chelner) și urmăriți cine este în tură.",
+                f6_t: "Branding", f6_d: "Schimbați culorile, logo-urile și fonturile din panoul de administrare.",
+                proc_h: "Procesul de comandă", proc_sub: "Automatizat de la oaspete la personal.",
+                s1_t: "Alegere", s1_d: "Oaspetele scanează QR або intră în bot.",
+                s2_t: "Comandă", s2_d: "Face comanda, alege plata.",
+                s3_t: "Sistem", s3_d: "Comanda apare în Admin și bază.",
+                s4_t: "Notificare", s4_d: "Personalul primește mesaj instant.",
+                price_h: "Plan Unic", price_sub: "Obțineți toate funcțiile la un singur preț lunar.",
+                p2_t: "Pro System", p2_1: "Bot Telegram + Site", p2_2: "Meniu QR", p2_3: "Aplicații Personal", p2_4: "CRM Avansat", p2_5: "Lansare instantanee a proiectului",
+                btn_ord: "Comandă Pro", month: "lună", price_note: "Prețul este stabilit în panoul de administrare",
+                faq_h: "Întrebări frecvente",
+                faq_q1: "Trebuie echipament scump?", faq_a1: "Nu, sistemul funcționează pe orice telefon. Nu ai nevoie de terminale POS scumpe.",
+                faq_q2: "Cât durează lansarea?", faq_a2: "Lansarea este instantanee. După înregistrare și completarea datelor, proiectul dvs. este imediat gata de lucru.",
+                faq_q3: "Pot schimba meniul?", faq_a3: "Da, ai panou Admin complet pentru a gestiona prețurile și personalul.",
+                form_h: "Discută proiectul", form_sub: "Lasă o cerere, te contactăm.",
+                lbl_name: "Nume", lbl_phone: "Telefon", lbl_int: "Interes", btn_send: "Trimite",
+                foot: "Soluții IT HoReCa."
+            }},
+            fr: {{
+                nav_feat: "Fonctions", nav_proc: "Processus", nav_price: "Tarif", nav_faq: "FAQ", nav_contact: "Contact", login: "Connexion",
+                title: "Votre Restaurant sur Smartphone <br><span class='gradient-text'>Automatisation</span>",
+                subtitle: "Système de livraison, menu QR et gestion du personnel. Sans commissions. Lancement instantané du projet.",
+                btn_start: "Commencer", btn_how: "Comment ça marche?",
+                feat_h: "Écosystème Complet", feat_sub: "Quatre modules clés pour une automatisation complète.",
+                f1_t: "Commandes Multi-Canaux", f1_d: "Site web et bot Telegram pour les commandes à livrer et à emporter.",
+                f2_t: "Menu QR sur Place", f2_d: "Le client scanne le QR, appelle le serveur, demande l'addition ou envoie la commande.",
+                f3_t: "Hub Mobil pour Staff", f3_d: "Les serveurs et coursiers gèrent les commandes dans Telegram.",
+                f4_t: "Panel Admin Puissant", f4_d: "Gestion complète du menu, des clients (CRM), du personnel et du design.",
+                f5_t: "Rôles & Services Flexibles", f5_d: "Attribuez des rôles (Coursier, Serveur) et suivez qui est en service.",
+                f6_t: "Branding & Personnalisation", f6_d: "Modifiez les couleurs, logos et polices depuis le panel admin.",
+                proc_h: "Processus", proc_sub: "Automatisé.",
+                s1_t: "Choix", s1_d: "Client scanne QR.",
+                s2_t: "Commande", s2_d: "Client valide.",
+                s3_t: "Traitement", s3_d: "Système enregistre.",
+                s4_t: "Notification", s4_d: "Staff informé.",
+                price_h: "Plan Unique", price_sub: "Obtenez toutes les fonctionnalités pour un seul prix mensuel.",
+                p2_t: "Système Pro", p2_1: "Bot + Site Web", p2_2: "Menu QR", p2_3: "Apps Staff", p2_4: "CRM Avancé", p2_5: "Lancement instantané du projet",
+                btn_ord: "Commander", month: "mois", price_note: "Le prix est défini dans le panneau d'administration",
+                faq_h: "FAQ",
+                faq_q1: "Matériel coûteux ?", faq_a1: "Non, tout smartphone.",
+                faq_q2: "Délai ?", faq_a2: "Le lancement est instantané. Après l'inscription et la saisie des données, votre projet est immédiatement prêt à fonctionner.",
+                faq_q3: "Modifier menu ?", faq_a3: "Oui, via Admin.",
+                form_h: "Contactez-nous", form_sub: "Envoyez une demande.",
+                lbl_name: "Nom", lbl_phone: "Téléphone", lbl_int: "Intérêt", btn_send: "Envoyer",
+                foot: "Solutions HoReCa."
+            }},
+            es: {{
+                nav_feat: "Funciones", nav_proc: "Proceso", nav_price: "Precio", nav_faq: "FAQ", nav_contact: "Contacto", login: "Entrar",
+                title: "Tu Restaurante en Smartphone <br><span class='gradient-text'>Automatización</span>",
+                subtitle: "Sistema de entrega, menú QR y gestión de personal. Sin comisiones. Lanzamiento instantáneo del proyecto.",
+                btn_start: "Empezar", btn_how: "¿Cómo funciona?",
+                feat_h: "Ecosistema Completo", feat_sub: "Cuatro módulos clave para la automatización total.",
+                f1_t: "Pedidos Multicanal", f1_d: "Sitio web y bot de Telegram para pedidos de entrega y recogida.",
+                f2_t: "Menú QR en Local", f2_d: "El cliente escanea QR, llama al camarero, pide la cuenta o envía el pedido.",
+                f3_t: "Hub Móvil Personal", f3_d: "Camareros y repartidores gestionan pedidos en Telegram.",
+                f4_t: "Potente Panel Admin", f4_d: "Gestión total de menú, clientes (CRM), personal y diseño.",
+                f5_t: "Roles y Turnos Flexibles", f5_d: "Asigna roles (Repartidor, Camarero) y sigue quién está de turno.",
+                f6_t: "Branding", f6_d: "Cambia colores, logos y fuentes desde el panel de admin.",
+                proc_h: "Proceso", proc_sub: "Automatizado.",
+                s1_t: "Elección", s1_d: "Cliente escanea QR.",
+                s2_t: "Pedido", s2_d: "Cliente confirma.",
+                s3_t: "Procesamiento", s3_d: "Sistema guarda.",
+                s4_t: "Notificación", s4_d: "Personal informado.",
+                price_h: "Plan Único", price_sub: "Obtenga todas las funciones por un único precio mensual.",
+                p2_t: "Sistema Pro", p2_1: "Bot + Web", p2_2: "Menú QR", p2_3: "Apps Personal", p2_4: "CRM Avanzado", p2_5: "Lanzamiento instantáneo del proyecto",
+                btn_ord: "Pedir", month: "mes", price_note: "El precio se establece en el panel de administración",
+                faq_h: "Preguntas",
+                faq_q1: "¿Hardware caro?", faq_a1: "No, cualquier móvil.",
+                faq_q2: "¿Tiempo?", faq_a2: "El lanzamiento es instantáneo. Después de registrarse e ingresar los datos, su proyecto está listo para funcionar de inmediato.",
+                faq_q3: "¿Editar menú?", faq_a3: "Sí, panel completo.",
+                form_h: "Hablemos", form_sub: "Envía solicitud.",
+                lbl_name: "Nombre", lbl_phone: "Teléfono", lbl_int: "Interés", btn_send: "Enviar",
+                foot: "Soluciones HoReCa."
+            }},
+            it: {{
+                nav_feat: "Funzioni", nav_proc: "Processo", nav_price: "Prezzo", nav_faq: "FAQ", nav_contact: "Contatto", login: "Entra",
+                title: "Il tuo Ristorante su Smartphone <br><span class='gradient-text'>Automazione</span>",
+                subtitle: "Sistema di consegna, menu QR e gestione del personale. Senza commissioni. Avvio immediato del progetto.",
+                btn_start: "Inizia", btn_how: "Come funziona?",
+                feat_h: "Ecosistema Completo", feat_sub: "Quattro moduli chiave per l'automazione completa.",
+                f1_t: "Ordini Multicanale", f1_d: "Sito web e bot Telegram per ordini di consegna e ritiro.",
+                f2_t: "Menu QR", f2_d: "Il cliente scansiona QR, chiama il cameriere, chiede il conto o invia l'ordine.",
+                f3_t: "Hub Mobile Staff", f3_d: "Camerieri e rider gestiscono gli ordini su Telegram.",
+                f4_t: "Pannello Admin", f4_d: "Gestione completa di menu, clienti (CRM), staff e design.",
+                f5_t: "Ruoli e Turni Flessibili", f5_d: "Assegna ruoli (Rider, Cameriere) e traccia chi è in turno.",
+                f6_t: "Branding", f6_d: "Modifica colori, loghi e font dal pannello di amministrazione.",
+                proc_h: "Processo", proc_sub: "Automatizzato.",
+                s1_t: "Scelta", s1_d: "Cliente scansiona QR.",
+                s2_t: "Ordine", s2_d: "Cliente conferma.",
+                s3_t: "Elaborazione", s3_d: "Sistema salva.",
+                s4_t: "Notifica", s4_d: "Staff informato.",
+                price_h: "Piano Unico", price_sub: "Ottieni tutte le funzionalità a un unico prezzo mensile.",
+                p2_t: "Sistema Pro", p2_1: "Bot + Sito", p2_2: "Menu QR", p2_3: "App Staff", p2_4: "CRM Avanzato", p2_5: "Avvio immediato del progetto",
+                btn_ord: "Ordinare", month: "mese", price_note: "Il prezzo è impostato nel pannello di amministrazione",
+                faq_h: "Domande",
+                faq_q1: "Hardware costoso?", faq_a1: "No, qualsiasi smartphone.",
+                faq_q2: "Tempo?", faq_a2: "L'avvio è immediato. Dopo la registrazione e l'inserimento dei dati, il tuo progetto è subito pronto per funzionare.",
+                faq_q3: "Modificare menu?", faq_a3: "Sì, pannello admin.",
+                form_h: "Parliamone", form_sub: "Invia richiesta.",
+                lbl_name: "Nome", lbl_phone: "Telefono", lbl_int: "Interesse", btn_send: "Inviare",
+                foot: "Soluzioni HoReCa."
+            }}
+        }};
+        // === КОНЕЦ БЛОКА i18n ===
+
+        function setLang(lang) {{
+            localStorage.setItem('restify_lang', lang);
+            document.getElementById('cur-lang').innerText = lang.toUpperCase();
+            document.getElementById('cur-flag').innerText = flags[lang];
+            const t = i18n[lang] || i18n.en;
+            for (const key in t) {{
+                const el = document.querySelector(`[data-i18n="${{key}}"]`);
+                if (el) el.innerHTML = t[key];
+            }}
+        }}
+        const savedLang = localStorage.getItem('restify_lang') || 'ru'; // По умолчанию русский
+        setLang(savedLang);
+
+        const observerOptions = {{ threshold: 0.1 }}; 
+        const observer = new IntersectionObserver((entries) => {{
+            entries.forEach(entry => {{
+                if (entry.isIntersecting) {{
+                    entry.target.classList.add('visible');
+                    if (entry.target.classList.contains('process-steps')) {{
+                        const steps = entry.target.querySelectorAll('.step-card');
+                        steps.forEach((step, index) => {{
+                            setTimeout(() => {{ step.classList.add('visible'); }}, index * 200);
+                        }});
+                    }}
+                    
+                    if (entry.target.classList.contains('grid-3') || entry.target.classList.contains('faq-container') || entry.target.classList.contains('pro-pricing-card')) {{
+                        const cards = entry.target.querySelectorAll('.stagger-card, .faq-item');
+                        if (cards.length > 0) {{
+                             cards.forEach((card, index) => {{
+                                setTimeout(() => {{ card.classList.add('visible'); }}, index * 150);
+                            }});
+                        }} else {{
+                            // Для одиночной карты тарифа
+                            entry.target.classList.add('visible');
+                        }}
+                    }}
+                }}
+            }});
+        }}, observerOptions);
+
+        document.querySelectorAll('.section-header, .contact-wrap, .process-steps, .grid-3, .faq-container, .pro-pricing-card').forEach(el => observer.observe(el));
+        
+        document.addEventListener('mousemove', (e) => {{
+            const x = (window.innerWidth - e.pageX) / 50;
+            const y = (window.innerHeight - e.pageY) / 50;
+            const bg = document.getElementById('hero-bg');
+            if(bg) bg.style.transform = `translate(${{x}}px, ${{y}}px)`;
+        }});
+        document.querySelectorAll('.feature-card').forEach(card => {{
+            card.addEventListener('mousemove', e => {{
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                card.style.setProperty('--x', `${{x}}px`);
+                card.style.setProperty('--y', `${{y}}px`);
+            }});
+        }});
+        
+        document.querySelectorAll('.tilt-card').forEach(card => {{
+            card.addEventListener('mousemove', e => {{
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const centerX = rect.width / 2;
+                const centerY = rect.height / 2;
+                const rotateX = ((y - centerY) / centerY) * -5;
+                const rotateY = ((x - centerX) / centerX) * 5;
+                card.style.transform = `perspective(1000px) rotateX(${{rotateX}}deg) rotateY(${{rotateY}}deg) scale(1.05)`;
+            }});
+            card.addEventListener('mouseleave', () => {{
+                card.style.transform = `perspective(1000px) rotateX(0) rotateY(0) scale(1)`;
+            }});
+        }});
+
+        function toggleFaq(element) {{
+            const item = element.parentElement;
+            item.classList.toggle('active');
+        }}
+
+        document.getElementById('leadForm').addEventListener('submit', async (e) => {{
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const oldText = btn.innerText;
+            const responseEl = document.getElementById('leadResponse');
+            btn.innerText = '...'; btn.disabled = true;
+            responseEl.style.color = 'var(--text-muted)';
+            responseEl.innerText = 'Отправка...';
+            const formData = new FormData(e.target);
+            try {{
+                const response = await fetch('/api/lead', {{ method: 'POST', body: formData }});
+                if (response.ok) {{
+                    responseEl.style.color = 'var(--accent)';
+                    responseEl.innerText = 'Успешно! Мы скоро свяжемся с вами.';
+                    e.target.reset();
+                }} else {{
+                    throw new Error('Server error');
+                }}
+            }} catch(e) {{ 
+                responseEl.style.color = '#f87171';
+                responseEl.innerText = 'Ошибка. Попробуйте позже.';
+            }}
+            btn.innerText = oldText; btn.disabled = false;
+        }});
+        
+        // === ИЗМЕНЕНИЕ: JS для модального окна ===
+        const modalBtn = document.getElementById('custom-modal-btn');
+        const modal = document.getElementById('customModal');
+        const closeModalBtn = document.getElementById('custom-modal-close-btn');
+
+        if (modalBtn && modal && closeModalBtn) {{
+            // Открыть окно по клику на кнопку в меню
+            modalBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                modal.classList.add('visible');
+            }});
+            
+            // Закрыть окно по клику на "крестик"
+            closeModalBtn.addEventListener('click', () => {{
+                modal.classList.remove('visible');
+            }});
+            
+            // Закрыть окно по клику на темный фон
+            modal.addEventListener('click', (e) => {{
+                if (e.target === modal) {{
+                    modal.classList.remove('visible');
+                }}
+            }});
+        }}
+        // === КОНЕЦ JS ===
     </script>
 </body>
 </html>

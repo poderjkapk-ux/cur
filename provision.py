@@ -1,8 +1,7 @@
 import os
 import secrets
 import logging
-import subprocess
-import json
+import subprocess # Используем subprocess вместо os.system для лучшего контроля
 
 # Настраиваем логирование
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -30,7 +29,10 @@ def run_system_command(command_args, is_sql=False, check_stdout=False):
              # Это особый случай для psql, передаем пароль через окружение
              env["PGPASSWORD"] = SAAS_ADMIN_PASSWORD
 
-        # subprocess.Popen с shell=False для безопасного выполнения списка аргументов
+        # =================================================================
+        # ИСПРАВЛЕНИЕ: Убрано shell=True. Теперь Popen
+        # корректно обработает список command_args в Linux.
+        # =================================================================
         process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False, env=env)
         stdout, stderr = process.communicate(timeout=60) # 60 секунд на команду
         
@@ -54,7 +56,7 @@ def run_system_command(command_args, is_sql=False, check_stdout=False):
         logging.error(f"Исключение при выполнении команды: {e}")
         return False
 
-# --- Функция создания ---
+# --- Функция создания (без изменений, кроме тех, что в run_system_command) ---
 def create_new_client_instance(client_name_base, root_domain, client_bot_token, admin_bot_token, admin_chat_id):
     """
     Полный цикл развертывания нового клиента.
@@ -107,12 +109,6 @@ def create_new_client_instance(client_name_base, root_domain, client_bot_token, 
         "-e", "ADMIN_USER=admin",
         "-e", f"ADMIN_PASS={admin_pass}",
         "--network", "saas_network",
-        
-        # --- ПОДКЛЮЧЕНИЕ ТОМОВ (Сохраняем файлы) ---
-        "-v", f"{client_id}_images:/app/static/images",
-        "-v", f"{client_id}_favicons:/app/static/favicons",
-        # -------------------------------------------
-
         "-l", "traefik.enable=true",
         "-l", f"traefik.http.routers.{client_id}.rule=Host(\"{subdomain}\")",
         "-l", f"traefik.http.routers.{client_id}.entrypoints=websecure",
@@ -148,7 +144,6 @@ def delete_client_instance(container_name):
     2. Удаляет контейнер
     3. Удаляет базу данных
     4. Удаляет пользователя базы данных
-    5. Удаляет тома с файлами
     """
     if not container_name or not container_name.endswith("_app"):
         logging.error(f"Неверное имя контейнера для удаления: {container_name}")
@@ -166,7 +161,7 @@ def delete_client_instance(container_name):
     
     if not run_system_command(["docker", "rm", container_name], check_stdout=True):
         logging.error(f"Критическая ошибка: Не удалось удалить контейнер {container_name}.")
-        return False
+        return False # Не продолжаем, если не смогли удалить контейнер
 
     # 2. Удаление Базы Данных
     if not run_system_command(["docker", "exec", "postgres_db", "psql", "-U", "saas_admin", "-d", "postgres", "-c", f"DROP DATABASE IF EXISTS {db_name}"], is_sql=True):
@@ -178,79 +173,5 @@ def delete_client_instance(container_name):
         logging.error(f"Не удалось удалить пользователя {db_user}.")
         return False
 
-    # 4. Удаление томов с картинками
-    run_system_command(["docker", "volume", "rm", f"{client_id}_images"])
-    run_system_command(["docker", "volume", "rm", f"{client_id}_favicons"])
-
     logging.info(f"Клиент {client_id} успешно и полностью удален.")
     return True
-
-# --- ФУНКЦИЯ ДЛЯ ОБНОВЛЕНИЯ КОДА ---
-def recreate_container_with_new_code(container_name):
-    """
-    1. Читает настройки текущего контейнера (Env vars, Labels).
-    2. Удаляет старый контейнер.
-    3. Запускает новый на базе обновленного образа 'crm-template' с подключением томов.
-    """
-    logging.info(f"Начинаем обновление кода для {container_name}...")
-    
-    # Извлекаем ID клиента из имени контейнера (например, client1_app -> client1)
-    client_id = container_name.replace("_app", "")
-
-    try:
-        # 1. Инспекция: Получаем конфигурацию текущего контейнера
-        inspect_cmd = ["docker", "inspect", container_name]
-        inspect_result = subprocess.check_output(inspect_cmd, stderr=subprocess.PIPE)
-        container_data = json.loads(inspect_result)[0]
-        
-        # Извлекаем переменные окружения и метки
-        env_vars = container_data['Config']['Env']
-        labels = container_data['Config']['Labels']
-        
-        logging.info(f"Конфигурация {container_name} считана успешно.")
-
-    except Exception as e:
-        logging.error(f"Ошибка при инспекции контейнера: {e}")
-        return False
-
-    # 2. Остановка и удаление старого
-    try:
-        run_system_command(["docker", "stop", container_name])
-        run_system_command(["docker", "rm", container_name])
-    except Exception as e:
-        logging.error(f"Ошибка при удалении старого контейнера: {e}")
-        return False
-
-    # 3. Формирование команды запуска
-    # Базовая команда
-    new_run_cmd = [
-        "docker", "run", "-d", 
-        "--name", container_name,
-        "--network", "saas_network",
-        "--restart", "always",
-        
-        # --- ПОДКЛЮЧЕНИЕ ТОМОВ (Чтобы файлы вернулись) ---
-        "-v", f"{client_id}_images:/app/static/images",
-        "-v", f"{client_id}_favicons:/app/static/favicons"
-        # -------------------------------------------------
-    ]
-
-    # Добавляем переменные окружения
-    for env in env_vars:
-        if not env.startswith("PATH=") and not env.startswith("HOSTNAME="):
-            new_run_cmd.extend(["-e", env])
-
-    # Добавляем метки Traefik
-    for key, value in labels.items():
-        new_run_cmd.extend(["-l", f"{key}={value}"])
-
-    # Указываем образ
-    new_run_cmd.append("crm-template")
-
-    # 4. Запуск
-    if run_system_command(new_run_cmd, check_stdout=True):
-        logging.info(f"Контейнер {container_name} успешно обновлен до новой версии.")
-        return True
-    else:
-        logging.error(f"Не удалось запустить новый контейнер {container_name}.")
-        return False
