@@ -1,34 +1,37 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Float, Boolean
 from sqlalchemy.orm import sessionmaker, relationship, DeclarativeBase
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-# --- 1. Настройка подключения к ГЛАВНОЙ БД (main_saas_db) ---
+# --- 1. Налаштування підключення до ГОЛОВНОЇ БД (main_saas_db) ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL не установлен для сайта-витрины (Lander)!")
+    # Тимчасова заглушка для локальних тестів, якщо змінна не задана
+    print("УВАГА: DATABASE_URL не знайдено. Переконайтеся, що змінні оточення задані.")
 
 try:
-    engine = create_async_engine(DATABASE_URL)
+    # Створюємо асинхронний двигун
+    engine = create_async_engine(DATABASE_URL, echo=False)
+    # Створюємо фабрику сесій
     async_session_maker = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
 except Exception as e:
-    print(f"Ошибка подключения к БД: {e}")
-    exit()
+    print(f"Помилка підключення до БД: {e}")
 
 
 class Base(DeclarativeBase):
     pass
 
-# --- 2. Модели данных ---
+# --- 2. Моделі даних ---
 
 class User(Base):
     """
-    Модель Клиента (Владельца), который регистрируется на сайте-витрине.
+    Модель Клієнта (Власника ресторану), який реєструється на сайті-вітрині.
+    Використовує SaaS рішення (свій сайт + бот).
     """
     __tablename__ = "users"
     
@@ -37,47 +40,157 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # --- ИЗМЕНЕНИЕ: Один пользователь -> Много экземпляров ---
-    # `uselist=False` удалено. Теперь это список.
+    # Один користувач -> Багато екземплярів (проектів)
     instances = relationship("Instance", back_populates="user", cascade="all, delete-orphan")
 
 class Instance(Base):
     """
-    Модель Экземпляра (Сайта), который принадлежит клиенту.
+    Модель Екземпляра (Сайту), який належить клієнту.
     """
     __tablename__ = "instances"
     
     id = Column(Integer, primary_key=True)
     
-    # --- ИЗМЕНЕНИЕ: `unique=True` удалено ---
-    # Один пользователь может иметь много ID здесь.
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=False) 
     
     subdomain = Column(String(100), nullable=False, unique=True)
-    
-    # Поле URL, которое мы добавили в прошлый раз
     url = Column(String(255), nullable=True) 
     
     container_name = Column(String(100), nullable=False, unique=True)
-    admin_pass = Column(String(100), nullable=False) # Пароль для админки CRM (чтобы клиент мог его посмотреть)
+    admin_pass = Column(String(100), nullable=False) # Пароль для адмінки CRM
     
     status = Column(String(50), default="active") # active, suspended, cancelled
     next_payment_due = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # --- ИЗМЕНЕНИЕ: `back_populates` указывает на `instances` (множественное число) ---
     user = relationship("User", back_populates="instances")
 
+class Courier(Base):
+    """
+    Модель Кур'єра (для Uber-like системи).
+    Реєструються через PWA або Telegram-бот.
+    """
+    __tablename__ = "couriers"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    
+    # Вхід за номером телефону
+    phone = Column(String(50), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    
+    # ID чату в Telegram для сповіщень
+    telegram_chat_id = Column(String(50), nullable=True, unique=True)
 
-# --- 3. Функции для работы с БД ---
+    # --- НОВЕ ПОЛЕ ДЛЯ PUSH-СПОВІЩЕНЬ (FIREBASE) ---
+    fcm_token = Column(String(255), nullable=True)
+    # --------------------------------------------------
+
+    # Статуси
+    is_active = Column(Boolean, default=True)      # Чи може взагалі працювати (чи не забанений)
+    is_online = Column(Boolean, default=False)     # Чи вийшов на зміну
+    
+    # Геопозиціонування
+    lat = Column(Float, nullable=True)             # Широта
+    lon = Column(Float, nullable=True)             # Довгота
+    last_seen = Column(DateTime, default=datetime.utcnow) 
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class DeliveryPartner(Base):
+    """
+    Модель Партнера (Ресторан), який викликає кур'єрів.
+    """
+    __tablename__ = "delivery_partners"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False) # Назва закладу
+    email = Column(String(100), unique=True, index=True, nullable=False)
+    phone = Column(String(50), nullable=False)
+    address = Column(String(255), nullable=False) 
+    hashed_password = Column(String(255), nullable=False)
+    
+    # ID чату в Telegram для сповіщень
+    telegram_chat_id = Column(String(50), nullable=True, unique=True)
+
+    is_active = Column(Boolean, default=True) 
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Видалення пов'язаних замовлень при видаленні партнера
+    jobs = relationship("DeliveryJob", back_populates="partner", cascade="all, delete-orphan")
+
+class DeliveryJob(Base):
+    """
+    Замовлення на доставку від Партнера для глобальних кур'єрів.
+    """
+    __tablename__ = "delivery_jobs"
+    
+    id = Column(Integer, primary_key=True)
+    partner_id = Column(Integer, ForeignKey("delivery_partners.id"), nullable=False)
+    
+    # Деталі доставки
+    customer_phone = Column(String(50), nullable=False)
+    customer_name = Column(String(100), nullable=True)
+    dropoff_address = Column(String(255), nullable=False)
+    
+    # Координати доставки
+    dropoff_lat = Column(Float, nullable=True) 
+    dropoff_lon = Column(Float, nullable=True)
+
+    order_price = Column(Float, default=0.0) 
+    delivery_fee = Column(Float, default=0.0) 
+    comment = Column(String(255), nullable=True)
+
+    # --- ОПЛАТА ---
+    # prepaid (вже оплачено), cash (клієнт платить кур'єру), buyout (кур'єр викуповує замовлення)
+    payment_type = Column(String(50), default="prepaid") 
+    
+    # Статус: pending, assigned, ready, picked_up, delivered, cancelled
+    status = Column(String(20), default="pending")
+    
+    # Прив'язка кур'єра
+    courier_id = Column(Integer, ForeignKey("couriers.id"), nullable=True)
+    
+    # --- ЧАСОВІ МІТКИ (TIMESTAMPS) ---
+    created_at = Column(DateTime, default=datetime.utcnow)
+    accepted_at = Column(DateTime, nullable=True)  # Коли кур'єр прийняв
+    ready_at = Column(DateTime, nullable=True)     # Коли замовлення готове
+    picked_up_at = Column(DateTime, nullable=True) # Коли забрав
+    delivered_at = Column(DateTime, nullable=True) # Коли доставив
+    
+    # --- РЕЙТИНГ ---
+    courier_rating = Column(Integer, nullable=True) # 1-5 зірок
+    courier_review = Column(String(500), nullable=True) # Текст відгуку
+    
+    partner = relationship("DeliveryPartner", back_populates="jobs")
+    courier = relationship("Courier")
+
+class PendingVerification(Base):
+    """
+    Тимчасова таблиця для зв'язування сесії браузера з Telegram.
+    Використовується при реєстрації через Deep Linking.
+    """
+    __tablename__ = "pending_verifications"
+    
+    token = Column(String(100), primary_key=True) # Унікальний UUID з посилання
+    status = Column(String(50), default="waiting_contact") # waiting_contact, verified
+    
+    phone = Column(String(50), nullable=True)       # Номер, який надіслав юзер в бот
+    telegram_chat_id = Column(String(50), nullable=True) # ID чату юзера
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# --- 3. Функції для роботи з БД ---
 
 async def create_db_tables():
-    """Создает все таблицы в БД (если их нет)."""
+    """Створює всі таблиці в БД (якщо їх немає)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 async def get_db():
-    """Зависимость (Dependency) для FastAPI для получения сессии БД."""
+    """Залежність (Dependency) для FastAPI для отримання сесії БД."""
     async with async_session_maker() as session:
         try:
             yield session

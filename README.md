@@ -20,8 +20,9 @@
   -e DATABASE_URL="postgresql+asyncpg://saas_admin:[PgS3rv!_2025_#saa]@postgres_db:5432/main_saas_db" \
   \
   # --- 4. Переменные для Telegram-уведомлений (О НОВЫХ КЛИЕНТАХ) ---
-  -e TG_BOT_TOKEN="[ТОКЕН_ВАШЕГО_БОТА_УВЕДОМЛЕНИЙ]" \
-  -e TG_CHAT_ID="[ВАШ_АДМИН_ID_ДЛЯ_УВЕДОМЛЕНИЙ]" \
+  -e TG_BOT_TOKEN="[8529997696:AAE3ae_ml24qEElHt-qo0TF80yqPGem9eh0]" \
+  -e TG_CHAT_ID="[-5064990818]" \
+  -e BOT_USERNAME="Landerrestify_bot" \
   \
   # --- 5. Подключение к Docker (ОБЯЗАТЕЛЬНО!) ---
   # Позволяет этому контейнеру выполнять команды 'docker exec' и 'docker run'
