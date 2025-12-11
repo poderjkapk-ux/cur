@@ -300,7 +300,7 @@ def get_courier_pwa_html(courier: Courier):
             </button>
         </div>
 
-        <div id="offline-msg" style="display: { 'none' if courier.is_online else 'flex' }; position: absolute; inset:0; background:rgba(15,23,42,0.8); z-index: 50; align-items:center; justify-content:center; flex-direction:column; backdrop-filter:blur(3px);">
+        <div id="offline-msg" style="display: {{ 'none' if courier.is_online else 'flex' }}; position: absolute; inset:0; background:rgba(15,23,42,0.8); z-index: 50; align-items:center; justify-content:center; flex-direction:column; backdrop-filter:blur(3px);">
             <h2>Ви зараз офлайн</h2>
             <button class="btn" style="width:200px" onclick="toggleShift()">Вийти на лінію</button>
         </div>
@@ -350,7 +350,7 @@ def get_courier_pwa_html(courier: Courier):
              <div style="background:white; color:black; padding:30px; border-radius:20px; width:85%; max-width:350px; text-align:center;">
                 <h2 style="margin-top:0;">🔥 Нове замовлення!</h2>
                 <div style="font-size:2.5rem; font-weight:800; color:var(--primary);" id="modal-fee">50 ₴</div>
-                <div id="modal-route" style="color:#555; margin:15px 0; text-align: left;"></div>
+                <div id="modal-route" style="color:#555; margin:15px 0;"></div>
                 <input type="hidden" id="modal-job-id">
                 <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
                 <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline;">Закрити</button>
@@ -531,20 +531,42 @@ def get_courier_pwa_html(courier: Courier):
                 if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 
                 document.getElementById('modal-fee').innerText = data.fee + ' ₴';
-                // --- МОДИФИКАЦИЯ: Добавляем больше информации в модал ---
+                
+                // --- ОБНОВЛЕННЫЙ HTML МОДАЛЬНОГО ОКНА (С ДИСТАНЦИЕЙ) ---
                 document.getElementById('modal-route').innerHTML = `
-                    <div style="font-weight: 700; color: #1e293b; margin-bottom: 5px;">Замовлення #${{data.id}}</div>
-                    <div style="font-size: 0.9rem; color: #334155; margin-bottom: 5px;">
-                        <i class="fa-solid fa-store" style="color: #6366f1;"></i> <b>${{data.restaurant}}</b>
-                    </div>
-                    <div style="font-size: 0.8rem; color: #555;">
-                        <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${{data.restaurant_address}} ➝ ${{data.address}}
-                    </div>
-                    <div style="font-size: 1.2rem; font-weight: 600; color: #334155; margin-top: 10px;">
-                         Чек клієнта: ${{data.price}} ₴
+                    <div style="text-align:left; margin-top:10px;">
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                            <div style="background:#eff6ff; color:#3b82f6; padding:8px; border-radius:8px; font-weight:bold; min-width:60px; text-align:center;">
+                                ${{data.dist_to_rest}} км
+                            </div>
+                            <div>
+                                <div style="font-size:0.8rem; color:#64748b;">До ресторану</div>
+                                <div style="font-weight:600; color:#0f172a;">${{data.restaurant}}</div>
+                                <div style="font-size:0.75rem; color:#94a3b8;">${{data.restaurant_address}}</div>
+                            </div>
+                        </div>
+
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <div style="background:#f0fdf4; color:#22c55e; padding:8px; border-radius:8px; font-weight:bold; min-width:60px; text-align:center;">
+                                ${{data.dist_rest_to_client}} км
+                            </div>
+                            <div>
+                                <div style="font-size:0.8rem; color:#64748b;">До клієнта</div>
+                                <div style="font-weight:600; color:#0f172a;">Клієнт</div>
+                                <div style="font-size:0.75rem; color:#94a3b8;">${{data.address}}</div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top:15px; border-top:1px solid #e2e8f0; padding-top:10px;">
+                            <div style="display:flex; justify-content:space-between; font-weight:700; color:#334155;">
+                                <span>До сплати (Чек):</span>
+                                <span>${{data.price}} ₴</span>
+                            </div>
+                        </div>
                     </div>
                 `;
-                // --------------------------------------------------------
+                // ----------------------------------------
+                
                 document.getElementById('modal-job-id').value = data.id;
                 document.getElementById('orderModal').style.display = 'flex';
             }}
