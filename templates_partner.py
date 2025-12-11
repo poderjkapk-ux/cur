@@ -135,7 +135,7 @@ def get_partner_auth_html(is_register=False, message=""):
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
-    Оновлений дашборд партнера з вибором оплати, скасуванням та рейтингом.
+    Оновлений дашборд партнера з вибором оплати, скасуванням, рейтингом та кнопкою 'Готово'.
     """
     
     # Розділяємо активні та завершені замовлення
@@ -152,10 +152,24 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         status_color = "#ccc"
         status_text = j.status
         
-        if j.status == 'assigned' or j.status == 'picked_up':
+        if j.status == 'assigned' or j.status == 'picked_up' or j.status == 'ready':
             track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
-            status_color = "#fef08a" if j.status == 'assigned' else "#bfdbfe"
+            if j.status == 'assigned': status_color = "#fef08a"
+            elif j.status == 'ready': status_color = "#86efac"
+            elif j.status == 'picked_up': status_color = "#bfdbfe"
         
+        # --- КНОПКА ГОТОВО ---
+        ready_btn = ""
+        if j.status in ['pending', 'assigned']:
+            ready_btn = f'''
+            <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
+                <i class="fa-solid fa-utensils"></i>
+            </button>
+            '''
+        elif j.status == 'ready':
+            ready_btn = '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
+        # --------------------
+
         courier_info = f"🚴 ID {j.courier_id}" if j.courier_id else "—"
         
         # Відображення типу оплати
@@ -177,7 +191,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <td><span class="status-badge" style="background:{status_color}; padding:3px 8px; border-radius:4px; font-size:0.8rem;">{status_text}</span></td>
             <td class="courier-cell">{courier_info}</td>
             <td>
-                <div style="display:flex; gap:5px;">
+                <div style="display:flex; gap:5px; align-items:center;">
+                    {ready_btn}
                     {track_btn}
                     {cancel_btn}
                 </div>
@@ -454,6 +469,28 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         alert("Помилка: " + data.message);
                     }}
                 }} catch(e) {{ alert("Помилка мережі"); }}
+            }}
+            
+            // --- ЛОГІКА "ГОТОВО" ---
+            async function markReady(jobId) {{
+                if(!confirm("Підтвердити готовність замовлення? Кур'єр отримає сповіщення.")) return;
+                
+                const fd = new FormData();
+                fd.append('job_id', jobId);
+                
+                try {{
+                    const res = await fetch('/api/partner/order_ready', {{ method: 'POST', body: fd }});
+                    const data = await res.json();
+                    
+                    if(data.status === 'ok') {{
+                        showToast("✅ Замовлення позначено готовим!");
+                        setTimeout(() => location.reload(), 1000);
+                    }} else {{
+                        alert(data.message);
+                    }}
+                }} catch(e) {{
+                    alert("Помилка мережі");
+                }}
             }}
 
             // --- ЛОГІКА РЕЙТИНГУ ---

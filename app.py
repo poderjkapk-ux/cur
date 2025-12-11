@@ -124,6 +124,15 @@ class ConnectionManager:
                     logging.error(f"WS Error (Courier {c_id}): {e}")
                     self.disconnect_courier(c_id)
 
+    async def notify_courier(self, courier_id: int, message: dict):
+        """Відправляє повідомлення конкретному кур'єру"""
+        if courier_id in self.active_couriers:
+            try:
+                await self.active_couriers[courier_id].send_json(message)
+            except Exception as e:
+                logging.error(f"WS Error (Courier {courier_id}): {e}")
+                self.disconnect_courier(courier_id)
+
     # --- Методи для ПАРТНЕРІВ (Ресторанів) ---
     async def connect_partner(self, websocket: WebSocket, partner_id: int):
         await websocket.accept()
@@ -1015,6 +1024,53 @@ async def create_partner_order(
         logging.warning("[PUSH] Немає доступних токенів для відправки.")
 
     return RedirectResponse("/partner/dashboard", status_code=303)
+
+# --- НОВЕ API: ПОВІДОМИТИ КУР'ЄРА ПРО ГОТОВНІСТЬ ЗАМОВЛЕННЯ ---
+@app.post("/api/partner/order_ready")
+async def partner_order_ready(
+    job_id: int = Form(...),
+    partner: DeliveryPartner = Depends(get_current_partner),
+    db: AsyncSession = Depends(get_db)
+):
+    job = await db.get(DeliveryJob, job_id)
+    if not job or job.partner_id != partner.id:
+        return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
+
+    # Статус можно менять только если заказ назначен или в ожидании
+    if job.status not in ["assigned", "pending"]:
+         return JSONResponse({"status": "error", "message": "Невірний статус замовлення"}, status_code=400)
+
+    job.status = "ready"
+    job.ready_at = datetime.utcnow()
+    await db.commit()
+
+    # 1. Сповіщення Кур'єра (якщо призначений)
+    if job.courier_id:
+        # WebSocket
+        await manager.notify_courier(job.courier_id, {
+            "type": "job_update",
+            "job_id": job.id,
+            "status": "ready",
+            "message": "🍽️ Замовлення готове! Можна забирати."
+        })
+        
+        # Telegram
+        courier = await db.get(Courier, job.courier_id)
+        if courier and courier.telegram_chat_id:
+            await bot_service.send_telegram_message(
+                courier.telegram_chat_id, 
+                f"✅ <b>Замовлення #{job.id} ГОТОВЕ!</b>\nЗаклад чекає на вас."
+            )
+            
+        # Push (Firebase)
+        if courier and courier.fcm_token:
+             asyncio.create_task(send_push_to_couriers(
+                [courier.fcm_token],
+                "🍳 Замовлення готове!",
+                f"Забирайте замовлення #{job.id} у {partner.name}"
+             ))
+
+    return JSONResponse({"status": "ok", "message": "Статус оновлено: Готово до видачі"})
 
 # --- НОВЕ: СКАСУВАННЯ ЗАМОВЛЕННЯ (Правило 3 хвилин) ---
 @app.post("/api/partner/cancel_order")

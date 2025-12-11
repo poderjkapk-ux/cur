@@ -484,12 +484,20 @@ def get_courier_pwa_html(courier: Courier):
                 socket.onmessage = (e) => {{
                     if (e.data === "pong") return; 
                     const msg = JSON.parse(e.data);
+                    
                     if(msg.type === 'new_order') {{
                         // Проверяем, не показываем ли мы уже этот заказ
                         const currentModalId = document.getElementById('modal-job-id').value;
                         if (currentModalId != msg.data.id) {{
                             showNewOrder(msg.data);
                         }}
+                    }}
+                    // --- ОБРОБКА ОНОВЛЕННЯ СТАТУСУ (ГОТОВО) ---
+                    else if (msg.type === 'job_update') {{
+                        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                        audio.play().catch(e => console.log("Audio play failed"));
+                        if (navigator.vibrate) navigator.vibrate([200]);
+                        checkActiveJob();
                     }}
                 }};
 
@@ -637,12 +645,21 @@ def get_courier_pwa_html(courier: Courier):
                 let destLon = null;
                 let destAddr = "";
 
-                if (currentJob.status === 'assigned') {{
+                if (currentJob.status === 'assigned' || currentJob.status === 'ready') {{
                     // Едем в РЕСТОРАН.
                     destAddr = currentJob.partner_address;
                     
                     steps[0].className = 'step active'; steps[1].className = 'step';
-                    document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
+                    
+                    // --- ЛОГИКА СТАТУСА "ГОТОВО" ---
+                    if (currentJob.status === 'ready') {{
+                         steps[0].style.background = '#4ade80';
+                         document.getElementById('job-status-desc').innerHTML = '<span style="color:#4ade80; font-weight:bold;">🍳 ЗАМОВЛЕННЯ ГОТОВЕ! ЗАХОДЬТЕ.</span>';
+                    }} else {{
+                         steps[0].style.background = '';
+                         document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
+                    }}
+                    
                     document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
                     document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('current-target-name').innerText = currentJob.partner_name;
@@ -661,6 +678,8 @@ def get_courier_pwa_html(courier: Courier):
                     destAddr = currentJob.customer_address;
 
                     steps[0].className = 'step done'; steps[1].className = 'step active';
+                    steps[0].style.background = ''; // Сброс стиля
+
                     document.getElementById('job-status-desc').innerText = 'Везіть до клієнта';
                     document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
                     document.getElementById('current-target-addr').innerText = destAddr;
