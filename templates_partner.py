@@ -17,13 +17,18 @@ def get_partner_auth_html(is_register=False, message=""):
     action = "/partner/register" if is_register else "/partner/login"
     pwa_meta = '<link rel="manifest" href="/partner/manifest.json">'
     
+    # --- НОВОЕ: Подключаем Leaflet CSS ---
+    leaflet_css = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>' if is_register else ""
+    
     verify_script = ""
     verify_style = ""
     verify_block = ""
     phone_input = '<input type="text" name="phone" placeholder="Телефон" required>' 
     submit_attr = ""
+    map_html = ""
+    map_script = ""
 
-    # Если регистрация - добавляем логику верификации
+    # Если регистрация - добавляем логику верификации И КАРТУ
     if is_register:
         verify_style = """
         <style>
@@ -34,6 +39,17 @@ def get_partner_auth_html(is_register=False, message=""):
             .hidden { display: none; }
             .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }
             @keyframes spin { to { transform: rotate(360deg); } }
+
+            /* СТИЛИ ДЛЯ КАРТЫ И ПОИСКА */
+            .autocomplete-wrapper { position: relative; }
+            .autocomplete-results { position: absolute; top: 100%; left: 0; right: 0; background: #1e293b; border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px; max-height: 200px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: left; }
+            .autocomplete-item { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: #cbd5e1; display:flex; flex-direction:column; }
+            .autocomplete-item small { color: #64748b; font-size: 0.8rem; margin-top:2px; }
+            .autocomplete-item:hover { background: var(--primary); color: white; }
+            
+            #picker-map { width: 100%; height: 250px; border-radius: 10px; margin-bottom: 15px; border: 1px solid var(--border); display:none; }
+            #picker-map.visible { display: block; }
+            .map-hint { font-size: 0.8rem; color: #facc15; margin-bottom: 10px; display:none; text-align: left; }
         </style>
         """
         
@@ -58,12 +74,26 @@ def get_partner_auth_html(is_register=False, message=""):
         """
         submit_attr = "disabled"
 
-        # JS скрипт
+        # Блок карты (заменяет обычный input address)
+        map_html = """
+        <div class="autocomplete-wrapper">
+            <input type="text" id="addr_input" name="address" placeholder="Адреса закладу (почніть вводити)" required autocomplete="off">
+            <div id="addr_results" class="autocomplete-results"></div>
+        </div>
+        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті (перетягніть маркер)</div>
+        <div id="picker-map"></div>
+        <input type="hidden" id="form_lat">
+        <input type="hidden" id="form_lon">
+        """
+
+        # JS скрипты (Telegram + Map)
         verify_script = """
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
             let verificationToken = "";
             let pollInterval = null;
             
+            // --- Telegram Verification ---
             async function initVerification() {
                 try {
                     const res = await fetch('/api/auth/init_verification', { method: 'POST' });
@@ -100,6 +130,102 @@ def get_partner_auth_html(is_register=False, message=""):
             }
             
             window.onload = initVerification;
+
+            // --- Map & Autocomplete Logic ---
+            const addrInput = document.getElementById('addr_input');
+            const addrResults = document.getElementById('addr_results');
+            const latInput = document.getElementById('form_lat');
+            const lonInput = document.getElementById('form_lon');
+            const pickerMapDiv = document.getElementById('picker-map');
+            const mapHint = document.getElementById('map-hint');
+            
+            let pickerMap, pickerMarker;
+            let searchTimeout = null;
+
+            function initPickerMap(lat, lon) {
+                if (pickerMap) return;
+                pickerMapDiv.classList.add('visible');
+                mapHint.style.display = 'block';
+                
+                const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52]; // Default Kiev
+                
+                pickerMap = L.map('picker-map').setView(startPos, 13);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(pickerMap);
+                
+                pickerMarker = L.marker(startPos, {draggable: true}).addTo(pickerMap);
+                
+                pickerMarker.on('dragend', function(e) {
+                    const pos = e.target.getLatLng();
+                    if(latInput) latInput.value = pos.lat;
+                    if(lonInput) lonInput.value = pos.lng;
+                });
+                
+                pickerMap.on('click', function(e) {
+                    pickerMarker.setLatLng(e.latlng);
+                    if(latInput) latInput.value = e.latlng.lat;
+                    if(lonInput) lonInput.value = e.latlng.lng;
+                });
+                
+                setTimeout(() => pickerMap.invalidateSize(), 200);
+            }
+
+            if(addrInput) {
+                addrInput.addEventListener('input', function() {
+                    clearTimeout(searchTimeout);
+                    const query = this.value;
+                    
+                    // Show map on first interaction
+                    if (!pickerMap) initPickerMap();
+
+                    if(query.length < 3) { addrResults.style.display = 'none'; return; }
+                    
+                    searchTimeout = setTimeout(async () => {
+                        try {
+                            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lat=50.45&lon=30.52`);
+                            const data = await res.json();
+                            
+                            addrResults.innerHTML = '';
+                            if(data.features && data.features.length > 0) {
+                                data.features.forEach(feat => {
+                                    const props = feat.properties;
+                                    const div = document.createElement('div');
+                                    div.className = 'autocomplete-item';
+                                    
+                                    let mainName = props.name || props.street || '';
+                                    if (props.housenumber) mainName += ', ' + props.housenumber;
+                                    let subName = [props.city, props.country].filter(Boolean).join(', ');
+                                    
+                                    div.innerHTML = `<span>${mainName}</span><small>${subName}</small>`;
+                                    
+                                    div.onclick = () => { 
+                                        addrInput.value = `${mainName}, ${props.city || ''}`;
+                                        addrResults.style.display = 'none';
+                                        
+                                        const lat = feat.geometry.coordinates[1];
+                                        const lon = feat.geometry.coordinates[0];
+                                        
+                                        if(latInput) latInput.value = lat;
+                                        if(lonInput) lonInput.value = lon;
+                                        
+                                        if(pickerMap) {
+                                            pickerMarker.setLatLng([lat, lon]);
+                                            pickerMap.setView([lat, lon], 16);
+                                        } else {
+                                            initPickerMap(lat, lon);
+                                        }
+                                    };
+                                    addrResults.appendChild(div);
+                                });
+                                addrResults.style.display = 'block';
+                            } else { addrResults.style.display = 'none'; }
+                        } catch(e) {}
+                    }, 400);
+                });
+                
+                document.addEventListener('click', (e) => { 
+                    if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; 
+                });
+            }
         </script>
         """
 
@@ -109,13 +235,12 @@ def get_partner_auth_html(is_register=False, message=""):
         <input type="text" name="name" placeholder="Назва закладу" required>
         {phone_input}
         {verify_block}
-        <input type="text" name="address" placeholder="Адреса закладу (місце забору)" required>
-        """
+        {map_html} """
     
     toggle_link = f'<a href="/partner/login">Вже є акаунт? Увійти</a>' if is_register else f'<a href="/partner/register">Стати партнером</a>'
 
     return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>{title}</title>{GLOBAL_STYLES}{pwa_meta}{verify_style}</head>
+    <!DOCTYPE html><html lang="uk"><head><title>{title}</title>{GLOBAL_STYLES}{pwa_meta}{leaflet_css}{verify_style}</head>
     <body><div class="container">
         <h1>🚴 Delivery Partner</h1>
         <p style="margin-top:-20px; margin-bottom:20px;">Кабінет для виклику кур'єрів</p>
