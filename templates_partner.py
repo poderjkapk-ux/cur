@@ -26,7 +26,6 @@ def get_partner_auth_html(is_register=False, message=""):
     phone_input = '<input type="text" name="phone" placeholder="Телефон" required>' 
     submit_attr = ""
     map_html = ""
-    map_script = ""
 
     # Если регистрация - добавляем логику верификации И КАРТУ
     if is_register:
@@ -263,7 +262,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     Обновленный дашборд партнера.
     Включает:
     - Интерактивную карту Leaflet для выбора точки.
-    - Умный поиск (Photon) с поддержкой опечаток.
+    - Умный поиск (Photon) с AbortController и индикацией загрузки.
     - Рейтинг курьера (звезды).
     - Кнопку Boost (+10 грн) для ускорения поиска.
     """
@@ -476,6 +475,14 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .autocomplete-item:hover {{ background: var(--primary); color: white; }}
         .autocomplete-item:hover small {{ color: rgba(255,255,255,0.7); }}
         
+        /* Индикатор загрузки с вашим SVG */
+        .loading-input {{
+            background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC%7Btransform-origin:center;animation:spinner_svv2 .75s infinite linear%7D@keyframes spinner_svv2%7B100%25%7Btransform:rotate(360deg)%7D%7D%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 20px 20px;
+        }}
+
         #picker-map {{ width: 100%; height: 200px; border-radius: 10px; margin-bottom: 15px; border: 1px solid var(--border); z-index: 1; display:none; }}
         #picker-map.visible {{ display: block; }}
         .map-hint {{ font-size: 0.8rem; color: #facc15; margin-bottom: 10px; display:none; }}
@@ -696,6 +703,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
+            let currentRequestController = null; // Для отмены старых запросов
 
             function initPickerMap(lat, lon) {{
                 if (pickerMap) return;
@@ -735,11 +743,32 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                     
                     if (!pickerMap) initPickerMap();
 
-                    if(query.length < 3) {{ addrResults.style.display = 'none'; return; }}
+                    if(query.length < 3) {{ 
+                        addrResults.style.display = 'none';
+                        addrInput.classList.remove('loading-input'); 
+                        return; 
+                    }}
                     
+                    // Показываем лоадер
+                    addrInput.classList.add('loading-input');
+
                     searchTimeout = setTimeout(async () => {{
                         try {{
-                            const res = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=50.45&lon=30.52`);
+                            // Отмена предыдущего запроса
+                            if (currentRequestController) {{
+                                currentRequestController.abort();
+                            }}
+                            currentRequestController = new AbortController();
+                            const signal = currentRequestController.signal;
+
+                            // Используем координаты центра карты для приоритета
+                            let centerLat = 50.45, centerLon = 30.52;
+                            if (pickerMap) {{
+                                const c = pickerMap.getCenter();
+                                centerLat = c.lat; centerLon = c.lng;
+                            }}
+
+                            const res = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=${{centerLat}}&lon=${{centerLon}}`, {{ signal }});
                             const data = await res.json();
                             
                             addrResults.innerHTML = '';
@@ -754,7 +783,12 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                     let mainName = props.name || props.street || '';
                                     if (props.housenumber) mainName += ', ' + props.housenumber;
                                     
-                                    let subName = [props.city, props.country].filter(Boolean).join(', ');
+                                    // Формируем подпись более аккуратно
+                                    let details = [];
+                                    if(props.district) details.push(props.district);
+                                    if(props.city) details.push(props.city);
+                                    
+                                    let subName = details.join(', ');
                                     
                                     div.innerHTML = `<span>${{mainName}}</span><small>${{subName}}</small>`;
                                     
@@ -778,8 +812,12 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                 }});
                                 addrResults.style.display = 'block';
                             }} else {{ addrResults.style.display = 'none'; }}
-                        }} catch(e) {{}}
-                    }}, 400); 
+                        }} catch(e) {{
+                            if (e.name !== 'AbortError') console.error(e);
+                        }} finally {{
+                             addrInput.classList.remove('loading-input');
+                        }}
+                    }}, 300); 
                 }});
                 
                 document.addEventListener('click', (e) => {{ 
