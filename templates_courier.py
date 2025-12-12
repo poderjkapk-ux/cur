@@ -9,8 +9,17 @@ except ImportError:
 # --- Добавляем стили специально для карты и PWA ---
 PWA_STYLES = """
 <style>
+    /* Глобальный сброс для PWA */
+    * { box-sizing: border-box; }
+
     /* Отключаем скролл страницы, чтобы ощущалось как Native App */
-    body, html { height: 100%; overflow: hidden; overscroll-behavior: none; }
+    body, html { 
+        height: 100%; 
+        overflow: hidden; 
+        overscroll-behavior: none;
+        padding: 0 !important; /* Сбрасываем padding из GLOBAL_STYLES */
+        margin: 0 !important;
+    }
     
     /* Карта на весь фон */
     #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
@@ -24,6 +33,7 @@ PWA_STYLES = """
         display: flex; justify-content: space-between; align-items: center;
         border-bottom: 1px solid var(--border);
         box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        height: 60px; /* Фиксированная высота для расчетов */
     }
     .status-indicator { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.9rem; cursor: pointer; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; box-shadow: 0 0 10px currentColor; }
@@ -51,15 +61,29 @@ PWA_STYLES = """
     .nav-item.active i { transform: translateY(-2px); text-shadow: 0 0 10px var(--primary); }
 
     /* Контейнеры экранов */
-    .screen { display: none; height: 100%; width: 100%; padding-bottom: 80px; }
+    .screen { 
+        display: none; 
+        height: 100%; 
+        width: 100%; 
+        position: relative; /* Важно для абсолютного позиционирования внутри */
+    }
     .screen.active { display: block; }
 
-    /* --- ЛЕНТА ЗАКАЗОВ (FEED) --- */
+    /* --- ЛЕНТА ЗАКАЗОВ (FEED) - ИСПРАВЛЕНО --- */
     .feed-container {
-        padding: 80px 15px 20px 15px; /* Отступ сверху для хедера */
-        overflow-y: auto; height: 100%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 70px; /* Отступ снизу равен высоте меню */
+        
+        padding: 80px 15px 20px 15px; /* Отступ сверху для хедера (60px + 20px) */
+        
+        overflow-y: auto; 
+        -webkit-overflow-scrolling: touch; /* Плавный скролл на iOS */
         background: var(--bg-body);
     }
+    
     .feed-header {
         margin-bottom: 20px; display: flex; justify-content: space-between; align-items: end;
     }
