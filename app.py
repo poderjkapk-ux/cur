@@ -1071,16 +1071,31 @@ async def partner_confirm_return(
 # --- ОНОВЛЕНИЙ РОУТ СТВОРЕННЯ ЗАМОВЛЕННЯ ---
 @app.post("/api/partner/create_order")
 async def create_partner_order(
-    dropoff_address: str = Form(...), customer_phone: str = Form(...), customer_name: str = Form(""),
-    order_price: float = Form(0.0), delivery_fee: float = Form(50.0), comment: str = Form(""),
+    dropoff_address: str = Form(...), 
+    customer_phone: str = Form(...), 
+    customer_name: str = Form(""),
+    order_price: float = Form(0.0), 
+    delivery_fee: float = Form(50.0), 
+    comment: str = Form(""),
     payment_type: str = Form("prepaid"), 
-    # НОВИЙ ПАРАМЕТР
     is_return_required: bool = Form(False),
+    # --- НОВЫЕ ПОЛЯ: Принимаем координаты прямо из формы ---
+    lat: float = Form(None),
+    lon: float = Form(None),
+    # -------------------------------------------------------
     db: AsyncSession = Depends(get_db), 
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
-    # 1. Geocoding
-    client_lat, client_lon = await geocode_address(dropoff_address)
+    # 1. Логика координат:
+    # Если фронтенд прислал координаты (через карту), используем их.
+    # Если нет — пробуем найти сами по старинке.
+    client_lat, client_lon = lat, lon
+    
+    if not client_lat or not client_lon:
+        # Пытаемся найти сами, если карта не использовалась
+        client_lat, client_lon = await geocode_address(dropoff_address)
+
+    # Получаем координаты ресторана для расчета
     rest_lat, rest_lon = await geocode_address(partner.address)
 
     # Автоматичне доповнення коментаря
@@ -1093,11 +1108,10 @@ async def create_partner_order(
     # 2. Create Job
     job = DeliveryJob(
         partner_id=partner.id, dropoff_address=dropoff_address, 
-        dropoff_lat=client_lat, dropoff_lon=client_lon,
+        dropoff_lat=client_lat, dropoff_lon=client_lon, # Используем точные координаты
         customer_phone=customer_phone, customer_name=customer_name,
         order_price=order_price, delivery_fee=delivery_fee,
         comment=full_comment, payment_type=payment_type,
-        # Зберігаємо прапорець повернення
         is_return_required=is_return_required,
         status="pending"
     )
@@ -1112,19 +1126,16 @@ async def create_partner_order(
     payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(payment_type, "Оплата")
 
     async def notify_courier_async(courier):
-        # UPDATED: Проверка свежести координат для Push
-        # Если координаты старые (>30 мин), считаем их недостоверными
         is_location_fresh = True
         if courier.last_seen:
             diff = datetime.utcnow() - courier.last_seen
-            if diff.total_seconds() > 1800: # 30 минут
+            if diff.total_seconds() > 1800: 
                 is_location_fresh = False
         
         dist_to_rest = None
         if is_location_fresh and courier.lat and courier.lon and rest_lat and rest_lon:
             dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
         
-        # Фильтр: если знаем точно, что далеко - не шлем
         if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
             return 
             
@@ -1135,15 +1146,12 @@ async def create_partner_order(
             "restaurant": partner.name, "restaurant_address": partner.address,
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
             "dist_to_rest": display_dist,
-            # Додаємо прапорці для PWA
             "is_return": is_return_required,
             "payment_type": payment_type
         }
         
-        # WebSocket отправляем только если соединение активно (это обработает ConnectionManager внутри)
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
         
-        # Push отправляем всем онлайн (даже если WS отпал, но в базе online)
         if courier.fcm_token:
             await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн")
 
