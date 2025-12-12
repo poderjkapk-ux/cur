@@ -66,7 +66,8 @@ PWA_STYLES = """
     /* Большие кнопки действий */
     .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
     .btn-nav { background: #3b82f6; color: white; border: none; padding: 15px; border-radius: 12px; font-weight: 600; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; font-size: 1rem; }
-    .btn-main { background: var(--status-active); color: #0f172a; border: none; padding: 15px; border-radius: 12px; font-weight: 700; width: 100%; font-size: 1.1rem; cursor: pointer; }
+    .btn-main { background: var(--status-active); color: #0f172a; border: none; padding: 15px; border-radius: 12px; font-weight: 700; width: 100%; font-size: 1.1rem; cursor: pointer; transition: 0.2s; }
+    .btn-main:disabled { background: #555; cursor: not-allowed; color: #aaa; }
     
     /* Модалка истории */
     .history-modal {
@@ -327,8 +328,11 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier):
     """
-    Полностью обновленный PWA интерфейс с защитой от потери заказов и авто-реконнектом.
-    ОБНОВЛЕНО: Поддержка ВИКУПА и ВОЗВРАТА НАЛИЧНЫХ.
+    Полностью обновленный PWA интерфейс.
+    ВКЛЮЧАЕТ НОВУЮ ЛОГИКУ:
+    - Кнопка "Я на месте"
+    - Промежуточный статус "Ожидание выдачи"
+    - Обработка возврата денег (статус returning)
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
@@ -469,17 +473,14 @@ def get_courier_pwa_html(courier: Courier):
             const messaging = firebase.messaging();
             
             // --- PUSH NOTIFICATION LOGIC (MANUAL REQUEST) ---
-            
-            // 1. Проверяем права при запуске
             function checkPushStatus() {{
                 if (Notification.permission === 'default') {{
                     document.getElementById('push-perm-request').style.display = 'block';
                 }} else if (Notification.permission === 'granted') {{
-                    initPush(); // Если уже разрешено, инициализируем
+                    initPush();
                 }}
             }}
 
-            // 2. Функция, вызываемая ТОЛЬКО по клику
             async function requestPushPermission() {{
                 try {{
                     const permission = await Notification.requestPermission();
@@ -497,17 +498,12 @@ def get_courier_pwa_html(courier: Courier):
             async function initPush() {{
                 try {{
                     const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-                    console.log('Service Worker Registered');
-
-                    // Используем VAPID ключ для получения токена
                     const token = await messaging.getToken({{ 
                         vapidKey: 'BP5-1Obs3DLFOEXn_H-Vopc2JTmVol72wJ8JmcA0dAYFy3YCozBxSn5hbYPkckt5F0T56kiKQYi01cw0hGMOvIU',
                         serviceWorkerRegistration: registration 
                     }});
                     
                     if (token) {{
-                        console.log('FCM Token:', token);
-                        // Відправляємо токен на сервер
                         const fd = new FormData();
                         fd.append('token', token);
                         await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
@@ -517,13 +513,9 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
             
-            // Запускаем проверку при загрузке
             checkPushStatus();
             
-            // Обробка пушів, коли додаток відкритий
             messaging.onMessage((payload) => {{
-                console.log('Foreground push:', payload);
-                // Можна додати звук або тост
                 const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
                 audio.play().catch(e => console.log("Audio play failed"));
             }});
@@ -548,7 +540,6 @@ def get_courier_pwa_html(courier: Courier):
                 try {{
                     if ('wakeLock' in navigator) {{
                         await navigator.wakeLock.request('screen');
-                        console.log('Wake Lock active');
                     }}
                 }} catch (err) {{ console.error(err); }}
             }}
@@ -562,11 +553,8 @@ def get_courier_pwa_html(courier: Courier):
                 socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/courier`);
 
                 socket.onopen = () => {{
-                    console.log("WS Connected");
-                    document.getElementById('connection-dot').style.background = '#4ade80'; // Green
+                    document.getElementById('connection-dot').style.background = '#4ade80';
                     isReconnecting = false;
-                    
-                    // Start Heartbeat (Ping) каждые 15 сек
                     clearInterval(pingInterval);
                     pingInterval = setInterval(() => {{
                         if (socket.readyState === WebSocket.OPEN) socket.send("ping");
@@ -578,7 +566,6 @@ def get_courier_pwa_html(courier: Courier):
                     const msg = JSON.parse(e.data);
                     
                     if(msg.type === 'new_order') {{
-                        // Проверяем, не показываем ли мы уже этот заказ
                         const currentModalId = document.getElementById('modal-job-id').value;
                         if (currentModalId != msg.data.id) {{
                             showNewOrder(msg.data);
@@ -590,7 +577,6 @@ def get_courier_pwa_html(courier: Courier):
                         if (navigator.vibrate) navigator.vibrate([200]);
                         checkActiveJob();
                     }}
-                    // --- ОБРОБКА ПОВІДОМЛЕНЬ ЧАТУ ---
                     else if (msg.type === 'chat_message') {{
                         const sheetOpen = document.getElementById('chat-sheet').classList.contains('open');
                         
@@ -603,27 +589,18 @@ def get_courier_pwa_html(courier: Courier):
                             container.scrollTop = container.scrollHeight;
                             if (navigator.vibrate) navigator.vibrate(50);
                         }} else {{
-                             // Якщо чат закритий - показуємо сповіщення
                              alert(`💬 Повідомлення від закладу:\n${{msg.text}}`);
                         }}
                     }}
                 }};
 
                 socket.onclose = (e) => {{
-                    console.log("WS Closed", e);
                     document.getElementById('connection-dot').style.background = 'red';
                     clearInterval(pingInterval);
-                    
-                    // Авто-реконнект, если мы на смене
                     if (isOnline) {{
                         isReconnecting = true;
-                        setTimeout(connectWS, 3000); // Пробуем каждые 3 сек
+                        setTimeout(connectWS, 3000); 
                     }}
-                }};
-                
-                socket.onerror = (err) => {{
-                    console.error("WS Error", err);
-                    socket.close();
                 }};
             }}
             
@@ -631,16 +608,12 @@ def get_courier_pwa_html(courier: Courier):
 
             // --- UI Functions ---
             function showNewOrder(data) {{
-                // Проигрываем звук (нужно взаимодействие с пользователем сначала)
                 const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
                 audio.play().catch(e => console.log("Audio play failed (need interaction)"));
-
-                // Вибрация (для Android)
                 if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 
                 document.getElementById('modal-fee').innerText = data.fee + ' ₴';
                 
-                // --- ЛОГИКА ПРЕДУПРЕЖДЕНИЙ О ВЫКУПЕ/ВОЗВРАТЕ ---
                 let warningHtml = "";
                 if (data.payment_type === 'buyout') {{
                     warningHtml = `<div style="background:#fce7f3; color:#db2777; padding:10px; border-radius:8px; margin-bottom:10px; font-weight:bold; border:1px solid #fbcfe8;">💰 ПОТРІБЕН ВИКУП: ${{data.price}} грн</div>`;
@@ -649,7 +622,6 @@ def get_courier_pwa_html(courier: Courier):
                 }}
                 document.getElementById('warning-placeholder').innerHTML = warningHtml;
                 
-                // --- ОБНОВЛЕННЫЙ HTML МОДАЛЬНОГО ОКНА (С ДИСТАНЦИЕЙ) ---
                 document.getElementById('modal-route').innerHTML = `
                     <div style="text-align:left; margin-top:10px;">
                         <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
@@ -673,17 +645,8 @@ def get_courier_pwa_html(courier: Courier):
                                 <div style="font-size:0.75rem; color:#94a3b8;">${{data.address}}</div>
                             </div>
                         </div>
-                        
-                        <div style="margin-top:15px; border-top:1px solid #e2e8f0; padding-top:10px;">
-                            <div style="display:flex; justify-content:space-between; font-weight:700; color:#334155;">
-                                <span>До сплати (Чек):</span>
-                                <span>${{data.price}} ₴</span>
-                            </div>
-                        </div>
                     </div>
                 `;
-                // ----------------------------------------
-                
                 document.getElementById('modal-job-id').value = data.id;
                 document.getElementById('orderModal').style.display = 'flex';
             }}
@@ -693,7 +656,6 @@ def get_courier_pwa_html(courier: Courier):
                 document.getElementById('modal-job-id').value = '';
             }}
 
-            // --- Geolocation ---
             if (navigator.geolocation) {{
                 navigator.geolocation.watchPosition((pos) => {{
                     const {{ latitude, longitude }} = pos.coords;
@@ -704,7 +666,6 @@ def get_courier_pwa_html(courier: Courier):
                         marker.setLatLng([latitude, longitude]);
                     }}
                     
-                    // Отправляем локацию, если онлайн и сокет открыт
                     if(isOnline && socket && socket.readyState === WebSocket.OPEN) {{
                         const fd = new FormData();
                         fd.append('lat', latitude);
@@ -714,7 +675,6 @@ def get_courier_pwa_html(courier: Courier):
                 }}, console.error, {{ enableHighAccuracy: true }});
             }}
 
-            // --- Shift Logic ---
             async function toggleShift() {{
                 try {{
                     const res = await fetch('/api/courier/toggle_status', {{method:'POST'}});
@@ -736,7 +696,6 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
 
-            // --- Job Logic (Existing) ---
             async function checkActiveJob() {{
                 try {{
                     const res = await fetch('/api/courier/active_job');
@@ -748,14 +707,11 @@ def get_courier_pwa_html(courier: Courier):
                     }} else {{
                         document.getElementById('job-sheet').classList.remove('active');
                         currentJob = null;
-                        
-                        // Очистка карты при отсутствии заказа
                         if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
                         if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
                     }}
                 }} catch(e) {{
                      console.error(e);
-                     alert("Не вдалося завантажити деталі замовлення. Спробуйте оновити сторінку.");
                 }}
             }}
             checkActiveJob();
@@ -769,14 +725,13 @@ def get_courier_pwa_html(courier: Courier):
                 sheet.classList.add('active');
                 document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
                 document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
-                document.getElementById('job-price').style.color = 'var(--status-active)'; // Сброс цвета
+                document.getElementById('job-price').style.color = 'var(--status-active)';
 
                 document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
                 document.getElementById('client-phone').innerText = currentJob.customer_phone;
                 document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
                 document.getElementById('job-comment').innerText = currentJob.comment || '';
 
-                // --- НАЛАШТУВАННЯ КНОПОК ДЗВІНКА ТА ЧАТУ ---
                 const btnCall = document.getElementById('btn-call');
                 if (currentJob.partner_phone) {{
                     btnCall.href = `tel:${{currentJob.partner_phone}}`;
@@ -786,11 +741,7 @@ def get_courier_pwa_html(courier: Courier):
                 }}
                 
                 document.getElementById('btn-chat').onclick = () => openChat();
-                // ---------------------------------------------
 
-                // --- ЛОГИКА ОТОБРАЖЕНИЯ НА КАРТЕ ---
-                
-                // 1. Очищаем старые маркеры назначения
                 if (targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
                 if (routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
 
@@ -798,97 +749,137 @@ def get_courier_pwa_html(courier: Courier):
                 let destLon = null;
                 let destAddr = "";
 
-                if (currentJob.status === 'assigned' || currentJob.status === 'ready') {{
-                    // Едем в РЕСТОРАН.
+                // === НОВАЯ ЛОГИКА ОТОБРАЖЕНИЯ ===
+                
+                if (['assigned', 'ready', 'arrived_pickup'].includes(currentJob.status)) {{
+                    // Едем в РЕСТОРАН
                     destAddr = currentJob.partner_address;
-                    
                     steps[0].className = 'step active'; steps[1].className = 'step';
-                    
-                    // --- ЛОГИКА СТАТУСА "ГОТОВО" ---
-                    if (currentJob.status === 'ready') {{
-                         steps[0].style.background = '#4ade80';
-                         document.getElementById('job-status-desc').innerHTML = '<span style="color:#4ade80; font-weight:bold;">🍳 ЗАМОВЛЕННЯ ГОТОВЕ! ЗАХОДЬТЕ.</span>';
-                    }} else {{
-                         steps[0].style.background = '';
-                         document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
-                    }}
-                    
+
                     document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
                     document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('current-target-name').innerText = currentJob.partner_name;
                     document.getElementById('client-info-block').style.display = 'none';
                     
-                    // Ссылка на навигатор (по адресу)
                     btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
-                    
-                    btnAct.innerText = 'Забрав замовлення';
-                    btnAct.onclick = () => updateStatus('picked_up');
-                    
-                }} else if (currentJob.status === 'picked_up') {{
-                    // Едем к КЛИЕНТУ.
-                    destLat = currentJob.customer_lat;
-                    destLon = currentJob.customer_lon;
-                    destAddr = currentJob.customer_address;
 
-                    steps[0].className = 'step done'; steps[1].className = 'step active';
-                    steps[0].style.background = ''; // Сброс стиля
-
-                    // --- СПЕЦИАЛЬНЫЕ СТАТУСЫ ---
-                    let statusText = 'Везіть до клієнта';
-                    if (currentJob.payment_type === 'buyout') {{
-                        statusText = '💰 ВІЗЬМІТЬ ГРОШІ ЗА ЗАМОВЛЕННЯ!';
-                        document.getElementById('job-price').style.color = '#f472b6';
-                    }}
-                    if (currentJob.payment_type === 'cash') {{
-                        statusText = '💵 ОТРИМАЙТЕ ГРОШІ ВІД КЛІЄНТА!';
-                    }}
-
-                    document.getElementById('job-status-desc').innerText = statusText;
-                    document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
-                    document.getElementById('current-target-addr').innerText = destAddr;
-                    document.getElementById('current-target-name').innerText = 'Клієнт';
-                    document.getElementById('client-info-block').style.display = 'block';
-                    
-                    // Если есть координаты - ставим маркер и строим линию
-                    if (destLat && destLon) {{
-                        const redIcon = new L.Icon({{
-                            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-                            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
-                        }});
+                    // --- КНОПКИ ДЛЯ ЭТАПА "РЕСТОРАН" ---
+                    if (currentJob.status === 'arrived_pickup') {{
+                        // Курьер на месте, ждет выдачи
+                        btnAct.innerText = '⏳ Чекаю замовлення...';
+                        btnAct.style.background = '#f59e0b'; // Желтый
                         
-                        targetMarker = L.marker([destLat, destLon], {{icon: redIcon}}).addTo(map)
-                            .bindPopup("Клієнт: " + destAddr).openPopup();
-
-                        // Если курьер тоже на карте, рисуем линию
-                        if (marker) {{
-                            const courierPos = marker.getLatLng();
-                            const targetPos = [destLat, destLon];
-                            routeLine = L.polyline([courierPos, targetPos], {{color: '#6366f1', weight: 4, dashArray: '10, 10'}}).addTo(map);
-                            map.fitBounds(routeLine.getBounds(), {{padding: [50, 50]}});
+                        if(currentJob.server_status === 'ready') {{ 
+                             btnAct.disabled = false;
+                             btnAct.innerText = '📦 Забрав замовлення';
+                             btnAct.style.background = 'var(--status-active)';
+                             btnAct.onclick = () => updateStatus('picked_up');
                         }} else {{
-                             map.setView([destLat, destLon], 14);
+                             btnAct.disabled = false; 
+                             // Разрешаем ручной переход, но спрашиваем
+                             btnAct.onclick = () => {{
+                                 if(confirm("Вам точно віддали замовлення?")) updateStatus('picked_up');
+                             }};
                         }}
-
-                        // Ссылка на навигатор (по координатам)
-                        btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{destLat}},${{destLon}}`;
                     }} else {{
-                        // Если координат нет, используем адрес
-                        btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
+                        // Едем в ресторан
+                        btnAct.innerText = '👋 Я на місці (в закладі)';
+                        btnAct.disabled = false;
+                        btnAct.style.background = 'var(--status-active)';
+                        btnAct.onclick = async () => {{
+                            btnAct.innerText = 'Повідомляємо...';
+                            await fetch('/api/courier/arrived_pickup', {{method:'POST', body: new URLSearchParams({{job_id: currentJob.id}})}});
+                            currentJob.status = 'arrived_pickup';
+                            renderJobSheet();
+                        }};
                     }}
-
-                    // --- ЛОГИКА ЗАВЕРШЕНИЯ (ВОЗВРАТ ДЕНЕГ) ---
-                    if (currentJob.is_return_required) {{
-                        btnAct.innerText = '✅ Віддав клієнту (Повернути гроші)';
+                    
+                    if (currentJob.status === 'ready') {{
+                         document.getElementById('job-status-desc').innerHTML = '<span style="color:#4ade80; font-weight:bold;">🍳 ГОТОВО! ЗАХОДЬТЕ.</span>';
+                    }} else if (currentJob.status === 'arrived_pickup') {{
+                         document.getElementById('job-status-desc').innerText = 'Чекайте видачі замовлення';
+                    }} else {{
+                         document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
+                    }}
+                    
+                }} else if (['picked_up', 'returning'].includes(currentJob.status)) {{
+                    // Едем к КЛИЕНТУ или НАЗАД
+                    
+                    if (currentJob.status === 'returning') {{
+                        // ВОЗВРАТ
+                        destAddr = currentJob.partner_address;
+                        document.getElementById('job-status-desc').innerHTML = '<b style="color:red">↩️ ПОВЕРНІТЬ ГРОШІ В ЗАКЛАД!</b>';
+                        document.getElementById('addr-label').innerText = 'ВЕЗТИ ГРОШІ СЮДИ:';
+                        document.getElementById('current-target-addr').innerText = currentJob.partner_address;
+                        document.getElementById('current-target-name').innerText = currentJob.partner_name;
+                        
+                        btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
+                        
+                        btnAct.innerText = '💵 Гроші віддав';
+                        btnAct.style.background = '#fb923c';
+                        btnAct.disabled = false;
                         btnAct.onclick = () => {{
-                            if(confirm("Ви отримали готівку від клієнта? Тепер везіть її в заклад.")) {{
-                                 alert("⚠️ УВАГА! НЕ ЗАБУДЬТЕ ЗАВЕЗТИ ГРОШІ В ЗАКЛАД!");
-                                 updateStatus('delivered'); 
-                            }}
+                            alert("Чекайте підтвердження від закладу. Замовлення закриється автоматично.");
                         }};
                     }} else {{
-                        btnAct.innerText = '✅ Доставив';
-                        btnAct.onclick = () => updateStatus('delivered');
+                        // ДОСТАВКА КЛИЕНТУ
+                        destLat = currentJob.customer_lat;
+                        destLon = currentJob.customer_lon;
+                        destAddr = currentJob.customer_address;
+
+                        steps[0].className = 'step done'; steps[1].className = 'step active';
+                        steps[0].style.background = ''; 
+
+                        let statusText = 'Везіть до клієнта';
+                        if (currentJob.payment_type === 'buyout') {{
+                            statusText = '💰 ВІЗЬМІТЬ ГРОШІ ЗА ЗАМОВЛЕННЯ!';
+                            document.getElementById('job-price').style.color = '#f472b6';
+                        }}
+                        if (currentJob.payment_type === 'cash') {{
+                            statusText = '💵 ОТРИМАЙТЕ ГРОШІ ВІД КЛІЄНТА!';
+                        }}
+
+                        document.getElementById('job-status-desc').innerText = statusText;
+                        document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
+                        document.getElementById('current-target-addr').innerText = destAddr;
+                        document.getElementById('current-target-name').innerText = 'Клієнт';
+                        document.getElementById('client-info-block').style.display = 'block';
+                        
+                        if (destLat && destLon) {{
+                            const redIcon = new L.Icon({{
+                                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                                iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+                            }});
+                            targetMarker = L.marker([destLat, destLon], {{icon: redIcon}}).addTo(map)
+                                .bindPopup("Клієнт: " + destAddr).openPopup();
+
+                            if (marker) {{
+                                const courierPos = marker.getLatLng();
+                                const targetPos = [destLat, destLon];
+                                routeLine = L.polyline([courierPos, targetPos], {{color: '#6366f1', weight: 4, dashArray: '10, 10'}}).addTo(map);
+                                map.fitBounds(routeLine.getBounds(), {{padding: [50, 50]}});
+                            }} else {{
+                                 map.setView([destLat, destLon], 14);
+                            }}
+                            btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{destLat}},${{destLon}}`;
+                        }} else {{
+                            btnNav.href = `https://www.google.com/maps/search/?api=1&query=$?q=${{encodeURIComponent(destAddr)}}`;
+                        }}
+
+                        if (currentJob.is_return_required) {{
+                            btnAct.innerText = '💰 Забрав гроші (Везу назад)';
+                            btnAct.style.background = 'var(--status-active)';
+                            btnAct.onclick = () => {{
+                                if(confirm("Ви отримали готівку від клієнта? Тепер везіть її в заклад.")) {{
+                                     updateStatus('delivered'); 
+                                }}
+                            }};
+                        }} else {{
+                            btnAct.innerText = '✅ Доставив';
+                            btnAct.style.background = 'var(--status-active)';
+                            btnAct.onclick = () => updateStatus('delivered');
+                        }}
                     }}
                 }}
             }}
@@ -917,12 +908,12 @@ def get_courier_pwa_html(courier: Courier):
                 
                 const res = await fetch('/api/courier/update_job_status', {{method:'POST', body:fd}});
                 if(res.ok) {{
-                    currentJob.status = newStatus;
-                    if(newStatus === 'delivered') {{
+                    const data = await res.json();
+                    currentJob.status = data.new_status; // Обновляем статус
+                    if(data.new_status === 'delivered') {{ // Только если окончательно закрыт
                         alert("Чудова робота! Замовлення завершено.");
                         currentJob = null;
                         document.getElementById('job-sheet').classList.remove('active');
-                        // Удаляем маркеры
                         if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
                         if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
                     }} else {{
@@ -952,7 +943,6 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
 
-            // --- CHAT LOGIC (COURIER SIDE) ---
             async function openChat() {{
                 if(!currentJob) return;
                 document.getElementById('chat-sheet').classList.add('open');
@@ -984,7 +974,6 @@ def get_courier_pwa_html(courier: Courier):
                 if(!text || !currentJob) return;
                 
                 input.value = '';
-                // Optimistic UI
                 const container = document.getElementById('chat-body');
                 const div = document.createElement('div');
                 div.className = 'msg me';

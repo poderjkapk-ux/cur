@@ -676,12 +676,16 @@ async def get_active_job(
     partner_phone = job.partner.phone if job.partner else ""
     
     payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+    
+    # Дополнительная инфа для статусов
+    server_status = job.status # Для фронта
 
     return JSONResponse({
         "active": True,
         "job": {
             "id": job.id,
             "status": job.status,
+            "server_status": server_status, # Поле для проверки готовности
             "partner_name": partner_name,
             "partner_address": partner_address,
             "partner_phone": partner_phone, 
@@ -693,12 +697,38 @@ async def get_active_job(
             "comment": f"[{payment_label}] {job.comment or ''}",
             "order_price": job.order_price,
             "delivery_fee": job.delivery_fee,
-            # Добавлена информация для PWA курьера
             "payment_type": job.payment_type,
             "is_return_required": job.is_return_required
         }
     })
 
+# --- НОВЫЙ РОУТ: Курьер прибыл в ресторан ---
+@app.post("/api/courier/arrived_pickup")
+async def courier_arrived_pickup(
+    job_id: int = Form(...),
+    courier: Courier = Depends(auth.get_current_courier),
+    db: AsyncSession = Depends(get_db)
+):
+    job = await db.get(DeliveryJob, job_id)
+    if not job or job.courier_id != courier.id:
+        return JSONResponse({"status": "error"}, 404)
+    
+    job.status = "arrived_pickup"
+    job.arrived_at_pickup_at = datetime.utcnow()
+    await db.commit()
+    
+    # Уведомляем партнера (ЗВУК!)
+    await manager.notify_partner(job.partner_id, {
+        "type": "order_update", 
+        "job_id": job.id, 
+        "status": "arrived_pickup",
+        "status_color": "#facc15", # Желтый
+        "message": f"👋 Кур'єр {courier.name} прибув і чекає на замовлення!"
+    })
+    
+    return JSONResponse({"status": "ok"})
+
+# --- ОБНОВЛЕННЫЙ РОУТ СТАТУСА: Обработка возврата ---
 @app.post("/api/courier/update_job_status")
 async def update_job_status(
     job_id: int = Form(...), status: str = Form(...),
@@ -708,32 +738,48 @@ async def update_job_status(
     if not job or job.courier_id != courier.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
-    job.status = status
-    if status == "picked_up": job.picked_up_at = datetime.utcnow()
-    elif status == "delivered": job.delivered_at = datetime.utcnow()
-    await db.commit()
+    # ЛОГИКА ВОЗВРАТА СРЕДСТВ
+    if status == "delivered" and job.is_return_required:
+        # Если нужен возврат, мы не закрываем заказ, а ставим статус "returning"
+        job.status = "returning"
+        msg_text = f"💰 Кур'єр {courier.name} віддав замовлення і везе гроші назад!"
+        color = "#fb923c" # Оранжевый
+        
+        # Уведомляем партнера
+        await manager.notify_partner(job.partner_id, {
+            "type": "order_update", "job_id": job.id, "status": "returning",
+            "status_text": "Повернення коштів", "status_color": color,
+            "message": msg_text
+        })
+    else:
+        # Стандартная логика
+        job.status = status
+        if status == "picked_up": 
+            job.picked_up_at = datetime.utcnow()
+            msg_text = f"✅ Кур'єр {courier.name} забрав замовлення."
+            color = "#bfdbfe" 
+        elif status == "delivered": 
+            job.delivered_at = datetime.utcnow()
+            msg_text = f"🎉 Замовлення #{job.id} успішно доставлено!"
+            color = "#bbf7d0"
+        else:
+             msg_text = f"Статус замовлення #{job.id}: {status}"
+             color = "#e2e8f0"
 
-    msg_text = ""
-    color = "#e2e8f0"
-    if status == "picked_up":
-        msg_text = f"✅ Кур'єр {courier.name} забрав замовлення."
-        color = "#bfdbfe" 
-    elif status == "delivered":
-        msg_text = f"🎉 Замовлення #{job.id} успішно доставлено!"
-        color = "#bbf7d0" 
-
-    if msg_text:
         await manager.notify_partner(job.partner_id, {
             "type": "order_update", "job_id": job.id, "status": status,
             "status_text": status, "status_color": color,
             "courier_name": courier.name, "message": msg_text
         })
+        
+        # Отправка в TG партнеру, если есть
         partner = await db.get(DeliveryPartner, job.partner_id)
-        if partner and partner.telegram_chat_id:
+        if partner and partner.telegram_chat_id and status in ["picked_up", "delivered"]:
             tg_text = f"📦 <b>Замовлення #{job.id}</b>\n{msg_text}\nКур'єр: {courier.name}"
             asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
 
-    return JSONResponse({"status": "ok", "new_status": status})
+    await db.commit()
+    return JSONResponse({"status": "ok", "new_status": job.status})
 
 @app.post("/api/courier/accept_order")
 async def courier_accept_order(
@@ -908,6 +954,31 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
         .order_by(DeliveryJob.id.desc())
     )
     return templates_partner.get_partner_dashboard_html(partner, result.scalars().all())
+
+# --- НОВЫЙ РОУТ: Партнер подтверждает получение возврата денег ---
+@app.post("/api/partner/confirm_return")
+async def partner_confirm_return(
+    job_id: int = Form(...),
+    partner: DeliveryPartner = Depends(get_current_partner), 
+    db: AsyncSession = Depends(get_db)
+):
+    job = await db.get(DeliveryJob, job_id)
+    if not job or job.partner_id != partner.id:
+        return JSONResponse({"status": "error"}, 404)
+        
+    job.status = "delivered" # Теперь окончательно закрываем
+    job.delivered_at = datetime.utcnow()
+    await db.commit()
+    
+    # Уведомляем курьера, что он свободен
+    if job.courier_id:
+        await manager.notify_courier(job.courier_id, {
+            "type": "job_update", 
+            "status": "delivered",
+            "message": "✅ Заклад підтвердив отримання коштів. Ви вільні!"
+        })
+        
+    return JSONResponse({"status": "ok"})
 
 # --- ОНОВЛЕНИЙ РОУТ СТВОРЕННЯ ЗАМОВЛЕННЯ ---
 @app.post("/api/partner/create_order")

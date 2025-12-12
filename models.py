@@ -146,7 +146,7 @@ class DeliveryJob(Base):
     # prepaid (вже оплачено), cash (клієнт платить кур'єру), buyout (кур'єр викуповує замовлення)
     payment_type = Column(String(50), default="prepaid") 
     
-    # Статус: pending, assigned, ready, picked_up, delivered, cancelled
+    # Статус: pending, assigned, arrived_pickup, ready, picked_up, delivered, returning, cancelled
     status = Column(String(20), default="pending")
     
     # --- НОВЕ ПОЛЕ: ПОВЕРНЕННЯ КОШТІВ ---
@@ -159,6 +159,11 @@ class DeliveryJob(Base):
     # --- ЧАСОВІ МІТКИ (TIMESTAMPS) ---
     created_at = Column(DateTime, default=datetime.utcnow)
     accepted_at = Column(DateTime, nullable=True)  # Коли кур'єр прийняв
+    
+    # --- НОВЕ ПОЛЕ: КОЛИ КУР'ЄР ПРИБУВ В ЗАКЛАД ---
+    arrived_at_pickup_at = Column(DateTime, nullable=True) 
+    # ----------------------------------------------
+    
     ready_at = Column(DateTime, nullable=True)     # Коли замовлення готове
     picked_up_at = Column(DateTime, nullable=True) # Коли забрав
     delivered_at = Column(DateTime, nullable=True) # Коли доставив

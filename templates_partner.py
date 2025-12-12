@@ -135,8 +135,10 @@ def get_partner_auth_html(is_register=False, message=""):
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
-    Оновлений дашборд партнера з вибором оплати, скасуванням, рейтингом та чатом.
-    ВКЛЮЧАЄ ЛОГІКУ ДЛЯ ПОВЕРНЕННЯ КОШТІВ ТА ВИКУПУ.
+    Оновлений дашборд партнера.
+    ВКЛЮЧАЄ НОВУ ЛОГІКУ:
+    - Статус "КУР'ЄР ЧЕКАЄ"
+    - Статус "ПОВЕРНЕННЯ" (і кнопка підтвердження грошей)
     """
     
     # Розділяємо активні та завершені замовлення
@@ -147,44 +149,64 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     active_rows = ""
     for j in active_jobs:
         track_btn = ""
-        # Додаємо кнопку скасування
         cancel_btn = f'<button class="btn-mini danger" onclick="cancelOrder({j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i></button>'
-        
-        # Кнопки зв'язку (телефон та чат)
         comm_btns = ""
         
         status_color = "#ccc"
         status_text = j.status
-        
-        # Якщо є кур'єр, показуємо кнопки зв'язку
+        courier_name_display = j.courier.name if j.courier else "—"
         courier_info = "—"
+
         if j.courier:
-            courier_info = f"🚴 ID {j.courier_id}"
-            
-            # ВАЖЛИВО: j.courier повинен бути завантажений (joinedload) в app.py
+            courier_info = f"🚴 {courier_name_display}"
             phone_link = f"tel:{j.courier.phone}"
             comm_btns = f"""
             <a href="{phone_link}" class="btn-mini success" title="Зателефонувати"><i class="fa-solid fa-phone"></i></a>
             <button class="btn-mini info" onclick="openChat({j.id}, 'Кур\\'єр {j.courier.name}')" title="Чат"><i class="fa-solid fa-comments"></i></button>
             """
         
-        if j.status == 'assigned' or j.status == 'picked_up' or j.status == 'ready':
+        # --- ЛОГІКА СТАТУСІВ (ОНОВЛЕНА) ---
+        if j.status == 'assigned':
+            status_color = "#fef08a" # Yellow
             track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
-            if j.status == 'assigned': status_color = "#fef08a"
-            elif j.status == 'ready': status_color = "#86efac"
-            elif j.status == 'picked_up': status_color = "#bfdbfe"
         
-        # --- КНОПКА ГОТОВО ---
-        ready_btn = ""
-        if j.status in ['pending', 'assigned']:
-            ready_btn = f'''
-            <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
-                <i class="fa-solid fa-utensils"></i>
+        elif j.status == 'arrived_pickup':
+            status_color = "#facc15" # Darker Yellow
+            status_text = "👋 КУР'ЄР ЧЕКАЄ"
+            courier_info = f"🚴 <b>{courier_name_display} (ТУТ)</b>"
+            
+        elif j.status == 'ready':
+            status_color = "#86efac" # Green
+            
+        elif j.status == 'picked_up':
+            status_color = "#bfdbfe" # Blue
+            track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
+            
+        elif j.status == 'returning':
+            status_color = "#fb923c" # Orange
+            status_text = "↩️ ПОВЕРНЕННЯ"
+            track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
+
+        # --- КНОПКА ДІЇ (ACTION BTN) ---
+        action_btn = ""
+        
+        if j.status == 'returning':
+            # Якщо кур'єр повертається з грошима
+            action_btn = f'''
+            <button class="btn-mini success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей" style="width:auto; padding:0 10px;">
+                <i class="fa-solid fa-sack-dollar"></i> Отримав гроші
             </button>
             '''
-        elif j.status == 'ready':
-            ready_btn = '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
-        # --------------------
+        elif j.status in ['pending', 'assigned', 'arrived_pickup']:
+            # Якщо їжа ще не готова (або кур'єр вже приїхав і чекає)
+            if j.status != 'ready':
+                action_btn = f'''
+                <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
+                    <i class="fa-solid fa-utensils"></i> Готово
+                </button>
+                '''
+            else:
+                action_btn = '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
         
         # Відображення типу оплати
         payment_badges = {
@@ -209,7 +231,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <td>
                 <div style="display:flex; gap:5px; align-items:center;">
                     {comm_btns}
-                    {ready_btn}
+                    {action_btn}
                     {track_btn}
                     {cancel_btn}
                 </div>
@@ -220,12 +242,10 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     # --- ТАБЛИЦЯ ІСТОРІЇ ---
     history_rows = ""
     for j in history_jobs:
-        # Форматування часу
         t_accept = j.accepted_at.strftime('%H:%M') if j.accepted_at else "-"
         t_pickup = j.picked_up_at.strftime('%H:%M') if j.picked_up_at else "-"
         t_deliver = j.delivered_at.strftime('%H:%M') if j.delivered_at else "-"
         
-        # Логіка відображення рейтингу
         rating_html = ""
         if j.status == 'delivered':
             if j.courier_rating:
@@ -253,9 +273,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         </tr>
         """
 
-    # --- PWA META (Manifest) ---
     pwa_meta = '<link rel="manifest" href="/partner/manifest.json">'
-    # ---------------------------
 
     return f"""
     <!DOCTYPE html><html lang="uk"><head><title>Кабінет Партнера</title>{GLOBAL_STYLES}{pwa_meta}
@@ -655,6 +673,28 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         setTimeout(() => location.reload(), 1000);
                     }} else {{
                         alert(data.message);
+                    }}
+                }} catch(e) {{
+                    alert("Помилка мережі");
+                }}
+            }}
+
+            // --- ЛОГІКА "ОТРИМАВ ГРОШІ" (ПОВЕРНЕННЯ) ---
+            async function confirmReturn(jobId) {{
+                if(!confirm("Ви точно отримали гроші від кур'єра? Замовлення буде закрито.")) return;
+                
+                const fd = new FormData();
+                fd.append('job_id', jobId);
+                
+                try {{
+                    const res = await fetch('/api/partner/confirm_return', {{ method: 'POST', body: fd }});
+                    const data = await res.json();
+                    
+                    if(data.status === 'ok') {{
+                        showToast("✅ Гроші отримано. Замовлення закрито!");
+                        setTimeout(() => location.reload(), 1000);
+                    }} else {{
+                        alert("Помилка при підтвердженні.");
                     }}
                 }} catch(e) {{
                     alert("Помилка мережі");
