@@ -95,6 +95,11 @@ class Courier(Base):
     lon = Column(Float, nullable=True)             # Довгота
     last_seen = Column(DateTime, default=datetime.utcnow) 
     
+    # --- НОВІ ПОЛЯ: РЕЙТИНГ ---
+    avg_rating = Column(Float, default=5.0)  # Середній рейтинг (за замовчуванням 5.0)
+    rating_count = Column(Integer, default=0) # Кількість отриманих оцінок
+    # ---------------------------
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class DeliveryPartner(Base):

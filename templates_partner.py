@@ -264,7 +264,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     Включает:
     - Интерактивную карту Leaflet для выбора точки.
     - Умный поиск (Photon) с поддержкой опечаток.
-    - Автоматический перелет маркера при выборе адреса.
+    - Рейтинг курьера (звезды).
+    - Кнопку Boost (+10 грн) для ускорения поиска.
     """
     
     # Разделяем активные и завершенные
@@ -280,11 +281,21 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         
         status_color = "#ccc"
         status_text = j.status
-        courier_name_display = j.courier.name if j.courier else "—"
         courier_info = "—"
+        action_btn = ""
 
+        # --- ОТОБРАЖЕНИЕ КУРЬЕРА С РЕЙТИНГОМ ---
         if j.courier:
-            courier_info = f"🚴 {courier_name_display}"
+            # Расчет бейджа рейтинга
+            rating_val = j.courier.avg_rating
+            rating_cnt = j.courier.rating_count
+            rating_display = f"⭐ {rating_val:.1f}" if rating_cnt > 0 else "⭐ New"
+            
+            courier_info = f"""
+            <div style="font-weight:600;">🚴 {j.courier.name}</div>
+            <div style="font-size:0.75rem; color:#facc15;">{rating_display} <span style="color:#64748b">({rating_cnt})</span></div>
+            """
+            
             phone_link = f"tel:{j.courier.phone}"
             comm_btns = f"""
             <a href="{phone_link}" class="btn-mini success" title="Зателефонувати"><i class="fa-solid fa-phone"></i></a>
@@ -299,7 +310,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         elif j.status == 'arrived_pickup':
             status_color = "#facc15" # Darker Yellow
             status_text = "👋 КУР'ЄР ЧЕКАЄ"
-            courier_info = f"🚴 <b>{courier_name_display} (ТУТ)</b>"
             
         elif j.status == 'ready':
             status_color = "#86efac" # Green
@@ -314,20 +324,26 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
 
         # --- КНОПКА ДЕЙСТВИЯ (ACTION BTN) ---
-        action_btn = ""
         
-        # --- НОВАЯ ЛОГИКА: Проверяем ready_at ---
-        is_ready = (j.ready_at is not None) or (j.status == 'ready')
-
-        if j.status == 'returning':
-            # Если курьер возвращает деньги
+        # 1. BOOST ЦЕНЫ (Только для PENDING)
+        if j.status == 'pending':
+            action_btn = f'''
+            <button class="btn-mini warn" onclick="boostOrder({j.id})" title="Підняти ціну (+10 грн)" style="width:auto; padding:0 8px; font-weight:bold; font-size:0.8rem;">
+                <i class="fa-solid fa-fire"></i> +10
+            </button>
+            '''
+        # 2. ВОЗВРАТ ДЕНЕГ
+        elif j.status == 'returning':
             action_btn = f'''
             <button class="btn-mini success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей" style="width:auto; padding:0 10px;">
                 <i class="fa-solid fa-sack-dollar"></i> Отримав гроші
             </button>
             '''
-        elif j.status in ['pending', 'assigned', 'arrived_pickup']:
-            # Если еда еще не готова
+        # 3. ОБЫЧНЫЙ ПРОЦЕСС (Готовность)
+        elif j.status in ['assigned', 'arrived_pickup']:
+            # Проверяем ready_at
+            is_ready = (j.ready_at is not None) or (j.status == 'ready')
+            
             if not is_ready:
                 action_btn = f'''
                 <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
@@ -371,8 +387,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     # --- ТАБЛИЦА ИСТОРИИ ---
     history_rows = ""
     for j in history_jobs:
-        t_accept = j.accepted_at.strftime('%H:%M') if j.accepted_at else "-"
-        t_pickup = j.picked_up_at.strftime('%H:%M') if j.picked_up_at else "-"
         t_deliver = j.delivered_at.strftime('%H:%M') if j.delivered_at else "-"
         
         rating_html = ""
@@ -389,9 +403,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         <tr>
             <td>#{j.id}</td>
             <td>
-                <div style="font-size:0.8rem">Прийняв: {t_accept}</div>
-                <div style="font-size:0.8rem">Забрав: {t_pickup}</div>
-                <div style="font-weight:bold; color:var(--status-active)">Довіз: {t_deliver}</div>
+                <div style="font-size:0.8rem">Довіз: <b style="color:var(--status-active)">{t_deliver}</b></div>
             </td>
             <td>
                 <div>{j.dropoff_address}</div>
@@ -412,7 +424,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         @media (max-width: 900px) {{ .dashboard-grid {{ grid-template-columns: 1fr; }} }}
         .panel {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 25px; margin-bottom: 20px; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }}
-        th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid var(--border); color: var(--text-main); }}
+        th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid var(--border); color: var(--text-main); vertical-align: middle; }}
         th {{ color: var(--text-muted); font-weight: 600; }}
         .header-bar {{ display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto 30px; width: 90%; }}
         
@@ -421,6 +433,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .btn-mini.info:hover {{ background: #6366f1; color: white; }}
         .btn-mini.danger:hover {{ background: #e11d48; color: white; }}
         .btn-mini.success:hover {{ background: #4ade80; color: #064e3b; }}
+        .btn-mini.warn:hover {{ background: #f59e0b; color: #78350f; }}
 
         /* Модальні вікна */
         .modal-overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 2000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(5px); }}
@@ -463,7 +476,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .autocomplete-item:hover {{ background: var(--primary); color: white; }}
         .autocomplete-item:hover small {{ color: rgba(255,255,255,0.7); }}
         
-        /* Мини-карта в форме */
         #picker-map {{ width: 100%; height: 200px; border-radius: 10px; margin-bottom: 15px; border: 1px solid var(--border); z-index: 1; display:none; }}
         #picker-map.visible {{ display: block; }}
         .map-hint {{ font-size: 0.8rem; color: #facc15; margin-bottom: 10px; display:none; }}
@@ -649,8 +661,30 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 setTimeout(() => {{ toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }}, 5000);
             }}
 
+            // --- НОВЫЙ МЕТОД: ПОВЫШЕНИЕ ЦЕНЫ (BOOST) ---
+            async function boostOrder(id) {{
+                if(!confirm("Підняти ціну доставки на 10 грн, щоб пришвидшити пошук?")) return;
+                
+                const fd = new FormData(); 
+                fd.append('job_id', id); 
+                fd.append('amount', 10);
+                
+                try {{
+                    const res = await fetch('/api/partner/boost_order', {{method:'POST', body:fd}});
+                    const data = await res.json();
+                    
+                    if(res.ok) {{ 
+                        showToast(`💸 Ціну піднято! Нова сума: ${{data.new_fee}} грн`); 
+                        setTimeout(() => location.reload(), 1500); 
+                    }}
+                    else {{
+                        alert(data.message || "Помилка");
+                    }}
+                }} catch(e) {{ alert("Помилка з'єднання"); }}
+            }}
+
             // ==========================================
-            // НОВЫЙ ПОИСК АДРЕСА (PHOTON + LEAFLET MAP)
+            // ПОИСК АДРЕСА (PHOTON + LEAFLET MAP)
             // ==========================================
             
             const addrInput = document.getElementById('addr_input');
@@ -663,112 +697,95 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             let pickerMap, pickerMarker;
             let searchTimeout = null;
 
-            // 1. Инициализация мини-карты (при первом фокусе или вводе)
             function initPickerMap(lat, lon) {{
                 if (pickerMap) return;
                 try {{
                     pickerMapDiv.classList.add('visible');
                     mapHint.style.display = 'block';
                     
-                    // Центр карты: либо результат поиска, либо Киев по умолчанию
                     const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52];
                     
                     pickerMap = L.map('picker-map').setView(startPos, 13);
                     L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(pickerMap);
                     
-                    // Создаем перетаскиваемый маркер
                     pickerMarker = L.marker(startPos, {{draggable: true}}).addTo(pickerMap);
                     
-                    // Слушаем перетаскивание
                     pickerMarker.on('dragend', function(e) {{
                         const pos = e.target.getLatLng();
                         latInput.value = pos.lat;
                         lonInput.value = pos.lng;
                     }});
                     
-                    // Клик по карте перемещает маркер
                     pickerMap.on('click', function(e) {{
                         pickerMarker.setLatLng(e.latlng);
                         latInput.value = e.latlng.lat;
                         lonInput.value = e.latlng.lng;
                     }});
                     
-                    // Фикс рендеринга Leaflet при появлении из display:none
                     setTimeout(() => pickerMap.invalidateSize(), 200);
                 }} catch(e) {{
                     console.error("Leaflet init error:", e);
                 }}
             }}
 
-            // 2. Умный поиск через Photon
-            addrInput.addEventListener('input', function() {{
-                clearTimeout(searchTimeout);
-                const query = this.value;
-                
-                // Показываем карту, если пользователь начал вводить
-                if (!pickerMap) initPickerMap();
+            if(addrInput) {{
+                addrInput.addEventListener('input', function() {{
+                    clearTimeout(searchTimeout);
+                    const query = this.value;
+                    
+                    if (!pickerMap) initPickerMap();
 
-                if(query.length < 3) {{ addrResults.style.display = 'none'; return; }}
+                    if(query.length < 3) {{ addrResults.style.display = 'none'; return; }}
+                    
+                    searchTimeout = setTimeout(async () => {{
+                        try {{
+                            const res = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=50.45&lon=30.52`);
+                            const data = await res.json();
+                            
+                            addrResults.innerHTML = '';
+                            if(data.features && data.features.length > 0) {{
+                                data.features.forEach(feat => {{
+                                    const props = feat.properties;
+                                    const coords = feat.geometry.coordinates; // [lon, lat]
+                                    
+                                    const div = document.createElement('div');
+                                    div.className = 'autocomplete-item';
+                                    
+                                    let mainName = props.name || props.street || '';
+                                    if (props.housenumber) mainName += ', ' + props.housenumber;
+                                    
+                                    let subName = [props.city, props.country].filter(Boolean).join(', ');
+                                    
+                                    div.innerHTML = `<span>${{mainName}}</span><small>${{subName}}</small>`;
+                                    
+                                    div.onclick = () => {{ 
+                                        addrInput.value = `${{mainName}}, ${{props.city || ''}}`;
+                                        addrResults.style.display = 'none';
+                                        
+                                        const lat = coords[1];
+                                        const lon = coords[0];
+                                        latInput.value = lat;
+                                        lonInput.value = lon;
+                                        
+                                        if(pickerMap) {{
+                                            pickerMarker.setLatLng([lat, lon]);
+                                            pickerMap.setView([lat, lon], 16);
+                                        }} else {{
+                                            initPickerMap(lat, lon);
+                                        }}
+                                    }};
+                                    addrResults.appendChild(div);
+                                }});
+                                addrResults.style.display = 'block';
+                            }} else {{ addrResults.style.display = 'none'; }}
+                        }} catch(e) {{}}
+                    }}, 400); 
+                }});
                 
-                searchTimeout = setTimeout(async () => {{
-                    try {{
-                        // ИСПРАВЛЕНИЕ: Убран параметр lang=uk, так как API его не поддерживает официально и выдает 400.
-                        const url = `https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=50.45&lon=30.52`;
-                        console.log("Fetching address:", url); // Log URL for debugging
-                        
-                        const res = await fetch(url);
-                        if (!res.ok) throw new Error("API Network Error: " + res.status);
-                        const data = await res.json();
-                        
-                        addrResults.innerHTML = '';
-                        if(data.features && data.features.length > 0) {{
-                            data.features.forEach(feat => {{
-                                const props = feat.properties;
-                                const coords = feat.geometry.coordinates; // [lon, lat]
-                                
-                                const div = document.createElement('div');
-                                div.className = 'autocomplete-item';
-                                
-                                // Формируем красивое название
-                                let mainName = props.name || props.street || '';
-                                if (props.housenumber) mainName += ', ' + props.housenumber;
-                                
-                                let subName = [props.city, props.country].filter(Boolean).join(', ');
-                                
-                                div.innerHTML = `<span>${{mainName}}</span><small>${{subName}}</small>`;
-                                
-                                div.onclick = () => {{ 
-                                    addrInput.value = `${{mainName}}, ${{props.city || ''}}`;
-                                    addrResults.style.display = 'none';
-                                    
-                                    // Обновляем карту и скрытые поля
-                                    const lat = coords[1];
-                                    const lon = coords[0];
-                                    latInput.value = lat;
-                                    lonInput.value = lon;
-                                    
-                                    // ПЕРЕМЕЩАЕМ МАРКЕР НА ВЫБРАННЫЙ АДРЕС
-                                    if(pickerMap) {{
-                                        pickerMarker.setLatLng([lat, lon]);
-                                        pickerMap.setView([lat, lon], 16);
-                                    }} else {{
-                                        initPickerMap(lat, lon);
-                                    }}
-                                }};
-                                addrResults.appendChild(div);
-                            }});
-                            addrResults.style.display = 'block';
-                        }} else {{ addrResults.style.display = 'none'; }}
-                    }} catch(e) {{
-                        console.error("Address Search Error:", e);
-                    }}
-                }}, 400); // Debounce 400ms
-            }});
-            
-            // Скрыть результаты при клике вне
-            document.addEventListener('click', (e) => {{ 
-                if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; 
-            }});
+                document.addEventListener('click', (e) => {{ 
+                    if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; 
+                }});
+            }}
             
             // --- WEBSOCKET ---
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -839,7 +856,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 await fetch('/api/chat/send', {{method: 'POST', body: fd}});
             }}
 
-            // --- CANCEL / READY / RETURN ---
+            // --- ACTIONS ---
             async function cancelOrder(jobId) {{
                 if(!confirm("Скасувати це замовлення?")) return;
                 const fd = new FormData(); fd.append('job_id', jobId);

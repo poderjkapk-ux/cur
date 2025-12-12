@@ -1197,16 +1197,78 @@ async def partner_cancel_order(
     await db.commit()
     return JSONResponse({"status": "ok"})
 
+# --- 1. ОБНОВЛЕНИЕ РЕЙТИНГА КУРЬЕРА ---
 @app.post("/api/partner/rate_courier")
 async def partner_rate_courier(
-    job_id: int = Form(...), rating: int = Form(...), review: str = Form(""), 
-    partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)
+    job_id: int = Form(...), 
+    rating: int = Form(...), 
+    review: str = Form(""), 
+    partner: DeliveryPartner = Depends(get_current_partner), 
+    db: AsyncSession = Depends(get_db)
 ):
     job = await db.get(DeliveryJob, job_id)
     if job and job.partner_id == partner.id:
-        job.courier_rating = rating; job.courier_review = review
+        job.courier_rating = rating
+        job.courier_review = review
+        
+        # --- LOGIC UPDATE: Recalculate Courier Rating ---
+        if job.courier_id:
+            courier = await db.get(Courier, job.courier_id)
+            if courier:
+                current_avg = courier.avg_rating or 5.0
+                current_count = courier.rating_count or 0
+                
+                # New Average Formula
+                new_count = current_count + 1
+                new_avg = ((current_avg * current_count) + rating) / new_count
+                
+                courier.avg_rating = round(new_avg, 2)
+                courier.rating_count = new_count
+        # ------------------------------------------------
+        
         await db.commit()
     return JSONResponse({"status": "ok"})
+
+# --- 2. НОВЫЙ ЭНДПОИНТ: BOOST PRICE (Поднятие цены) ---
+@app.post("/api/partner/boost_order")
+async def partner_boost_order(
+    job_id: int = Form(...),
+    amount: float = Form(10.0),
+    partner: DeliveryPartner = Depends(get_current_partner),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Увеличивает цену доставки (fee) на указанную сумму (amount).
+    Только для заказов в статусе 'pending'.
+    Уведомляет всех курьеров через WebSocket.
+    """
+    job = await db.get(DeliveryJob, job_id)
+    if not job or job.partner_id != partner.id:
+        return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
+    
+    if job.status != "pending":
+         return JSONResponse({"status": "error", "message": "Замовлення вже прийнято або скасовано"}, status_code=400)
+    
+    # Увеличиваем цену
+    job.delivery_fee += amount
+    await db.commit()
+    
+    # Мгновенно уведомляем всех онлайн-курьеров
+    online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
+    
+    for c in online_couriers:
+        # Отправляем событие 'new_order', чтобы PWA курьера обновило список или показало модалку
+        await manager.notify_courier(c.id, {
+            "type": "new_order", 
+            "data": {
+                "id": job.id,
+                # Дополнительные данные, если понадобятся фронтенду для обновления без перезагрузки
+                "fee": job.delivery_fee 
+            }
+        })
+        
+    return JSONResponse({"status": "ok", "new_fee": job.delivery_fee})
+
 
 @app.get("/api/partner/track_courier/{job_id}")
 async def track_courier_location(
