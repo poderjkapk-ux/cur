@@ -659,6 +659,68 @@ async def websocket_endpoint(
         logging.error(f"WS Error: {e}")
         manager.disconnect_courier(courier.id)
 
+# --- НОВАЯ ФУНКЦИЯ ДЛЯ ОТДАЧИ ЛЕНТЫ ЗАКАЗОВ (FEED) ---
+@app.get("/api/courier/open_orders")
+async def get_open_orders(
+    lat: float, lon: float, 
+    courier: Courier = Depends(auth.get_current_courier),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Повертає список доступних замовлень, відсортованих за відстанню до закладу.
+    """
+    # 1. Берем все заказы со статусом pending
+    result = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner))
+        .where(DeliveryJob.status == "pending")
+    )
+    jobs = result.scalars().all()
+    
+    response_data = []
+    
+    for job in jobs:
+        if not job.partner: continue
+        
+        # 2. Получаем координаты ресторана (используем кэш геокодера)
+        rest_lat, rest_lon = await geocode_address(job.partner.address)
+        
+        dist_to_rest = None
+        if rest_lat and rest_lon:
+            dist_to_rest = calculate_distance(lat, lon, rest_lat, rest_lon)
+        
+        # Если не удалось посчитать дистанцию или она > 30 км, пропускаем (или ставим в конец)
+        sort_dist = dist_to_rest if dist_to_rest is not None else 9999
+        
+        # Считаем дистанцию доставки (от ресторана до клиента)
+        dist_trip = "?"
+        if job.dropoff_lat and job.dropoff_lon and rest_lat and rest_lon:
+            val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
+            if val: dist_trip = val
+
+        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+
+        response_data.append({
+            "id": job.id,
+            "restaurant_name": job.partner.name,
+            "restaurant_address": job.partner.address,
+            "dropoff_address": job.dropoff_address,
+            "fee": job.delivery_fee,
+            "price": job.order_price,
+            "dist_to_rest": dist_to_rest, # Дистанция подлета
+            "dist_trip": dist_trip,       # Дистанция поездки
+            "payment_type": job.payment_type,
+            "is_return": job.is_return_required,
+            "comment": job.comment,
+            "_sort_key": sort_dist
+        })
+
+    # 3. Сортируем: сначала ближайшие рестораны
+    response_data.sort(key=lambda x: x["_sort_key"])
+    
+    return JSONResponse(response_data)
+
+
 @app.get("/api/courier/history")
 async def get_courier_history(
     courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)
