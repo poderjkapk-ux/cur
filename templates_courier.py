@@ -1,4 +1,3 @@
-
 from templates_saas import GLOBAL_STYLES
 
 # Импорт моделей для типизации
@@ -171,6 +170,19 @@ PWA_STYLES = """
     .msg.me { align-self: flex-end; background: var(--primary); border-bottom-right-radius: 4px; }
     .msg.other { align-self: flex-start; background: #334155; border-bottom-left-radius: 4px; }
     .chat-input { flex: 1; background: #1e293b; border: 1px solid var(--border); padding: 12px; border-radius: 25px; color: white; }
+
+    /* --- НОВЫЕ СТИЛИ ДЛЯ ОПЛАТЫ И ГОТОВНОСТИ --- */
+    .client-pay-box {
+        background: #fce7f3; color: #be185d; 
+        padding: 10px; border-radius: 8px; margin-bottom: 15px; 
+        font-weight: bold; text-align: center; border: 1px dashed #be185d;
+    }
+    .ready-badge {
+        background: #4ade80; color: #064e3b; padding: 5px 10px; 
+        border-radius: 6px; font-weight: bold; display: inline-block; 
+        margin-bottom: 10px; animation: popIn 0.3s;
+    }
+    @keyframes popIn { from { transform: scale(0.5); opacity:0; } to { transform: scale(1); opacity:1; } }
 </style>
 """
 
@@ -327,6 +339,7 @@ def get_courier_pwa_html(courier: Courier):
                     <span id="job-title">Замовлення #...</span>
                     <span id="job-price" style="color: var(--status-active)">+0 ₴</span>
                 </div>
+                
                 <div class="sheet-subtitle" id="job-status-desc">Статус...</div>
                 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
@@ -472,8 +485,7 @@ def get_courier_pwa_html(courier: Courier):
                     // Дистанция подлета
                     let distText = o.dist_to_rest !== null ? o.dist_to_rest.toFixed(1) + ' км' : '?';
                     
-                    // Дистанция ПОЕЗДКИ (Ресторан -> Клиент)
-                    // ВНИМАНИЕ: Используем двойные скобки для JS интерполяции внутри f-строки!
+                    // Дистанция ПОЕЗДКИ
                     let tripText = o.dist_trip ? `🏁 ${{parseFloat(o.dist_trip).toFixed(1)}} км` : '';
 
                     return `
@@ -521,12 +533,20 @@ def get_courier_pwa_html(courier: Courier):
                     
                     if(msg.type === 'new_order') {{
                         if (activeTab === 'orders') fetchOrders(); // Обновляем ленту
-                        else {{
-                            // Показываем модалку, только если не в ленте
-                            showNewOrderModal(msg.data);
-                        }}
+                        else showNewOrderModal(msg.data); // Показываем модалку, если не в ленте
                     }}
                     else if (msg.type === 'job_update') checkActiveJob();
+                    
+                    // --- ОБРАБОТКА ГОТОВНОСТИ ---
+                    else if (msg.type === 'job_ready') {{
+                        if (currentJob) {{
+                            currentJob.is_ready = true;
+                            renderJobSheet();
+                            if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                            alert(msg.message);
+                        }}
+                    }}
+                    
                     else if (msg.type === 'chat_message') {{
                         const sheetOpen = document.getElementById('chat-sheet').classList.contains('open');
                         if (sheetOpen && currentJob && currentJob.id == msg.job_id) renderSingleMsg(msg);
@@ -551,18 +571,12 @@ def get_courier_pwa_html(courier: Courier):
 
                     if(isOnline && socket && socket.readyState === WebSocket.OPEN) {{
                         const fd = new FormData(); fd.append('lat', latitude); fd.append('lon', longitude);
-                        // Отправляем локацию через специальный тип сообщения для handshake, если нужно, 
-                        // но сейчас бекенд принимает POST /api/courier/location.
-                        // Для сокета мы используем init_location только при старте, но тут можно оставить beacon.
                         navigator.sendBeacon('/api/courier/location', fd);
-                        
-                        // Также шлем в сокет, чтобы обновить дистанции в риалтайме
                         socket.send(JSON.stringify({{type: 'init_location', lat: latitude, lon: longitude}}));
                     }}
                 }}, console.error, {{ enableHighAccuracy: true }});
             }}
             
-            // Периодическое обновление ленты
             setInterval(() => {{
                 if (activeTab === 'orders' && isOnline && currentLat) fetchOrders();
             }}, 15000);
@@ -609,6 +623,21 @@ def get_courier_pwa_html(courier: Courier):
                 
                 document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
                 document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
+                
+                // --- СТАТУС И ГОТОВНОСТЬ ---
+                const statusDesc = document.getElementById('job-status-desc');
+                statusDesc.innerHTML = ''; // Очистка
+                
+                if (currentJob.is_ready) {{
+                    statusDesc.innerHTML += '<div class="ready-badge">🍳 ЗАМОВЛЕННЯ ГОТОВЕ!</div><br>';
+                }}
+                
+                // Если нужно взять деньги
+                if (currentJob.payment_type === 'cash' || currentJob.payment_type === 'buyout') {{
+                     let label = currentJob.payment_type === 'cash' ? '💵 ВЗЯТИ ГОТІВКУ:' : '💰 ВИКУП (Свої гроші):';
+                     statusDesc.innerHTML += `<div class="client-pay-box">${{label}} ${{currentJob.order_price}} ₴</div>`;
+                }}
+
                 document.getElementById('current-target-name').innerText = currentJob.partner_name;
                 document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
                 document.getElementById('client-phone').innerText = currentJob.customer_phone;
@@ -624,6 +653,7 @@ def get_courier_pwa_html(courier: Courier):
                 document.getElementById('btn-chat').onclick = openChat;
 
                 let destAddr = "";
+                // --- ЛОГИКА ОТОБРАЖЕНИЯ ЭТАПОВ ---
                 if (['assigned', 'ready', 'arrived_pickup'].includes(currentJob.status)) {{
                     destAddr = currentJob.partner_address;
                     document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
@@ -632,35 +662,42 @@ def get_courier_pwa_html(courier: Courier):
                     document.getElementById('step-1').className = 'step active'; document.getElementById('step-2').className = 'step';
                     
                     if (currentJob.status === 'arrived_pickup') {{
+                        // Если уже прибыли - кнопка "Забрал"
                         btnAct.innerText = '📦 Забрав замовлення';
                         btnAct.style.background = 'var(--status-active)';
                         btnAct.onclick = () => updateStatus('picked_up');
-                        document.getElementById('job-status-desc').innerText = 'Чекайте видачі замовлення';
+                        
+                        // Если еще не готово, пишем "Ждите"
+                        if (!currentJob.is_ready) {{
+                             statusDesc.innerHTML += '<span style="color:#aaa">Очікуйте видачі...</span>';
+                        }}
                     }} else {{
+                        // Если еще едем
                         btnAct.innerText = '👋 Я на місці';
                         btnAct.style.background = 'var(--status-active)';
                         btnAct.onclick = async () => {{
                              await fetch('/api/courier/arrived_pickup', {{method:'POST', body: new URLSearchParams({{job_id: currentJob.id}})}});
                              currentJob.status = 'arrived_pickup'; renderJobSheet();
                         }};
-                        document.getElementById('job-status-desc').innerText = 'Прямуйте до закладу';
+                        if (!currentJob.is_ready) statusDesc.innerHTML += '<span style="color:#aaa">Прямуйте до закладу</span>';
                     }}
                 }} else {{
+                    // Везем клиенту
                     destAddr = currentJob.customer_address;
                     document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
                     document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('client-info-block').style.display = 'block';
                     document.getElementById('step-1').className = 'step done'; document.getElementById('step-2').className = 'step active';
                     
-                    document.getElementById('job-status-desc').innerText = 'Везіть до клієнта';
-                    if (currentJob.payment_type === 'cash') document.getElementById('job-status-desc').innerText = '💵 ОТРИМАЙТЕ ГОТІВКУ!';
-                    if (currentJob.payment_type === 'buyout') document.getElementById('job-status-desc').innerText = '💰 ВІЗЬМІТЬ ГРОШІ!';
+                    if (currentJob.payment_type === 'cash') statusDesc.innerHTML = `<div class="client-pay-box">💵 ОТРИМАЙТЕ ГОТІВКУ: ${{currentJob.order_price}} ₴</div>`;
+                    else if (currentJob.payment_type === 'buyout') statusDesc.innerHTML = `<div class="client-pay-box">💰 ЗАБЕРІТЬ СВОЇ: ${{currentJob.order_price}} ₴</div>`;
+                    else statusDesc.innerHTML = 'Везіть до клієнта';
 
                     if (currentJob.is_return_required) {{
                         btnAct.innerText = '💰 Забрав гроші (Везу назад)';
                         btnAct.onclick = () => {{ if(confirm("Везти гроші в заклад?")) updateStatus('delivered'); }};
                     }} else if (currentJob.status === 'returning') {{
-                         document.getElementById('job-status-desc').innerHTML = '<b style="color:red">↩️ ПОВЕРНІТЬ ГРОШІ!</b>';
+                         statusDesc.innerHTML = '<b style="color:red">↩️ ПОВЕРНІТЬ ГРОШІ!</b>';
                          document.getElementById('addr-label').innerText = 'ВЕЗТИ ГРОШІ СЮДИ:';
                          document.getElementById('current-target-addr').innerText = currentJob.partner_address;
                          btnAct.innerText = '💵 Гроші віддав';
@@ -758,7 +795,7 @@ def get_courier_pwa_html(courier: Courier):
                 const text = input.value.trim();
                 if(!text || !currentJob) return;
                 input.value = '';
-                renderSingleMsg({{role:'courier', text:text}}); // optimistic
+                renderSingleMsg({{role:'courier', text:text}}); 
                 const fd = new FormData(); fd.append('job_id', currentJob.id); fd.append('message', text); fd.append('role', 'courier');
                 await fetch('/api/chat/send', {{method: 'POST', body: fd}});
             }}

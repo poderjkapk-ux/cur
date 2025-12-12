@@ -768,12 +768,16 @@ async def get_active_job(
     # Дополнительная инфа для статусов
     server_status = job.status # Для фронта
 
+    # --- ИЗМЕНЕНИЕ: Флаг готовности, не зависящий от статуса ---
+    is_ready = True if (job.ready_at or job.status == 'ready') else False
+
     return JSONResponse({
         "active": True,
         "job": {
             "id": job.id,
             "status": job.status,
             "server_status": server_status, # Поле для проверки готовности
+            "is_ready": is_ready,           # <--- НОВОЕ ПОЛЕ
             "partner_name": partner_name,
             "partner_address": partner_address,
             "partner_phone": partner_phone, 
@@ -1171,11 +1175,16 @@ async def partner_order_ready(
 ):
     job = await db.get(DeliveryJob, job_id)
     if not job or job.partner_id != partner.id: return JSONResponse({"status": "error"}, 404)
-    job.status = "ready"
+    
+    # --- ИЗМЕНЕНИЕ: Не меняем статус, только метку времени ---
+    # job.status = "ready" 
     job.ready_at = datetime.utcnow()
     await db.commit()
+    
+    # Отправляем курьеру событие о готовности
     if job.courier_id:
-        await manager.notify_courier(job.courier_id, {"type": "job_update", "status": "ready"})
+        await manager.notify_courier(job.courier_id, {"type": "job_ready", "message": "🍳 Замовлення готове!"})
+        
     return JSONResponse({"status": "ok"})
 
 @app.post("/api/partner/cancel_order")

@@ -316,6 +316,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         # --- КНОПКА ДЕЙСТВИЯ (ACTION BTN) ---
         action_btn = ""
         
+        # --- НОВАЯ ЛОГИКА: Проверяем ready_at ---
+        is_ready = (j.ready_at is not None) or (j.status == 'ready')
+
         if j.status == 'returning':
             # Если курьер возвращает деньги
             action_btn = f'''
@@ -325,7 +328,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             '''
         elif j.status in ['pending', 'assigned', 'arrived_pickup']:
             # Если еда еще не готова
-            if j.status != 'ready':
+            if not is_ready:
                 action_btn = f'''
                 <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
                     <i class="fa-solid fa-utensils"></i> Готово
