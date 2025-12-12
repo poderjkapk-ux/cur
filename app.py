@@ -602,47 +602,59 @@ async def websocket_endpoint(
                     
                     logging.info(f"Courier {courier.id} updated location via WS: {lat}, {lon}")
 
-                    # 2. Тільки ТЕПЕР шукаємо замовлення і розраховуємо відстань
-                    result = await db.execute(
-                        select(DeliveryJob)
-                        .options(joinedload(DeliveryJob.partner))
-                        .where(DeliveryJob.status == "pending")
+                    # --- ВИПРАВЛЕННЯ: ПЕРЕВІРКА ЗАЙНЯТОСТІ ---
+                    # Якщо кур'єр вже має активне замовлення, він НЕ повинен бачити нові
+                    active_job_check = await db.execute(
+                        select(DeliveryJob.id)
+                        .where(DeliveryJob.courier_id == courier.id)
+                        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
                     )
-                    pending_jobs = result.scalars().all()
                     
-                    for job in pending_jobs:
-                        if not job.partner: continue
+                    if active_job_check.scalar():
+                         # Кур'єр зайнятий - нічого не відправляємо
+                         pass
+                    else:
+                        # 2. Тільки ТЕПЕР шукаємо замовлення і розраховуємо відстань
+                        result = await db.execute(
+                            select(DeliveryJob)
+                            .options(joinedload(DeliveryJob.partner))
+                            .where(DeliveryJob.status == "pending")
+                        )
+                        pending_jobs = result.scalars().all()
                         
-                        # Розрахунок відстані на основі СВІЖИХ координат
-                        rest_lat, rest_lon = await geocode_address(job.partner.address)
-                        dist_to_rest = calculate_distance(lat, lon, rest_lat, rest_lon)
-                        
-                        # Фільтр за відстанню (наприклад, 20 км)
-                        if dist_to_rest is not None and dist_to_rest > 20: 
-                            continue
+                        for job in pending_jobs:
+                            if not job.partner: continue
+                            
+                            # Розрахунок відстані на основі СВІЖИХ координат
+                            rest_lat, rest_lon = await geocode_address(job.partner.address)
+                            dist_to_rest = calculate_distance(lat, lon, rest_lat, rest_lon)
+                            
+                            # Фільтр за відстанню (наприклад, 20 км)
+                            if dist_to_rest is not None and dist_to_rest > 20: 
+                                continue
 
-                        dist_rest_to_client = "?"
-                        if job.dropoff_lat and job.dropoff_lon and rest_lat and rest_lon:
-                            val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
-                            if val: dist_rest_to_client = val
-                        
-                        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+                            dist_rest_to_client = "?"
+                            if job.dropoff_lat and job.dropoff_lon and rest_lat and rest_lon:
+                                val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
+                                if val: dist_rest_to_client = val
+                            
+                            payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
 
-                        job_data = {
-                            "id": job.id,
-                            "address": job.dropoff_address,
-                            "restaurant": job.partner.name,
-                            "restaurant_address": job.partner.address,
-                            "fee": job.delivery_fee,
-                            "price": job.order_price,
-                            "comment": f"[{payment_label}] {job.comment or ''}",
-                            "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
-                            "dist_rest_to_client": dist_rest_to_client,
-                            "payment_type": job.payment_type,
-                            "is_return": job.is_return_required
-                        }
-                        # Відправляємо замовлення
-                        await websocket.send_json({"type": "new_order", "data": job_data})
+                            job_data = {
+                                "id": job.id,
+                                "address": job.dropoff_address,
+                                "restaurant": job.partner.name,
+                                "restaurant_address": job.partner.address,
+                                "fee": job.delivery_fee,
+                                "price": job.order_price,
+                                "comment": f"[{payment_label}] {job.comment or ''}",
+                                "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
+                                "dist_rest_to_client": dist_rest_to_client,
+                                "payment_type": job.payment_type,
+                                "is_return": job.is_return_required
+                            }
+                            # Відправляємо замовлення
+                            await websocket.send_json({"type": "new_order", "data": job_data})
                 
                 # Обробка пінгів (якщо вони приходять як JSON, хоча зазвичай це текст)
                 elif data == "ping":
@@ -668,8 +680,18 @@ async def get_open_orders(
 ):
     """
     Повертає список доступних замовлень, відсортованих за відстанню до закладу.
+    ВИПРАВЛЕНО: Якщо кур'єр зайнятий, повертає порожній список.
     """
-    # 1. Берем все заказы со статусом pending
+    # 1. Перевірка зайнятості
+    active_check = await db.execute(
+        select(DeliveryJob.id)
+        .where(DeliveryJob.courier_id == courier.id)
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+    )
+    if active_check.scalar():
+        return JSONResponse([]) # Зайнятий кур'єр не бачить стрічку
+
+    # 2. Берем все заказы со статусом pending
     result = await db.execute(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.partner))
@@ -682,7 +704,7 @@ async def get_open_orders(
     for job in jobs:
         if not job.partner: continue
         
-        # 2. Получаем координаты ресторана (используем кэш геокодера)
+        # 3. Получаем координаты ресторана (используем кэш геокодера)
         rest_lat, rest_lon = await geocode_address(job.partner.address)
         
         dist_to_rest = None
@@ -715,7 +737,7 @@ async def get_open_orders(
             "_sort_key": sort_dist
         })
 
-    # 3. Сортируем: сначала ближайшие рестораны
+    # 4. Сортируем: сначала ближайшие рестораны
     response_data.sort(key=lambda x: x["_sort_key"])
     
     return JSONResponse(response_data)
@@ -1124,6 +1146,15 @@ async def create_partner_order(
     await db.refresh(job)
 
     # 3. Notify Couriers
+    # ВИПРАВЛЕННЯ: Спочатку знаходимо всіх ЗАЙНЯТИХ кур'єрів
+    busy_couriers_res = await db.execute(
+        select(DeliveryJob.courier_id)
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        .where(DeliveryJob.courier_id.is_not(None))
+    )
+    busy_ids = set(busy_couriers_res.scalars().all())
+
+    # Знаходимо всіх онлайн кур'єрів
     res = await db.execute(select(Courier).where(Courier.is_online == True))
     online_couriers = res.scalars().all()
     
@@ -1160,11 +1191,15 @@ async def create_partner_order(
             await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн")
 
     for c in online_couriers:
+        # ПРОПУСКАЄМО ЗАЙНЯТИХ КУР'ЄРІВ
+        if c.id in busy_ids: continue
         asyncio.create_task(notify_courier_async(c))
 
     # 4. Notify TG
     res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
     for c in res_tg.scalars().all():
+        # Теж пропускаємо зайнятих для TG сповіщень
+        if c.id in busy_ids: continue
         asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {delivery_fee} грн\n📍 {partner.name}"))
 
     return RedirectResponse("/partner/dashboard", status_code=303)
@@ -1253,10 +1288,21 @@ async def partner_boost_order(
     job.delivery_fee += amount
     await db.commit()
     
+    # ВИПРАВЛЕННЯ: Фільтруємо зайнятих кур'єрів
+    busy_couriers_res = await db.execute(
+        select(DeliveryJob.courier_id)
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        .where(DeliveryJob.courier_id.is_not(None))
+    )
+    busy_ids = set(busy_couriers_res.scalars().all())
+
     # Мгновенно уведомляем всех онлайн-курьеров
     online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
     
     for c in online_couriers:
+        # ПРОПУСКАЄМО ЗАЙНЯТИХ
+        if c.id in busy_ids: continue
+        
         # Отправляем событие 'new_order', чтобы PWA курьера обновило список или показало модалку
         await manager.notify_courier(c.id, {
             "type": "new_order", 
