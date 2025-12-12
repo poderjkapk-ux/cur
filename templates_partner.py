@@ -139,7 +139,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     Включает:
     - Интерактивную карту Leaflet для выбора точки.
     - Умный поиск (Photon) с поддержкой опечаток.
-    - Статусы: "КУР'ЄР ЧЕКАЄ", "ПОВЕРНЕННЯ".
+    - Автоматический перелет маркера при выборе адреса.
     """
     
     # Разделяем активные и завершенные
@@ -328,8 +328,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
         
         /* --- НОВЫЕ СТИЛИ ДЛЯ ПОИСКА И КАРТЫ --- */
-        .autocomplete-wrapper {{ position: relative; }}
-        .autocomplete-results {{ position: absolute; top: 100%; left: 0; right: 0; background: #1e293b; border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px; max-height: 200px; overflow-y: auto; z-index: 1000; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
+        .autocomplete-wrapper {{ position: relative; z-index: 1001; }}
+        .autocomplete-results {{ position: absolute; top: 100%; left: 0; right: 0; background: #1e293b; border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px; max-height: 200px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
         .autocomplete-item {{ padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: #cbd5e1; display:flex; flex-direction:column; }}
         .autocomplete-item small {{ color: #64748b; font-size: 0.8rem; margin-top:2px; }}
         .autocomplete-item:hover {{ background: var(--primary); color: white; }}
@@ -386,7 +386,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
                         <div class="autocomplete-wrapper">
                             <label>Куди везти (Введіть вулицю або перетягніть пін)</label>
-                            <input type="text" id="addr_input" name="dropoff_address" placeholder="Почніть вводити вулицю..." required>
+                            <input type="text" id="addr_input" name="dropoff_address" placeholder="Почніть вводити вулицю..." required autocomplete="off">
                             <div id="addr_results" class="autocomplete-results"></div>
                         </div>
                         
@@ -614,6 +614,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                     latInput.value = lat;
                                     lonInput.value = lon;
                                     
+                                    // ПЕРЕМЕЩАЕМ МАРКЕР НА ВЫБРАННЫЙ АДРЕС
                                     if(pickerMap) {{
                                         pickerMarker.setLatLng([lat, lon]);
                                         pickerMap.setView([lat, lon], 16);
