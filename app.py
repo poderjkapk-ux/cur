@@ -561,7 +561,7 @@ async def get_firebase_sw():
     """
     return Response(content=content, media_type="application/javascript")
 
-# --- WEBSOCKET COURIER ---
+# --- WEBSOCKET COURIER (UPDATED LOGIC) ---
 @app.websocket("/ws/courier")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -580,53 +580,79 @@ async def websocket_endpoint(
 
     await manager.connect_courier(websocket, courier.id)
     
-    # Синхронизация ожидающих заказов
-    try:
-        result = await db.execute(
-            select(DeliveryJob)
-            .options(joinedload(DeliveryJob.partner))
-            .where(DeliveryJob.status == "pending")
-        )
-        pending_jobs = result.scalars().all()
-        
-        for job in pending_jobs:
-            if not job.partner: continue
-            
-            rest_lat, rest_lon = await geocode_address(job.partner.address)
-            dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
-            
-            if dist_to_rest is not None and dist_to_rest > 20: 
-                continue
-
-            dist_rest_to_client = "?"
-            if job.dropoff_lat and job.dropoff_lon and rest_lat and rest_lon:
-                val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
-                if val: dist_rest_to_client = val
-
-            job_data = {
-                "id": job.id,
-                "address": job.dropoff_address,
-                "restaurant": job.partner.name,
-                "restaurant_address": job.partner.address,
-                "fee": job.delivery_fee,
-                "price": job.order_price,
-                "comment": job.comment,
-                "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
-                "dist_rest_to_client": dist_rest_to_client,
-                # Добавляем новые поля в синхронизацию
-                "payment_type": job.payment_type,
-                "is_return": job.is_return_required
-            }
-            await websocket.send_json({"type": "new_order", "data": job_data})
-            
-    except Exception as e:
-        logging.error(f"Sync error for courier {courier.id}: {e}")
-
     try:
         while True:
-            data = await websocket.receive_text()
-            if data == "ping":
-                await websocket.send_text("pong")
+            # Чекаємо повідомлення від клієнта (PWA)
+            data_text = await websocket.receive_text()
+            
+            try:
+                # Намагаємося розпарсити JSON (на випадок init_location)
+                data = json.loads(data_text)
+                
+                # --- ЛОГІКА "РУКОСТИСКАННЯ" (HANDSHAKE) ---
+                if data.get("type") == "init_location":
+                    # 1. Оновлюємо координати кур'єра СВІЖИМИ даними
+                    lat = float(data.get("lat"))
+                    lon = float(data.get("lon"))
+                    
+                    courier.lat = lat
+                    courier.lon = lon
+                    courier.last_seen = datetime.utcnow()
+                    await db.commit() # Зберігаємо в БД
+                    
+                    logging.info(f"Courier {courier.id} updated location via WS: {lat}, {lon}")
+
+                    # 2. Тільки ТЕПЕР шукаємо замовлення і розраховуємо відстань
+                    result = await db.execute(
+                        select(DeliveryJob)
+                        .options(joinedload(DeliveryJob.partner))
+                        .where(DeliveryJob.status == "pending")
+                    )
+                    pending_jobs = result.scalars().all()
+                    
+                    for job in pending_jobs:
+                        if not job.partner: continue
+                        
+                        # Розрахунок відстані на основі СВІЖИХ координат
+                        rest_lat, rest_lon = await geocode_address(job.partner.address)
+                        dist_to_rest = calculate_distance(lat, lon, rest_lat, rest_lon)
+                        
+                        # Фільтр за відстанню (наприклад, 20 км)
+                        if dist_to_rest is not None and dist_to_rest > 20: 
+                            continue
+
+                        dist_rest_to_client = "?"
+                        if job.dropoff_lat and job.dropoff_lon and rest_lat and rest_lon:
+                            val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
+                            if val: dist_rest_to_client = val
+                        
+                        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+
+                        job_data = {
+                            "id": job.id,
+                            "address": job.dropoff_address,
+                            "restaurant": job.partner.name,
+                            "restaurant_address": job.partner.address,
+                            "fee": job.delivery_fee,
+                            "price": job.order_price,
+                            "comment": f"[{payment_label}] {job.comment or ''}",
+                            "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
+                            "dist_rest_to_client": dist_rest_to_client,
+                            "payment_type": job.payment_type,
+                            "is_return": job.is_return_required
+                        }
+                        # Відправляємо замовлення
+                        await websocket.send_json({"type": "new_order", "data": job_data})
+                
+                # Обробка пінгів (якщо вони приходять як JSON, хоча зазвичай це текст)
+                elif data == "ping":
+                    await websocket.send_text("pong")
+
+            except json.JSONDecodeError:
+                # Якщо прийшов просто текст "ping"
+                if data_text == "ping":
+                    await websocket.send_text("pong")
+
     except WebSocketDisconnect:
         manager.disconnect_courier(courier.id)
     except Exception as e:
@@ -1024,19 +1050,38 @@ async def create_partner_order(
     payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(payment_type, "Оплата")
 
     async def notify_courier_async(courier):
-        dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
-        if dist_to_rest is not None and dist_to_rest > 20: return 
+        # UPDATED: Проверка свежести координат для Push
+        # Если координаты старые (>30 мин), считаем их недостоверными
+        is_location_fresh = True
+        if courier.last_seen:
+            diff = datetime.utcnow() - courier.last_seen
+            if diff.total_seconds() > 1800: # 30 минут
+                is_location_fresh = False
+        
+        dist_to_rest = None
+        if is_location_fresh and courier.lat and courier.lon and rest_lat and rest_lon:
+            dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
+        
+        # Фильтр: если знаем точно, что далеко - не шлем
+        if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
+            return 
+            
+        display_dist = dist_to_rest if (is_location_fresh and dist_to_rest is not None) else "?"
 
         personal_data = {
             "id": job.id, "address": dropoff_address, 
             "restaurant": partner.name, "restaurant_address": partner.address,
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
-            "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
+            "dist_to_rest": display_dist,
             # Додаємо прапорці для PWA
             "is_return": is_return_required,
             "payment_type": payment_type
         }
+        
+        # WebSocket отправляем только если соединение активно (это обработает ConnectionManager внутри)
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
+        
+        # Push отправляем всем онлайн (даже если WS отпал, но в базе online)
         if courier.fcm_token:
             await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн")
 
