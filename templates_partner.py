@@ -538,35 +538,38 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             // 1. Инициализация мини-карты (при первом фокусе или вводе)
             function initPickerMap(lat, lon) {{
                 if (pickerMap) return;
-                pickerMapDiv.classList.add('visible');
-                mapHint.style.display = 'block';
-                
-                // Центр карты: либо результат поиска, либо Киев по умолчанию
-                const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52];
-                
-                pickerMap = L.map('picker-map').setView(startPos, 13);
-                L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(pickerMap);
-                
-                // Создаем перетаскиваемый маркер
-                pickerMarker = L.marker(startPos, {{draggable: true}}).addTo(pickerMap);
-                
-                // Слушаем перетаскивание
-                pickerMarker.on('dragend', function(e) {{
-                    const pos = e.target.getLatLng();
-                    latInput.value = pos.lat;
-                    lonInput.value = pos.lng;
-                    // Опционально: можно сделать обратный геокодинг, чтобы обновить текст, но не обязательно
-                }});
-                
-                // Клик по карте перемещает маркер
-                pickerMap.on('click', function(e) {{
-                    pickerMarker.setLatLng(e.latlng);
-                    latInput.value = e.latlng.lat;
-                    lonInput.value = e.latlng.lng;
-                }});
-                
-                // Фикс рендеринга Leaflet при появлении из display:none
-                setTimeout(() => pickerMap.invalidateSize(), 200);
+                try {{
+                    pickerMapDiv.classList.add('visible');
+                    mapHint.style.display = 'block';
+                    
+                    // Центр карты: либо результат поиска, либо Киев по умолчанию
+                    const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52];
+                    
+                    pickerMap = L.map('picker-map').setView(startPos, 13);
+                    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(pickerMap);
+                    
+                    // Создаем перетаскиваемый маркер
+                    pickerMarker = L.marker(startPos, {{draggable: true}}).addTo(pickerMap);
+                    
+                    // Слушаем перетаскивание
+                    pickerMarker.on('dragend', function(e) {{
+                        const pos = e.target.getLatLng();
+                        latInput.value = pos.lat;
+                        lonInput.value = pos.lng;
+                    }});
+                    
+                    // Клик по карте перемещает маркер
+                    pickerMap.on('click', function(e) {{
+                        pickerMarker.setLatLng(e.latlng);
+                        latInput.value = e.latlng.lat;
+                        lonInput.value = e.latlng.lng;
+                    }});
+                    
+                    // Фикс рендеринга Leaflet при появлении из display:none
+                    setTimeout(() => pickerMap.invalidateSize(), 200);
+                }} catch(e) {{
+                    console.error("Leaflet init error:", e);
+                }}
             }}
 
             // 2. Умный поиск через Photon
@@ -581,10 +584,12 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 
                 searchTimeout = setTimeout(async () => {{
                     try {{
-                        // Используем Photon API (лучше понимает опечатки)
-                        // lang=uk (украинский), bias к Украине
-                        const url = `https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&lang=uk&limit=5&lat=50.45&lon=30.52`;
+                        // ИСПРАВЛЕНИЕ: Убран параметр lang=uk, так как API его не поддерживает официально и выдает 400.
+                        const url = `https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=50.45&lon=30.52`;
+                        console.log("Fetching address:", url); // Log URL for debugging
+                        
                         const res = await fetch(url);
+                        if (!res.ok) throw new Error("API Network Error: " + res.status);
                         const data = await res.json();
                         
                         addrResults.innerHTML = '';
@@ -626,7 +631,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             }});
                             addrResults.style.display = 'block';
                         }} else {{ addrResults.style.display = 'none'; }}
-                    }} catch(e) {{}}
+                    }} catch(e) {{
+                        console.error("Address Search Error:", e);
+                    }}
                 }}, 400); // Debounce 400ms
             }});
             
