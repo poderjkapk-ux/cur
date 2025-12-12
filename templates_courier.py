@@ -1,3 +1,4 @@
+
 from templates_saas import GLOBAL_STYLES
 
 # Импорт моделей для типизации
@@ -103,6 +104,13 @@ PWA_STYLES = """
     }
     .oc-point.rest::before { background: #facc15; border: 2px solid #1e293b; }
     .oc-point.client::before { background: #22c55e; border: 2px solid #1e293b; }
+    
+    /* Доп. инфо о маршруте (дистанция поездки) */
+    .route-meta {
+        position: absolute; left: -5px; top: 50%; transform: translateY(-50%);
+        background: var(--bg-card); color: var(--text-muted); font-size: 0.7rem;
+        padding: 2px 0; z-index: 2;
+    }
 
     .oc-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 15px; }
     .oc-tags { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -127,7 +135,6 @@ PWA_STYLES = """
         transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
         max-height: 85vh;
         overflow-y: auto;
-        /* Отступ снизу, чтобы не перекрываться навбаром, если он есть (но мы его скрываем при активном заказе) */
     }
     .bottom-sheet.active { transform: translateY(0); }
     
@@ -386,14 +393,16 @@ def get_courier_pwa_html(courier: Courier):
         </div>
 
         <div id="orderModal" class="order-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(5px);">
-             <div style="background:white; color:black; padding:30px; border-radius:20px; width:85%; max-width:350px; text-align:center;">
-                <h2 style="margin-top:0;">🔥 Нове замовлення!</h2>
-                <div style="font-size:2.5rem; font-weight:800; color:var(--primary);" id="modal-fee">50 ₴</div>
+             <div style="background:white; color:black; padding:25px; border-radius:20px; width:90%; max-width:350px; text-align:center;">
+                <h2 style="margin-top:0; margin-bottom:10px;">🔥 Нове замовлення!</h2>
+                <div style="font-size:2.5rem; font-weight:800; color:var(--primary); margin-bottom:10px;" id="modal-fee">50 ₴</div>
                 <div id="warning-placeholder"></div>
-                <div id="modal-route" style="color:#555; margin:15px 0;"></div>
+                
+                <div id="modal-route" style="margin:15px 0;"></div>
+                
                 <input type="hidden" id="modal-job-id">
                 <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
-                <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline;">Закрити</button>
+                <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline; font-size:0.9rem;">Закрити</button>
              </div>
         </div>
 
@@ -460,7 +469,12 @@ def get_courier_pwa_html(courier: Courier):
                     if (o.payment_type === 'buyout') badgesHtml += '<span class="oc-tag" style="color:#ec4899">Викуп</span>';
                     if (o.is_return) badgesHtml += '<span class="oc-tag" style="color:#f97316">Повернення</span>';
                     
+                    // Дистанция подлета
                     let distText = o.dist_to_rest !== null ? o.dist_to_rest.toFixed(1) + ' км' : '?';
+                    
+                    // Дистанция ПОЕЗДКИ (Ресторан -> Клиент)
+                    // ВНИМАНИЕ: Используем двойные скобки для JS интерполяции внутри f-строки!
+                    let tripText = o.dist_trip ? `🏁 ${{parseFloat(o.dist_trip).toFixed(1)}} км` : '';
 
                     return `
                     <div class="${{cardClass}}">
@@ -471,6 +485,8 @@ def get_courier_pwa_html(courier: Courier):
                         <div class="oc-route">
                             <div class="oc-point rest"><div style="font-weight:600; color:white;">${{o.restaurant_name}}</div><div style="font-size:0.8rem;">${{o.restaurant_address}}</div></div>
                             <div class="oc-point client"><div style="font-weight:600; color:white;">Клієнт</div><div style="font-size:0.8rem;">${{o.dropoff_address}}</div></div>
+                            
+                            ${{tripText ? `<div style="position:absolute; left:0; top:50%; transform:translateY(-50%); font-size:0.75rem; background:var(--bg-card); color:#94a3b8; padding:2px 0; z-index:2;">${{tripText}}</div>` : ''}}
                         </div>
                         ${{o.comment ? `<div style="font-size:0.85rem; color:#94a3b8; margin-bottom:10px; background:rgba(255,255,255,0.03); padding:8px; border-radius:8px;">💬 ${{o.comment}}</div>` : ''}}
                         <div class="oc-footer">
@@ -535,7 +551,13 @@ def get_courier_pwa_html(courier: Courier):
 
                     if(isOnline && socket && socket.readyState === WebSocket.OPEN) {{
                         const fd = new FormData(); fd.append('lat', latitude); fd.append('lon', longitude);
+                        // Отправляем локацию через специальный тип сообщения для handshake, если нужно, 
+                        // но сейчас бекенд принимает POST /api/courier/location.
+                        // Для сокета мы используем init_location только при старте, но тут можно оставить beacon.
                         navigator.sendBeacon('/api/courier/location', fd);
+                        
+                        // Также шлем в сокет, чтобы обновить дистанции в риалтайме
+                        socket.send(JSON.stringify({{type: 'init_location', lat: latitude, lon: longitude}}));
                     }}
                 }}, console.error, {{ enableHighAccuracy: true }});
             }}
@@ -684,7 +706,15 @@ def get_courier_pwa_html(courier: Courier):
                 let warning = "";
                 if (data.payment_type === 'buyout') warning = `<div style="background:#fce7f3; color:#db2777; padding:10px; border-radius:8px; margin-bottom:10px; font-weight:bold;">💰 ПОТРІБЕН ВИКУП: ${{data.price}} грн</div>`;
                 document.getElementById('warning-placeholder').innerHTML = warning;
-                document.getElementById('modal-route').innerHTML = `<b>${{data.restaurant}}</b> <i class="fa-solid fa-arrow-right"></i> Клієнт`;
+                
+                // ОБНОВЛЕННЫЙ БЛОК АДРЕСОВ В МОДАЛКЕ
+                document.getElementById('modal-route').innerHTML = `
+                    <div style="text-align:left; background:rgba(0,0,0,0.05); padding:10px; border-radius:8px; font-size:0.9rem;">
+                        <div style="margin-bottom:8px;"><i class="fa-solid fa-shop" style="color:#f59e0b"></i> <b>${{data.restaurant}}</b><br><span style="color:#555; font-size:0.8rem">${{data.restaurant_address}}</span></div>
+                        <div><i class="fa-solid fa-location-dot" style="color:#ef4444"></i> <b>Клієнт</b><br><span style="color:#555; font-size:0.8rem">${{data.address}}</span></div>
+                    </div>
+                `;
+                
                 document.getElementById('modal-job-id').value = data.id;
                 document.getElementById('orderModal').style.display = 'flex';
             }}
