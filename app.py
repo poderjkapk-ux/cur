@@ -514,7 +514,7 @@ async def update_fcm_token(
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- Helper for Push ---
+# --- Helper for Push (ОБНОВЛЕННАЯ ФУНКЦИЯ ДЛЯ PWA) ---
 async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str):
     if not courier_tokens: return
     try:
@@ -522,16 +522,40 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
             msg = messaging.Message(
                 notification=messaging.Notification(title=title, body=body),
                 token=token,
+                # Настройки для Android (High Priority будит телефон)
+                android=messaging.AndroidConfig(
+                    priority='high',
+                    notification=messaging.AndroidNotification(
+                        sound='default',
+                        click_action='FLUTTER_NOTIFICATION_CLICK',
+                        channel_id='high_importance_channel'
+                    )
+                ),
+                # Настройки для iOS (APNs) - критично для iPhone
+                apns=messaging.APNSConfig(
+                    headers={'apns-priority': '10'}, # 10 = отправить немедленно
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            content_available=True, # Позволяет обработку в фоне
+                            sound='default',
+                            alert=messaging.ApsAlert(title=title, body=body)
+                        )
+                    )
+                )
             )
             messaging.send(msg) 
+            logging.info(f"Push sent to {token}")
     except Exception as e:
         logging.error(f"Push Error: {e}")
 
+# --- НОВЫЙ РОУТ ДЛЯ SERVICE WORKER ---
 @app.get("/firebase-messaging-sw.js")
 async def get_firebase_sw():
     content = """
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
+    
+    // ВАШ КОНФИГ FIREBASE
     firebase.initializeApp({
         apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
         authDomain: "restifysite.firebaseapp.com",
@@ -540,26 +564,45 @@ async def get_firebase_sw():
         messagingSenderId: "679234031594",
         appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
     });
+
     const messaging = firebase.messaging();
+
+    // Обработка сообщений в фоне
     messaging.onBackgroundMessage(function(payload) {
-      self.registration.showNotification(payload.notification.title, {
+      console.log('[firebase-messaging-sw.js] Received background message ', payload);
+      
+      const notificationTitle = payload.notification.title;
+      const notificationOptions = {
         body: payload.notification.body,
-        icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png', 
-        tag: 'new-order', data: { url: '/courier/app' } 
-      });
+        icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png',
+        tag: 'new-order', 
+        requireInteraction: true,
+        data: { url: '/courier/app' }
+      };
+
+      return self.registration.showNotification(notificationTitle, notificationOptions);
     });
+
+    // Клик по уведомлению открывает приложение
     self.addEventListener('notificationclick', function(event) {
         event.notification.close();
-        event.waitUntil(clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
-            for (var i = 0; i < windowClients.length; i++) {
-                var client = windowClients[i];
-                if (client.url.indexOf('/courier/app') !== -1 && 'focus' in client) { return client.focus(); }
-            }
-            if (clients.openWindow) { return clients.openWindow('/courier/app'); }
-        }));
+        event.waitUntil(
+            clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
+                for (var i = 0; i < windowClients.length; i++) {
+                    var client = windowClients[i];
+                    if (client.url.indexOf('/courier/app') !== -1 && 'focus' in client) {
+                        return client.focus();
+                    }
+                }
+                if (clients.openWindow) {
+                    return clients.openWindow('/courier/app');
+                }
+            })
+        );
     });
     """
     return Response(content=content, media_type="application/javascript")
+
 
 # --- WEBSOCKET COURIER (UPDATED LOGIC) ---
 @app.websocket("/ws/courier")

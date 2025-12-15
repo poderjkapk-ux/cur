@@ -1,0 +1,68 @@
+importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
+importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
+
+// --- НАЛАШТУВАННЯ FIREBASE ---
+// Переконайтеся, що ці дані збігаються з тими, що в templates_courier.py
+firebase.initializeApp({
+    apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
+    authDomain: "restifysite.firebaseapp.com",
+    projectId: "restifysite",
+    storageBucket: "restifysite.firebasestorage.app",
+    messagingSenderId: "679234031594",
+    appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
+});
+
+const messaging = firebase.messaging();
+
+/**
+ * Обробка повідомлень у фоновому режимі (Background Message Handler)
+ * Спрацьовує, коли вкладка закрита або неактивна.
+ */
+messaging.onBackgroundMessage(function(payload) {
+  console.log('[firebase-messaging-sw.js] Received background message ', payload);
+  
+  // Заголовок та тіло повідомлення
+  const notificationTitle = payload.notification.title;
+  const notificationOptions = {
+    body: payload.notification.body,
+    icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png', // Іконка кур'єра
+    tag: 'new-order', // Тег для заміни старих сповіщень новими (щоб не спамити)
+    requireInteraction: true, // Повідомлення висить, поки користувач не натисне
+    data: { 
+        url: '/courier/app', // URL для відкриття
+        job_id: payload.data ? payload.data.job_id : null
+    }
+  };
+
+  return self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+/**
+ * Обробка кліку по повідомленню
+ * Відкриває PWA або фокусується на вже відкритій вкладці.
+ */
+self.addEventListener('notificationclick', function(event) {
+    console.log('[firebase-messaging-sw.js] Notification click received.');
+    
+    event.notification.close(); // Закриваємо повідомлення
+
+    // URL, який треба відкрити (беремо з data або дефолтний)
+    const urlToOpen = (event.notification.data && event.notification.data.url) || '/courier/app';
+
+    event.waitUntil(
+        clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
+            // 1. Шукаємо, чи вже відкрито вкладку з нашим додатком
+            for (var i = 0; i < windowClients.length; i++) {
+                var client = windowClients[i];
+                // Якщо вкладка знайдена і це наш URL -> фокусуємося на ній
+                if (client.url.indexOf(urlToOpen) !== -1 && 'focus' in client) {
+                    return client.focus();
+                }
+            }
+            // 2. Якщо вкладки немає -> відкриваємо нову
+            if (clients.openWindow) {
+                return clients.openWindow(urlToOpen);
+            }
+        })
+    );
+});

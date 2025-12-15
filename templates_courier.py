@@ -69,7 +69,7 @@ PWA_STYLES = """
     }
     .screen.active { display: block; }
 
-    /* --- ЛЕНТА ЗАКАЗОВ (FEED) - ИСПРАВЛЕНО --- */
+    /* --- ЛЕНТА ЗАКАЗОВ (FEED) --- */
     .feed-container {
         position: absolute;
         top: 0;
@@ -319,11 +319,25 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier):
     """
-    Полностью обновленный PWA интерфейс с Feed (Лентой заказов).
+    Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK.
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
     pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
+
+    # --- ВАЖЛИВО: ВСТАВТЕ СЮДИ ВАШІ ДАНІ З FIREBASE CONSOLE ---
+    FIREBASE_CONFIG = """
+    {
+        apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
+        authDomain: "restifysite.firebaseapp.com",
+        projectId: "restifysite",
+        storageBucket: "restifysite.firebasestorage.app",
+        messagingSenderId: "679234031594",
+        appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
+    }
+    """
+    # Знайдіть цей ключ тут: Firebase Console -> Project Settings -> Cloud Messaging -> Web Configuration -> Web Push certificates
+    VAPID_KEY = "BP5-1Obs3DLFOEXn_H-Vopc2JTmVol72wJ8JmcA0dAYFy3YCozBxSn5hbYPkckt5F0T56kiKQYi01cw0hGMOvIU" 
 
     return f"""
     <!DOCTYPE html>
@@ -444,20 +458,96 @@ def get_courier_pwa_html(courier: Courier):
         </div>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        
+        <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
+
         <script>
-            // --- GLOBAL STATE ---
+            // --- FIREBASE INIT ---
+            const firebaseConfig = {FIREBASE_CONFIG};
+            try {{
+                firebase.initializeApp(firebaseConfig);
+            }} catch(e) {{ console.error("Firebase init error", e); }}
+
+            const messaging = firebase.messaging();
+            const VAPID_KEY = "{VAPID_KEY}";
+
+            // --- PUSH & WAKE LOCK ---
+            async function initPushNotifications() {{
+                try {{
+                    const permission = await Notification.requestPermission();
+                    if (permission === 'granted') {{
+                        console.log('Push permission granted.');
+                        
+                        // ВАЖНО: Передаем VAPID Key!
+                        const token = await messaging.getToken({{ vapidKey: VAPID_KEY }});
+                        
+                        if (token) {{
+                            console.log('FCM Token:', token);
+                            await sendTokenToServer(token);
+                        }} else {{
+                            console.log('No registration token available.');
+                        }}
+                    }}
+                }} catch (err) {{
+                    console.error('Push Token Error:', err);
+                }}
+            }}
+
+            async function sendTokenToServer(token) {{
+                const fd = new FormData();
+                fd.append('token', token);
+                try {{
+                    await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
+                }} catch(e) {{}}
+            }}
+
+            // Foreground message handler
+            messaging.onMessage((payload) => {{
+                console.log('Message received.', payload);
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(e => {{}});
+                // Если данные пришли, показываем модалку
+                if (payload.data && payload.data.job_id) {{
+                     // Можно добавить логику обновления интерфейса
+                     alert("🔔 " + (payload.notification.title || "Нове повідомлення"));
+                }}
+            }});
+
+            // WAKE LOCK (Щоб екран не гас і WS не рвався)
+            let wakeLock = null;
+            async function requestWakeLock() {{
+                if ('wakeLock' in navigator) {{
+                    try {{
+                        wakeLock = await navigator.wakeLock.request('screen');
+                        console.log('Wake Lock active');
+                        document.addEventListener('visibilitychange', async () => {{
+                            if (wakeLock !== null && document.visibilityState === 'visible') {{
+                                wakeLock = await navigator.wakeLock.request('screen');
+                            }}
+                        }});
+                    }} catch (err) {{ console.log('Wake Lock error:', err); }}
+                }}
+            }}
+
+            // Инициализация по клику (требование браузеров)
+            document.addEventListener('click', () => {{
+                initPushNotifications();
+                requestWakeLock();
+            }}, {{ once: true }});
+
+            // --- APP LOGIC ---
             let currentLat = null, currentLon = null;
             let isOnline = {str(courier.is_online).lower()};
             let currentJob = null;
             let activeTab = 'map';
             let socket = null, pingInterval = null;
 
-            // --- MAP INIT ---
+            // ... (Далі йде стандартна логіка карти та сокетів, як була раніше) ...
             const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
             let marker = null, targetMarker = null, routeLine = null;
 
-            // --- TABS LOGIC ---
             function switchTab(tab) {{
                 activeTab = tab;
                 document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
@@ -475,7 +565,6 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
 
-            // --- FETCH ORDERS LOGIC ---
             async function fetchOrders() {{
                 if (!isOnline || !currentLat) return;
                 const loader = document.getElementById('feed-loader');
@@ -506,10 +595,7 @@ def get_courier_pwa_html(courier: Courier):
                     if (o.payment_type === 'buyout') badgesHtml += '<span class="oc-tag" style="color:#ec4899">Викуп</span>';
                     if (o.is_return) badgesHtml += '<span class="oc-tag" style="color:#f97316">Повернення</span>';
                     
-                    // Дистанция подлета
                     let distText = o.dist_to_rest !== null ? o.dist_to_rest.toFixed(1) + ' км' : '?';
-                    
-                    // Дистанция ПОЕЗДКИ
                     let tripText = o.dist_trip ? `🏁 ${{parseFloat(o.dist_trip).toFixed(1)}} км` : '';
 
                     return `
@@ -521,7 +607,6 @@ def get_courier_pwa_html(courier: Courier):
                         <div class="oc-route">
                             <div class="oc-point rest"><div style="font-weight:600; color:white;">${{o.restaurant_name}}</div><div style="font-size:0.8rem;">${{o.restaurant_address}}</div></div>
                             <div class="oc-point client"><div style="font-weight:600; color:white;">Клієнт</div><div style="font-size:0.8rem;">${{o.dropoff_address}}</div></div>
-                            
                             ${{tripText ? `<div style="position:absolute; left:0; top:50%; transform:translateY(-50%); font-size:0.75rem; background:var(--bg-card); color:#94a3b8; padding:2px 0; z-index:2;">${{tripText}}</div>` : ''}}
                         </div>
                         ${{o.comment ? `<div style="font-size:0.85rem; color:#94a3b8; margin-bottom:10px; background:rgba(255,255,255,0.03); padding:8px; border-radius:8px;">💬 ${{o.comment}}</div>` : ''}}
@@ -540,7 +625,6 @@ def get_courier_pwa_html(courier: Courier):
                 switchTab('map');
             }}
 
-            // --- GEOLOCATION & SOCKET ---
             function connectWS() {{
                 if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -556,12 +640,10 @@ def get_courier_pwa_html(courier: Courier):
                     const msg = JSON.parse(e.data);
                     
                     if(msg.type === 'new_order') {{
-                        if (activeTab === 'orders') fetchOrders(); // Обновляем ленту
-                        else showNewOrderModal(msg.data); // Показываем модалку, если не в ленте
+                        if (activeTab === 'orders') fetchOrders(); 
+                        else showNewOrderModal(msg.data); 
                     }}
                     else if (msg.type === 'job_update') checkActiveJob();
-                    
-                    // --- ОБРАБОТКА ГОТОВНОСТИ ---
                     else if (msg.type === 'job_ready') {{
                         if (currentJob) {{
                             currentJob.is_ready = true;
@@ -570,7 +652,6 @@ def get_courier_pwa_html(courier: Courier):
                             alert(msg.message);
                         }}
                     }}
-                    
                     else if (msg.type === 'chat_message') {{
                         const sheetOpen = document.getElementById('chat-sheet').classList.contains('open');
                         if (sheetOpen && currentJob && currentJob.id == msg.job_id) renderSingleMsg(msg);
@@ -620,7 +701,6 @@ def get_courier_pwa_html(courier: Courier):
             }}
             if(isOnline) connectWS();
 
-            // --- JOB LOGIC ---
             async function checkActiveJob() {{
                 try {{
                     const res = await fetch('/api/courier/active_job');
@@ -629,11 +709,11 @@ def get_courier_pwa_html(courier: Courier):
                         currentJob = data.job;
                         renderJobSheet();
                         switchTab('map');
-                        document.querySelector('.bottom-nav').style.display = 'none'; // Скрываем табы
+                        document.querySelector('.bottom-nav').style.display = 'none';
                     }} else {{
                         document.getElementById('job-sheet').classList.remove('active');
                         currentJob = null;
-                        document.querySelector('.bottom-nav').style.display = 'flex'; // Показываем табы
+                        document.querySelector('.bottom-nav').style.display = 'flex';
                         if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
                         if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
                     }}
@@ -648,15 +728,13 @@ def get_courier_pwa_html(courier: Courier):
                 document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
                 document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
                 
-                // --- СТАТУС И ГОТОВНОСТЬ ---
                 const statusDesc = document.getElementById('job-status-desc');
-                statusDesc.innerHTML = ''; // Очистка
+                statusDesc.innerHTML = '';
                 
                 if (currentJob.is_ready) {{
                     statusDesc.innerHTML += '<div class="ready-badge">🍳 ЗАМОВЛЕННЯ ГОТОВЕ!</div><br>';
                 }}
                 
-                // Если нужно взять деньги
                 if (currentJob.payment_type === 'cash' || currentJob.payment_type === 'buyout') {{
                      let label = currentJob.payment_type === 'cash' ? '💵 ВЗЯТИ ГОТІВКУ:' : '💰 ВИКУП (Свої гроші):';
                      statusDesc.innerHTML += `<div class="client-pay-box">${{label}} ${{currentJob.order_price}} ₴</div>`;
@@ -677,7 +755,6 @@ def get_courier_pwa_html(courier: Courier):
                 document.getElementById('btn-chat').onclick = openChat;
 
                 let destAddr = "";
-                // --- ЛОГИКА ОТОБРАЖЕНИЯ ЭТАПОВ ---
                 if (['assigned', 'ready', 'arrived_pickup'].includes(currentJob.status)) {{
                     destAddr = currentJob.partner_address;
                     document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
@@ -686,17 +763,11 @@ def get_courier_pwa_html(courier: Courier):
                     document.getElementById('step-1').className = 'step active'; document.getElementById('step-2').className = 'step';
                     
                     if (currentJob.status === 'arrived_pickup') {{
-                        // Если уже прибыли - кнопка "Забрал"
                         btnAct.innerText = '📦 Забрав замовлення';
                         btnAct.style.background = 'var(--status-active)';
                         btnAct.onclick = () => updateStatus('picked_up');
-                        
-                        // Если еще не готово, пишем "Ждите"
-                        if (!currentJob.is_ready) {{
-                             statusDesc.innerHTML += '<span style="color:#aaa">Очікуйте видачі...</span>';
-                        }}
+                        if (!currentJob.is_ready) statusDesc.innerHTML += '<span style="color:#aaa">Очікуйте видачі...</span>';
                     }} else {{
-                        // Если еще едем
                         btnAct.innerText = '👋 Я на місці';
                         btnAct.style.background = 'var(--status-active)';
                         btnAct.onclick = async () => {{
@@ -706,7 +777,6 @@ def get_courier_pwa_html(courier: Courier):
                         if (!currentJob.is_ready) statusDesc.innerHTML += '<span style="color:#aaa">Прямуйте до закладу</span>';
                     }}
                 }} else {{
-                    // Везем клиенту
                     destAddr = currentJob.customer_address;
                     document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
                     document.getElementById('current-target-addr').innerText = destAddr;
@@ -732,7 +802,6 @@ def get_courier_pwa_html(courier: Courier):
                         btnAct.onclick = () => updateStatus('delivered');
                     }}
                     
-                    // Рисуем маршрут к клиенту
                     if (currentJob.customer_lat && currentJob.customer_lon && !targetMarker) {{
                         const pos = [currentJob.customer_lat, currentJob.customer_lon];
                         targetMarker = L.marker(pos).addTo(map);
@@ -768,7 +837,6 @@ def get_courier_pwa_html(courier: Courier):
                 if (data.payment_type === 'buyout') warning = `<div style="background:#fce7f3; color:#db2777; padding:10px; border-radius:8px; margin-bottom:10px; font-weight:bold;">💰 ПОТРІБЕН ВИКУП: ${{data.price}} грн</div>`;
                 document.getElementById('warning-placeholder').innerHTML = warning;
                 
-                // ОБНОВЛЕННЫЙ БЛОК АДРЕСОВ В МОДАЛКЕ
                 document.getElementById('modal-route').innerHTML = `
                     <div style="text-align:left; background:rgba(0,0,0,0.05); padding:10px; border-radius:8px; font-size:0.9rem;">
                         <div style="margin-bottom:8px;"><i class="fa-solid fa-shop" style="color:#f59e0b"></i> <b>${{data.restaurant}}</b><br><span style="color:#555; font-size:0.8rem">${{data.restaurant_address}}</span></div>
@@ -781,7 +849,6 @@ def get_courier_pwa_html(courier: Courier):
             }}
             function closeOrderModal() {{ document.getElementById('orderModal').style.display = 'none'; }}
 
-            // --- CHAT & HISTORY ---
             async function toggleHistory(show) {{
                 const modal = document.getElementById('history-modal');
                 if(show) {{
