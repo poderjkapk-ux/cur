@@ -1,8 +1,8 @@
 importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
 importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
 
-// --- НАЛАШТУВАННЯ FIREBASE ---
-// Переконайтеся, що ці дані збігаються з тими, що в templates_courier.py
+// --- 1. НАЛАШТУВАННЯ FIREBASE ---
+// Ці дані повинні збігатися з тими, що у вас в templates_courier.py
 firebase.initializeApp({
     apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
     authDomain: "restifysite.firebaseapp.com",
@@ -15,22 +15,32 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 /**
- * Обробка повідомлень у фоновому режимі (Background Message Handler)
- * Спрацьовує, коли вкладка закрита або неактивна.
+ * --- 2. ОБРОБКА ПОВІДОМЛЕНЬ У ФОНІ (Background Handler) ---
+ * Ця функція спрацьовує, коли додаток закритий або згорнутий.
+ * Ми беремо дані з payload.data, щоб сформувати сповіщення самостійно.
  */
 messaging.onBackgroundMessage(function(payload) {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
+
+  // Отримуємо дані. Якщо ключів немає, використовуємо дефолтні значення.
+  // Важливо: ми використовуємо payload.data, тому що в app.py ми відправляємо дані саме туди.
+  const data = payload.data || {};
   
-  // Заголовок та тіло повідомлення
-  const notificationTitle = payload.notification.title;
+  const notificationTitle = data.title || "Restify Courier";
   const notificationOptions = {
-    body: payload.notification.body,
+    body: data.body || "Нове замовлення!",
     icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png', // Іконка кур'єра
-    tag: 'new-order', // Тег для заміни старих сповіщень новими (щоб не спамити)
-    requireInteraction: true, // Повідомлення висить, поки користувач не натисне
+    
+    // Тег дозволяє замінювати старі повідомлення новими (щоб не було "смітника" в шторці)
+    tag: 'new-order', 
+    
+    // Повідомлення не зникне саме, поки користувач не натисне або не свайпне
+    requireInteraction: true,
+    
+    // Передаємо URL, який треба відкрити при кліку
     data: { 
-        url: '/courier/app', // URL для відкриття
-        job_id: payload.data ? payload.data.job_id : null
+        url: data.url || '/courier/app',
+        job_id: data.job_id
     }
   };
 
@@ -38,28 +48,30 @@ messaging.onBackgroundMessage(function(payload) {
 });
 
 /**
- * Обробка кліку по повідомленню
- * Відкриває PWA або фокусується на вже відкритій вкладці.
+ * --- 3. ОБРОБКА КЛІКУ ПО ПОВІДОМЛЕННЮ ---
+ * Коли кур'єр натискає на сповіщення, ми відкриваємо додаток (PWA)
+ * або фокусуємося на вже відкритій вкладці.
  */
 self.addEventListener('notificationclick', function(event) {
     console.log('[firebase-messaging-sw.js] Notification click received.');
-    
-    event.notification.close(); // Закриваємо повідомлення
 
-    // URL, який треба відкрити (беремо з data або дефолтний)
+    // Закриваємо повідомлення в шторці
+    event.notification.close();
+
+    // Отримуємо URL з даних повідомлення (або дефолтний)
     const urlToOpen = (event.notification.data && event.notification.data.url) || '/courier/app';
 
+    // Магія PWA: шукаємо відкриті вікна браузера
     event.waitUntil(
         clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
-            // 1. Шукаємо, чи вже відкрито вкладку з нашим додатком
+            // 1. Якщо вкладка вже відкрита - фокусуємося на ній
             for (var i = 0; i < windowClients.length; i++) {
                 var client = windowClients[i];
-                // Якщо вкладка знайдена і це наш URL -> фокусуємося на ній
                 if (client.url.indexOf(urlToOpen) !== -1 && 'focus' in client) {
                     return client.focus();
                 }
             }
-            // 2. Якщо вкладки немає -> відкриваємо нову
+            // 2. Якщо вкладки немає - відкриваємо нову
             if (clients.openWindow) {
                 return clients.openWindow(urlToOpen);
             }

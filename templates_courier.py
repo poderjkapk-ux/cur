@@ -494,6 +494,16 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
 
+            // Слушаем обновление токена (FIX для стабильности)
+            messaging.onTokenRefresh(() => {{
+                messaging.getToken().then((refreshedToken) => {{
+                    console.log('Token refreshed.');
+                    sendTokenToServer(refreshedToken);
+                }}).catch((err) => {{
+                    console.log('Unable to retrieve refreshed token ', err);
+                }});
+            }});
+
             async function sendTokenToServer(token) {{
                 const fd = new FormData();
                 fd.append('token', token);
@@ -507,10 +517,12 @@ def get_courier_pwa_html(courier: Courier):
                 console.log('Message received.', payload);
                 const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
                 audio.play().catch(e => {{}});
-                // Если данные пришли, показываем модалку
+                // Если данные пришли, показываем модалку или Toast
                 if (payload.data && payload.data.job_id) {{
-                     // Можно добавить логику обновления интерфейса
-                     alert("🔔 " + (payload.notification.title || "Нове повідомлення"));
+                    // Вместо alert лучше использовать кастомное уведомление или обновить интерфейс
+                    // alert("🔔 Нове замовлення!"); 
+                    // Можно вызвать функцию обновления списка заказов
+                    if(activeTab === 'orders') fetchOrders();
                 }}
             }});
 

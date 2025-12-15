@@ -84,7 +84,7 @@ class ConnectionManager:
                 logging.error(f"WS Error (Courier {courier_id}): {e}")
                 self.disconnect_courier(courier_id)
 
-    # --- Методи для ПАРТНЕРОВ (Ресторанов) ---
+    # --- Методы для ПАРТНЕРОВ (Ресторанов) ---
     async def connect_partner(self, websocket: WebSocket, partner_id: int):
         await websocket.accept()
         self.active_partners[partner_id] = websocket
@@ -514,32 +514,30 @@ async def update_fcm_token(
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- Helper for Push (ОБНОВЛЕННАЯ ФУНКЦИЯ ДЛЯ PWA) ---
-async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str):
+# --- Helper for Push (ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ PWA) ---
+async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str, job_id: int = None):
     if not courier_tokens: return
     try:
         for token in courier_tokens:
             msg = messaging.Message(
-                notification=messaging.Notification(title=title, body=body),
                 token=token,
-                # Настройки для Android (High Priority будит телефон)
+                # ВАЖНО: Передаем всю информацию через data, чтобы Service Worker мог ее перехватить
+                data={
+                    "title": title,
+                    "body": body,
+                    "url": "/courier/app",
+                    "job_id": str(job_id) if job_id else ""
+                },
+                # Настройки для Android для гарантированной доставки и пробуждения
                 android=messaging.AndroidConfig(
                     priority='high',
-                    notification=messaging.AndroidNotification(
-                        sound='default',
-                        click_action='FLUTTER_NOTIFICATION_CLICK',
-                        channel_id='high_importance_channel'
-                    )
+                    ttl=0, # Time to live 0 = немедленная доставка
                 ),
-                # Настройки для iOS (APNs) - критично для iPhone
+                # Настройки для iOS (APNs)
                 apns=messaging.APNSConfig(
-                    headers={'apns-priority': '10'}, # 10 = отправить немедленно
+                    headers={'apns-priority': '10'},
                     payload=messaging.APNSPayload(
-                        aps=messaging.Aps(
-                            content_available=True, # Позволяет обработку в фоне
-                            sound='default',
-                            alert=messaging.ApsAlert(title=title, body=body)
-                        )
+                        aps=messaging.Aps(content_available=True)
                     )
                 )
             )
@@ -548,7 +546,7 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
     except Exception as e:
         logging.error(f"Push Error: {e}")
 
-# --- НОВЫЙ РОУТ ДЛЯ SERVICE WORKER ---
+# --- ОБНОВЛЕННЫЙ SERVICE WORKER (ИСПРАВЛЕННЫЙ) ---
 @app.get("/firebase-messaging-sw.js")
 async def get_firebase_sw():
     content = """
@@ -571,13 +569,15 @@ async def get_firebase_sw():
     messaging.onBackgroundMessage(function(payload) {
       console.log('[firebase-messaging-sw.js] Received background message ', payload);
       
-      const notificationTitle = payload.notification.title;
+      // ИСПРАВЛЕНИЕ: Берем данные из payload.data, так как мы убрали ключ notification при отправке
+      const data = payload.data || {};
+      const notificationTitle = data.title || "Restify Courier";
       const notificationOptions = {
-        body: payload.notification.body,
+        body: data.body || "Нове повідомлення",
         icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png',
         tag: 'new-order', 
         requireInteraction: true,
-        data: { url: '/courier/app' }
+        data: { url: data.url || '/courier/app' }
       };
 
       return self.registration.showNotification(notificationTitle, notificationOptions);
@@ -586,16 +586,20 @@ async def get_firebase_sw():
     // Клик по уведомлению открывает приложение
     self.addEventListener('notificationclick', function(event) {
         event.notification.close();
+        
+        // Получаем URL из данных уведомления
+        const urlToOpen = event.notification.data.url || '/courier/app';
+
         event.waitUntil(
             clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
                 for (var i = 0; i < windowClients.length; i++) {
                     var client = windowClients[i];
-                    if (client.url.indexOf('/courier/app') !== -1 && 'focus' in client) {
+                    if (client.url.indexOf(urlToOpen) !== -1 && 'focus' in client) {
                         return client.focus();
                     }
                 }
                 if (clients.openWindow) {
-                    return clients.openWindow('/courier/app');
+                    return clients.openWindow(urlToOpen);
                 }
             })
         );
@@ -1231,7 +1235,8 @@ async def create_partner_order(
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
         
         if courier.fcm_token:
-            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн")
+            # ИСПОЛЬЗУЕМ ОБНОВЛЕННУЮ ФУНКЦИЮ ПУШЕЙ
+            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн", job_id=job.id)
 
     for c in online_couriers:
         # ПРОПУСКАЄМО ЗАЙНЯТИХ КУР'ЄРІВ
