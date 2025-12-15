@@ -514,8 +514,9 @@ async def update_fcm_token(
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- Helper for Push (ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ PWA) ---
-async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str, job_id: int = None):
+# --- Helper for Push (ОБНОВЛЕННАЯ ФУНКЦИЯ) ---
+# Добавлен параметр fee для передачи цены в payload
+async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str, job_id: int = None, fee: float = None):
     if not courier_tokens: return
     try:
         for token in courier_tokens:
@@ -526,7 +527,9 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
                     "title": title,
                     "body": body,
                     "url": "/courier/app",
-                    "job_id": str(job_id) if job_id else ""
+                    "job_id": str(job_id) if job_id else "",
+                    # Передаем цену, чтобы фильтровать спам
+                    "fee": str(fee) if fee is not None else "0"
                 },
                 # Настройки для Android для гарантированной доставки и пробуждения
                 android=messaging.AndroidConfig(
@@ -546,7 +549,8 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
     except Exception as e:
         logging.error(f"Push Error: {e}")
 
-# --- ОБНОВЛЕННЫЙ SERVICE WORKER (ИСПРАВЛЕННЫЙ) ---
+# --- ОБНОВЛЕННЫЙ SERVICE WORKER С ФИЛЬТРАЦИЕЙ СПАМА ---
+# Использует IndexedDB для проверки, видел ли курьер этот заказ с такой ценой
 @app.get("/firebase-messaging-sw.js")
 async def get_firebase_sw():
     content = """
@@ -565,22 +569,61 @@ async def get_firebase_sw():
 
     const messaging = firebase.messaging();
 
+    // --- ФИЛЬТР СПАМА (IndexedDB) ---
+    // Если курьер уже видел этот заказ с такой же (или меньшей) ценой - не показываем.
+    // Если цена выросла - показываем и обновляем запись.
+    function checkAndSaveOrder(jobId, fee) {
+        return new Promise((resolve) => {
+            if(!jobId || !fee) { resolve(true); return; } 
+
+            var req = indexedDB.open('RestifyPushDB', 1);
+            req.onupgradeneeded = function(e) { 
+                e.target.result.createObjectStore('jobs'); 
+            };
+            req.onsuccess = function(e) {
+                var db = e.target.result;
+                var tx = db.transaction('jobs', 'readwrite');
+                var store = tx.objectStore('jobs');
+                var getReq = store.get(jobId);
+                
+                getReq.onsuccess = function() {
+                    var lastFee = getReq.result;
+                    // Если старая цена есть и она больше или равна новой -> СПАМ
+                    if (lastFee && parseFloat(lastFee) >= parseFloat(fee)) {
+                        resolve(false); 
+                    } else {
+                        store.put(fee, jobId); // Сохраняем новую (высокую) цену
+                        resolve(true); 
+                    }
+                };
+                getReq.onerror = function() { resolve(true); };
+            };
+            req.onerror = function() { resolve(true); };
+        });
+    }
+
     // Обработка сообщений в фоне
     messaging.onBackgroundMessage(function(payload) {
       console.log('[firebase-messaging-sw.js] Received background message ', payload);
       
-      // ИСПРАВЛЕНИЕ: Берем данные из payload.data, так как мы убрали ключ notification при отправке
       const data = payload.data || {};
       const notificationTitle = data.title || "Restify Courier";
-      const notificationOptions = {
-        body: data.body || "Нове повідомлення",
-        icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png',
-        tag: 'new-order', 
-        requireInteraction: true,
-        data: { url: data.url || '/courier/app' }
-      };
-
-      return self.registration.showNotification(notificationTitle, notificationOptions);
+      
+      // Проверяем на спам перед показом
+      return checkAndSaveOrder(data.job_id, data.fee).then(function(shouldShow) {
+          if (shouldShow) {
+              const notificationOptions = {
+                body: data.body || "Нове повідомлення",
+                icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png',
+                tag: 'job-' + data.job_id, // Группировка по ID заказа
+                requireInteraction: true,
+                data: { url: data.url || '/courier/app' }
+              };
+              return self.registration.showNotification(notificationTitle, notificationOptions);
+          } else {
+              console.log('[SW] Notification suppressed (Duplicate/Spam) for Job ' + data.job_id);
+          }
+      });
     });
 
     // Клик по уведомлению открывает приложение
@@ -1235,8 +1278,8 @@ async def create_partner_order(
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
         
         if courier.fcm_token:
-            # ИСПОЛЬЗУЕМ ОБНОВЛЕННУЮ ФУНКЦИЮ ПУШЕЙ
-            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн", job_id=job.id)
+            # ИСПОЛЬЗУЕМ ОБНОВЛЕННУЮ ФУНКЦИЮ ПУШЕЙ с ценой
+            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн", job_id=job.id, fee=delivery_fee)
 
     for c in online_couriers:
         # ПРОПУСКАЄМО ЗАЙНЯТИХ КУР'ЄРІВ
@@ -1323,7 +1366,7 @@ async def partner_boost_order(
     """
     Увеличивает цену доставки (fee) на указанную сумму (amount).
     Только для заказов в статусе 'pending'.
-    Уведомляет всех курьеров через WebSocket.
+    Уведомляет всех курьеров через WebSocket и PUSH.
     """
     job = await db.get(DeliveryJob, job_id)
     if not job or job.partner_id != partner.id:
@@ -1351,15 +1394,24 @@ async def partner_boost_order(
         # ПРОПУСКАЄМО ЗАЙНЯТИХ
         if c.id in busy_ids: continue
         
-        # Отправляем событие 'new_order', чтобы PWA курьера обновило список или показало модалку
+        # 1. Отправляем событие по WebSocket (для открытого приложения)
         await manager.notify_courier(c.id, {
             "type": "new_order", 
             "data": {
                 "id": job.id,
-                # Дополнительные данные, если понадобятся фронтенду для обновления без перезагрузки
                 "fee": job.delivery_fee 
             }
         })
+
+        # 2. ОБНОВЛЕНИЕ: Отправляем Push (для свернутого приложения)
+        if c.fcm_token:
+             await send_push_to_couriers(
+                 [c.fcm_token], 
+                 "🔥 Ціна зросла!", 
+                 f"💰 {job.delivery_fee} грн", 
+                 job_id=job.id, 
+                 fee=job.delivery_fee
+             )
         
     return JSONResponse({"status": "ok", "new_fee": job.delivery_fee})
 
