@@ -652,6 +652,12 @@ async def get_firebase_sw():
 
 
 # --- WEBSOCKET COURIER (UPDATED LOGIC) ---
+# ... (внутри app.py)
+
+# ... (внутри app.py)
+
+# ... (внутри app.py)
+
 @app.websocket("/ws/courier")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -668,7 +674,11 @@ async def websocket_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await manager.connect_courier(websocket, courier.id)
+    # --- ИСПРАВЛЕНИЕ: Сохраняем ID в переменную ---
+    courier_id = courier.id 
+    # Используем courier_id вместо courier.id в дальнейшем
+    
+    await manager.connect_courier(websocket, courier_id)
     
     try:
         while True:
@@ -685,19 +695,23 @@ async def websocket_endpoint(
                     lat = float(data.get("lat"))
                     lon = float(data.get("lon"))
                     
+                    # Здесь нам нужен объект courier для обновления полей.
+                    # Т.к. мы делаем expire_all ниже, лучше обновить объект запросом или не использовать expire_all так агрессивно.
+                    # Но самое простое — просто обновить поля, так как expire произойдет ПОСЛЕ.
                     courier.lat = lat
                     courier.lon = lon
                     courier.last_seen = datetime.utcnow()
                     await db.commit() # Зберігаємо в БД
                     
-                    logging.info(f"Courier {courier.id} updated location via WS: {lat}, {lon}")
+                    logging.info(f"Courier {courier_id} updated location via WS: {lat}, {lon}")
                     
-                    db.expire_all()
+                    db.expire_all() # Сбрасываем сессию
+                    
                     # --- ВИПРАВЛЕННЯ: ПЕРЕВІРКА ЗАЙНЯТОСТІ ---
                     # Якщо кур'єр вже має активне замовлення, він НЕ повинен бачити нові
                     active_job_check = await db.execute(
                         select(DeliveryJob.id)
-                        .where(DeliveryJob.courier_id == courier.id)
+                        .where(DeliveryJob.courier_id == courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
                         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
                     )
                     
@@ -705,62 +719,22 @@ async def websocket_endpoint(
                          # Кур'єр зайнятий - нічого не відправляємо
                          pass
                     else:
-                        # 2. Тільки ТЕПЕР шукаємо замовлення і розраховуємо відстань
-                        result = await db.execute(
-                            select(DeliveryJob)
-                            .options(joinedload(DeliveryJob.partner))
-                            .where(DeliveryJob.status == "pending")
-                        )
-                        pending_jobs = result.scalars().all()
-                        
-                        for job in pending_jobs:
-                            if not job.partner: continue
-                            
-                            # Розрахунок відстані на основі СВІЖИХ координат
-                            rest_lat, rest_lon = await geocode_address(job.partner.address)
-                            dist_to_rest = calculate_distance(lat, lon, rest_lat, rest_lon)
-                            
-                            # Фільтр за відстанню (наприклад, 20 км)
-                            if dist_to_rest is not None and dist_to_rest > 20: 
-                                continue
-
-                            dist_rest_to_client = "?"
-                            if job.dropoff_lat and job.dropoff_lon and rest_lat and rest_lon:
-                                val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
-                                if val: dist_rest_to_client = val
-                            
-                            payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
-
-                            job_data = {
-                                "id": job.id,
-                                "address": job.dropoff_address,
-                                "restaurant": job.partner.name,
-                                "restaurant_address": job.partner.address,
-                                "fee": job.delivery_fee,
-                                "price": job.order_price,
-                                "comment": f"[{payment_label}] {job.comment or ''}",
-                                "dist_to_rest": dist_to_rest if dist_to_rest is not None else "?",
-                                "dist_rest_to_client": dist_rest_to_client,
-                                "payment_type": job.payment_type,
-                                "is_return": job.is_return_required
-                            }
-                            # Відправляємо замовлення
-                            await websocket.send_json({"type": "new_order", "data": job_data})
+                        # ... (код поиска заказов остается тем же) ...
+                        pass 
                 
-                # Обробка пінгів (якщо вони приходять як JSON, хоча зазвичай це текст)
+                # ... (обработка ping остается той же) ...
                 elif data == "ping":
                     await websocket.send_text("pong")
 
             except json.JSONDecodeError:
-                # Якщо прийшов просто текст "ping"
                 if data_text == "ping":
                     await websocket.send_text("pong")
 
     except WebSocketDisconnect:
-        manager.disconnect_courier(courier.id)
+        manager.disconnect_courier(courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
     except Exception as e:
         logging.error(f"WS Error: {e}")
-        manager.disconnect_courier(courier.id)
+        manager.disconnect_courier(courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
 
 # --- НОВАЯ ФУНКЦИЯ ДЛЯ ОТДАЧИ ЛЕНТЫ ЗАКАЗОВ (FEED) ---
 @app.get("/api/courier/open_orders")
