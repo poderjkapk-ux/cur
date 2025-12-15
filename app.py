@@ -1364,22 +1364,52 @@ async def partner_boost_order(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Увеличивает цену доставки (fee) на указанную сумму (amount).
-    Только для заказов в статусе 'pending'.
-    Уведомляет всех курьеров через WebSocket и PUSH.
+    Увеличивает цену доставки и рассылает ПОЛНЫЙ объект данных,
+    чтобы у курьера корректно отобразились адреса и новая цена.
     """
-    job = await db.get(DeliveryJob, job_id)
+    # 1. Загружаем заказ сразу с Партнером, чтобы взять адрес ресторана
+    result = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner))
+        .where(DeliveryJob.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+
     if not job or job.partner_id != partner.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
     if job.status != "pending":
          return JSONResponse({"status": "error", "message": "Замовлення вже прийнято або скасовано"}, status_code=400)
     
-    # Увеличиваем цену
+    # 2. Увеличиваем цену
     job.delivery_fee += amount
     await db.commit()
     
-    # ВИПРАВЛЕННЯ: Фільтруємо зайнятих кур'єрів
+    # 3. Подготовка данных для отправки (ГЕОКОДИНГ + СБОР ПОЛНОГО ОБЪЕКТА)
+    # Нам нужно рассчитать дистанцию заново или взять из кэша, чтобы данные были полными
+    rest_lat, rest_lon = await geocode_address(job.partner.address)
+    
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+    
+    # Формируем ПОЛНЫЙ пакет данных, как в create_order
+    # Это исправит проблему с пустыми адресами
+    full_job_data = {
+        "id": job.id,
+        "address": job.dropoff_address,
+        "restaurant": job.partner.name,
+        "restaurant_address": job.partner.address,
+        "fee": job.delivery_fee,          # Новая цена
+        "price": job.order_price,
+        "comment": f"[{payment_label}] {job.comment or ''}",
+        "payment_type": job.payment_type,
+        "is_return": job.is_return_required,
+        # Дистанцию ставим приблизительную или "?", так как для каждого курьера она своя.
+        # Но для модального окна она не критична, главное адреса.
+        "dist_to_rest": "?", 
+        "dist_rest_to_client": "?" 
+    }
+
+    # 4. Фильтруем занятых курьеров
     busy_couriers_res = await db.execute(
         select(DeliveryJob.courier_id)
         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
@@ -1387,28 +1417,35 @@ async def partner_boost_order(
     )
     busy_ids = set(busy_couriers_res.scalars().all())
 
-    # Мгновенно уведомляем всех онлайн-курьеров
+    # 5. Рассылаем всем онлайн-курьерам
     online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
     
     for c in online_couriers:
-        # ПРОПУСКАЄМО ЗАЙНЯТИХ
         if c.id in busy_ids: continue
         
-        # 1. Отправляем событие по WebSocket (для открытого приложения)
+        # Пересчитываем дистанцию для конкретного курьера (если нужно идеально точно)
+        # Но для скорости можно отправить "?" или пересчитать:
+        current_dist = "?"
+        if c.lat and c.lon and rest_lat and rest_lon:
+            d = calculate_distance(c.lat, c.lon, rest_lat, rest_lon)
+            if d: current_dist = d
+        
+        # Обновляем дистанцию в пакете для конкретного курьера
+        courier_specific_data = full_job_data.copy()
+        courier_specific_data["dist_to_rest"] = current_dist
+
+        # 1. WebSocket (обновит интерфейс без перезагрузки)
         await manager.notify_courier(c.id, {
             "type": "new_order", 
-            "data": {
-                "id": job.id,
-                "fee": job.delivery_fee 
-            }
+            "data": courier_specific_data 
         })
 
-        # 2. ОБНОВЛЕНИЕ: Отправляем Push (для свернутого приложения)
+        # 2. Push Notification (придет новая цена)
         if c.fcm_token:
              await send_push_to_couriers(
                  [c.fcm_token], 
                  "🔥 Ціна зросла!", 
-                 f"💰 {job.delivery_fee} грн", 
+                 f"💰 {job.delivery_fee} грн\n📍 {job.dropoff_address}", 
                  job_id=job.id, 
                  fee=job.delivery_fee
              )
