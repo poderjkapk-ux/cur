@@ -336,7 +336,6 @@ def get_courier_pwa_html(courier: Courier):
         appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
     }
     """
-    # Знайдіть цей ключ тут: Firebase Console -> Project Settings -> Cloud Messaging -> Web Configuration -> Web Push certificates
     VAPID_KEY = "BP5-1Obs3DLFOEXn_H-Vopc2JTmVol72wJ8JmcA0dAYFy3YCozBxSn5hbYPkckt5F0T56kiKQYi01cw0hGMOvIU" 
 
     return f"""
@@ -457,6 +456,10 @@ def get_courier_pwa_html(courier: Courier):
              </div>
         </div>
 
+        <div id="toast" style="display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); background:rgba(16, 185, 129, 0.95); color:white; padding:15px 25px; border-radius:50px; z-index:9999; box-shadow:0 10px 30px rgba(0,0,0,0.3); font-weight:bold; backdrop-filter:blur(5px); width:max-content; max-width:90%;">
+            🔔 Нове замовлення!
+        </div>
+
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -478,15 +481,10 @@ def get_courier_pwa_html(courier: Courier):
                     const permission = await Notification.requestPermission();
                     if (permission === 'granted') {{
                         console.log('Push permission granted.');
-                        
-                        // ВАЖНО: Передаем VAPID Key!
                         const token = await messaging.getToken({{ vapidKey: VAPID_KEY }});
-                        
                         if (token) {{
                             console.log('FCM Token:', token);
                             await sendTokenToServer(token);
-                        }} else {{
-                            console.log('No registration token available.');
                         }}
                     }}
                 }} catch (err) {{
@@ -494,14 +492,10 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
 
-            // Слушаем обновление токена (FIX для стабильности)
             messaging.onTokenRefresh(() => {{
                 messaging.getToken().then((refreshedToken) => {{
-                    console.log('Token refreshed.');
                     sendTokenToServer(refreshedToken);
-                }}).catch((err) => {{
-                    console.log('Unable to retrieve refreshed token ', err);
-                }});
+                }}).catch((err) => {{}});
             }});
 
             async function sendTokenToServer(token) {{
@@ -512,19 +506,29 @@ def get_courier_pwa_html(courier: Courier):
                 }} catch(e) {{}}
             }}
 
-            // Foreground message handler
+            // --- FOREGROUND MESSAGE HANDLER (С ИСПРАВЛЕНИЕМ) ---
             messaging.onMessage((payload) => {{
                 console.log('Message received.', payload);
-                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-                audio.play().catch(e => {{}});
-                // Если данные пришли, показываем модалку или Toast
+                
+                // 1. Звук (локальный файл)
+                const audio = new Audio('/static/notification.mp3'); 
+                audio.play().catch(e => console.log('Audio play failed:', e));
+                
+                // 2. Визуальное уведомление (Toast)
+                showToast(`🔔 ${{payload.notification?.title || "Нове замовлення!"}}`);
+
+                // 3. Обновление ленты
                 if (payload.data && payload.data.job_id) {{
-                    // Вместо alert лучше использовать кастомное уведомление или обновить интерфейс
-                    // alert("🔔 Нове замовлення!"); 
-                    // Можно вызвать функцию обновления списка заказов
                     if(activeTab === 'orders') fetchOrders();
                 }}
             }});
+
+            function showToast(text) {{
+                const t = document.getElementById('toast');
+                t.innerText = text;
+                t.style.display = 'block';
+                setTimeout(() => t.style.display = 'none', 5000);
+            }}
 
             // WAKE LOCK (Щоб екран не гас і WS не рвався)
             let wakeLock = null;
@@ -532,7 +536,6 @@ def get_courier_pwa_html(courier: Courier):
                 if ('wakeLock' in navigator) {{
                     try {{
                         wakeLock = await navigator.wakeLock.request('screen');
-                        console.log('Wake Lock active');
                         document.addEventListener('visibilitychange', async () => {{
                             if (wakeLock !== null && document.visibilityState === 'visible') {{
                                 wakeLock = await navigator.wakeLock.request('screen');
@@ -542,7 +545,6 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
 
-            // Инициализация по клику (требование браузеров)
             document.addEventListener('click', () => {{
                 initPushNotifications();
                 requestWakeLock();
@@ -555,7 +557,6 @@ def get_courier_pwa_html(courier: Courier):
             let activeTab = 'map';
             let socket = null, pingInterval = null;
 
-            // ... (Далі йде стандартна логіка карти та сокетів, як була раніше) ...
             const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
             let marker = null, targetMarker = null, routeLine = null;
@@ -654,6 +655,10 @@ def get_courier_pwa_html(courier: Courier):
                     if(msg.type === 'new_order') {{
                         if (activeTab === 'orders') fetchOrders(); 
                         else showNewOrderModal(msg.data); 
+                        
+                        // ЗВУК ПРИ ВХОДЯЩЕМ WS СООБЩЕНИИ (Дублирование для надежности)
+                        const audio = new Audio('/static/notification.mp3'); 
+                        audio.play().catch(e => {{}});
                     }}
                     else if (msg.type === 'job_update') checkActiveJob();
                     else if (msg.type === 'job_ready') {{
@@ -667,7 +672,7 @@ def get_courier_pwa_html(courier: Courier):
                     else if (msg.type === 'chat_message') {{
                         const sheetOpen = document.getElementById('chat-sheet').classList.contains('open');
                         if (sheetOpen && currentJob && currentJob.id == msg.job_id) renderSingleMsg(msg);
-                        else alert(`💬 Повідомлення: ${{msg.text}}`);
+                        else showToast(`💬 ${{msg.text}}`);
                     }}
                 }};
                 socket.onclose = () => {{
@@ -858,6 +863,10 @@ def get_courier_pwa_html(courier: Courier):
                 
                 document.getElementById('modal-job-id').value = data.id;
                 document.getElementById('orderModal').style.display = 'flex';
+                
+                // ЗВУК ПРИ ПОЯВЛЕНИИ МОДАЛКИ (Дублирование для надежности)
+                const audio = new Audio('/static/notification.mp3'); 
+                audio.play().catch(e => {{}});
             }}
             function closeOrderModal() {{ document.getElementById('orderModal').style.display = 'none'; }}
 
