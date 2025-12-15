@@ -691,7 +691,8 @@ async def websocket_endpoint(
                     await db.commit() # Зберігаємо в БД
                     
                     logging.info(f"Courier {courier.id} updated location via WS: {lat}, {lon}")
-
+                    
+                    db.expire_all()
                     # --- ВИПРАВЛЕННЯ: ПЕРЕВІРКА ЗАЙНЯТОСТІ ---
                     # Якщо кур'єр вже має активне замовлення, він НЕ повинен бачити нові
                     active_job_check = await db.execute(
