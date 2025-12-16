@@ -317,26 +317,18 @@ def get_courier_register_page():
     </body></html>
     """
 
-def get_courier_pwa_html(courier: Courier):
+def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key: str):
     """
     Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK.
+    ОБНОВЛЕНО: Принимает настройки Firebase из аргументов.
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
     pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
 
-    # --- ВАЖЛИВО: ВСТАВТЕ СЮДИ ВАШІ ДАНІ З FIREBASE CONSOLE ---
-    FIREBASE_CONFIG = """
-    {
-        apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
-        authDomain: "restifysite.firebaseapp.com",
-        projectId: "restifysite",
-        storageBucket: "restifysite.firebasestorage.app",
-        messagingSenderId: "679234031594",
-        appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
-    }
-    """
-    VAPID_KEY = "BP5-1Obs3DLFOEXn_H-Vopc2JTmVol72wJ8JmcA0dAYFy3YCozBxSn5hbYPkckt5F0T56kiKQYi01cw0hGMOvIU" 
+    # Если конфиг не настроен, используем заглушку
+    safe_firebase_config = firebase_config_json if firebase_config_json else "{}"
+    safe_vapid_key = vapid_key if vapid_key else ""
 
     return f"""
     <!DOCTYPE html>
@@ -466,17 +458,24 @@ def get_courier_pwa_html(courier: Courier):
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
         <script>
-            // --- FIREBASE INIT ---
-            const firebaseConfig = {FIREBASE_CONFIG};
+            // --- FIREBASE INIT (ДИНАМИЧЕСКИЙ) ---
+            const firebaseConfig = {safe_firebase_config};
+            let messaging = null;
+            
             try {{
-                firebase.initializeApp(firebaseConfig);
+                if (firebaseConfig.apiKey) {{
+                    firebase.initializeApp(firebaseConfig);
+                    messaging = firebase.messaging();
+                }} else {{
+                    console.warn("Firebase config is missing from DB");
+                }}
             }} catch(e) {{ console.error("Firebase init error", e); }}
 
-            const messaging = firebase.messaging();
-            const VAPID_KEY = "{VAPID_KEY}";
+            const VAPID_KEY = "{safe_vapid_key}";
 
             // --- PUSH & WAKE LOCK ---
             async function initPushNotifications() {{
+                if (!messaging) return; 
                 try {{
                     const permission = await Notification.requestPermission();
                     if (permission === 'granted') {{
@@ -492,11 +491,26 @@ def get_courier_pwa_html(courier: Courier):
                 }}
             }}
 
-            messaging.onTokenRefresh(() => {{
-                messaging.getToken().then((refreshedToken) => {{
-                    sendTokenToServer(refreshedToken);
-                }}).catch((err) => {{}});
-            }});
+            if (messaging) {{
+                messaging.onTokenRefresh(() => {{
+                    messaging.getToken().then((refreshedToken) => {{
+                        sendTokenToServer(refreshedToken);
+                    }}).catch((err) => {{}});
+                }});
+
+                messaging.onMessage((payload) => {{
+                    console.log('Message received.', payload);
+                    
+                    const audio = new Audio('/static/notification.mp3'); 
+                    audio.play().catch(e => console.log('Audio play failed:', e));
+                    
+                    showToast(`🔔 ${{payload.notification?.title || "Нове замовлення!"}}`);
+
+                    if (payload.data && payload.data.job_id) {{
+                        if(activeTab === 'orders') fetchOrders();
+                    }}
+                }});
+            }}
 
             async function sendTokenToServer(token) {{
                 const fd = new FormData();
@@ -505,23 +519,6 @@ def get_courier_pwa_html(courier: Courier):
                     await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
                 }} catch(e) {{}}
             }}
-
-            // --- FOREGROUND MESSAGE HANDLER (С ИСПРАВЛЕНИЕМ) ---
-            messaging.onMessage((payload) => {{
-                console.log('Message received.', payload);
-                
-                // 1. Звук (локальный файл)
-                const audio = new Audio('/static/notification.mp3'); 
-                audio.play().catch(e => console.log('Audio play failed:', e));
-                
-                // 2. Визуальное уведомление (Toast)
-                showToast(`🔔 ${{payload.notification?.title || "Нове замовлення!"}}`);
-
-                // 3. Обновление ленты
-                if (payload.data && payload.data.job_id) {{
-                    if(activeTab === 'orders') fetchOrders();
-                }}
-            }});
 
             function showToast(text) {{
                 const t = document.getElementById('toast');

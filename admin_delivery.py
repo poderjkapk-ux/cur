@@ -1,12 +1,17 @@
 import json
 import os
+import logging
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
+# FIREBASE ADMIN IMPORTS
+import firebase_admin
+from firebase_admin import credentials, get_app, delete_app
+
 # Импортируем auth вместо app, чтобы избежать циклического импорта
-from models import get_db, Courier, DeliveryPartner
+from models import get_db, Courier, DeliveryPartner, SystemSetting
 from auth import check_admin_auth 
 
 # Импортируем GLOBAL_STYLES
@@ -48,7 +53,7 @@ def save_pwa_config(config):
         json.dump(config, f, indent=4)
 
 # --- HTML TEMPLATE ---
-def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
+def get_delivery_admin_html(couriers, partners, pwa_config, fb_config_str, vapid_key, service_account_str, message=""):
     courier_rows = ""
     for c in couriers:
         status_color = "#4ade80" if c.is_active else "#f87171"
@@ -121,6 +126,11 @@ def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
         
         .pwa-settings input {{ background: rgba(0,0,0,0.2); padding: 8px; border: 1px solid #475569; border-radius: 6px; color: white; width: 100%; margin-bottom: 10px; }}
         .pwa-settings label {{ font-size: 0.8rem; color: #94a3b8; margin-bottom: 2px; display: block; }}
+
+        /* --- STYLES FOR FIREBASE PANEL --- */
+        .settings-box {{ background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 1px solid var(--border); }}
+        textarea {{ width: 100%; background: rgba(0,0,0,0.3); color: #fff; font-family: monospace; font-size: 0.85rem; min-height: 100px; border: 1px solid #475569; border-radius: 6px; padding: 8px; box-sizing: border-box; resize: vertical; }}
+        .section-label {{ color: var(--primary); font-weight: bold; margin-bottom: 5px; display: block; margin-top: 15px; }}
     </style>
     </head>
     <body>
@@ -154,40 +164,63 @@ def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
                 </div>
             </div>
 
-            <div class="panel" style="margin-top: 20px;">
-                <h2>📱 Налаштування PWA (для встановлення)</h2>
-                <form method="post" action="/admin/delivery/pwa_save" class="grid pwa-settings">
-                    <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
-                        <h3 style="margin-top:0">Courier App</h3>
-                        <label>Назва додатка</label>
-                        <input type="text" name="c_name" value="{pwa_config['courier']['name']}">
-                        <label>Коротка назва (під іконкою)</label>
-                        <input type="text" name="c_short_name" value="{pwa_config['courier']['short_name']}">
-                        <label>URL іконки (PNG, 512x512)</label>
-                        <input type="text" name="c_icon" value="{pwa_config['courier']['icon_url']}">
-                        <label>Колір теми (HEX)</label>
-                        <input type="color" name="c_color" value="{pwa_config['courier']['theme_color']}" style="height:40px;">
-                    </div>
+            <div class="grid" style="margin-top: 20px;">
+                <div class="panel">
+                    <h2>📱 Налаштування PWA (для встановлення)</h2>
+                    <form method="post" action="/admin/delivery/pwa_save" class="pwa-settings">
+                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
+                            <h3 style="margin-top:0">Courier App</h3>
+                            <label>Назва додатка</label>
+                            <input type="text" name="c_name" value="{pwa_config['courier']['name']}">
+                            <label>Коротка назва (під іконкою)</label>
+                            <input type="text" name="c_short_name" value="{pwa_config['courier']['short_name']}">
+                            <label>URL іконки (PNG, 512x512)</label>
+                            <input type="text" name="c_icon" value="{pwa_config['courier']['icon_url']}">
+                            <label>Колір теми (HEX)</label>
+                            <input type="color" name="c_color" value="{pwa_config['courier']['theme_color']}" style="height:40px;">
+                        </div>
 
-                    <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
-                        <h3 style="margin-top:0">Partner App</h3>
-                        <label>Назва додатка</label>
-                        <input type="text" name="p_name" value="{pwa_config['partner']['name']}">
-                        <label>Коротка назва</label>
-                        <input type="text" name="p_short_name" value="{pwa_config['partner']['short_name']}">
-                        <label>URL іконки</label>
-                        <input type="text" name="p_icon" value="{pwa_config['partner']['icon_url']}">
-                        <label>Колір теми</label>
-                        <input type="color" name="p_color" value="{pwa_config['partner']['theme_color']}" style="height:40px;">
-                    </div>
-                    
-                    <button type="submit" class="btn" style="grid-column: span 2;">💾 Зберегти налаштування PWA</button>
-                </form>
+                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; margin-top: 10px;">
+                            <h3 style="margin-top:0">Partner App</h3>
+                            <label>Назва додатка</label>
+                            <input type="text" name="p_name" value="{pwa_config['partner']['name']}">
+                            <label>Коротка назва</label>
+                            <input type="text" name="p_short_name" value="{pwa_config['partner']['short_name']}">
+                            <label>URL іконки</label>
+                            <input type="text" name="p_icon" value="{pwa_config['partner']['icon_url']}">
+                            <label>Колір теми</label>
+                            <input type="color" name="p_color" value="{pwa_config['partner']['theme_color']}" style="height:40px;">
+                        </div>
+                        
+                        <button type="submit" class="btn" style="margin-top: 15px; width: 100%;">💾 Зберегти налаштування PWA</button>
+                    </form>
+                </div>
+
+                <div class="panel">
+                    <h2>🔥 Firebase Cloud Messaging</h2>
+                    <form method="post" action="/admin/delivery/firebase_save">
+                        <div class="settings-box">
+                            <span class="section-label">1. Client Config (для браузера)</span>
+                            <p style="font-size:0.8rem; color:#888; margin-bottom:5px;">Project Settings -> General -> Your apps</p>
+                            <textarea name="firebase_config_json" placeholder='{{ "apiKey": "...", ... }}' required>{fb_config_str}</textarea>
+                            
+                            <span class="section-label">2. VAPID Key (для прав доступу)</span>
+                            <p style="font-size:0.8rem; color:#888; margin-bottom:5px;">Cloud Messaging -> Web configuration (Key Pair)</p>
+                            <input type="text" name="vapid_key" value="{vapid_key}" required>
+
+                            <span class="section-label">3. Service Account JSON (для сервера)</span>
+                            <p style="font-size:0.8rem; color:#888; margin-bottom:5px;">Project Settings -> Service accounts -> Generate new private key. Відкрийте файл і скопіюйте сюди ВЕСЬ вміст.</p>
+                            <textarea name="service_account_json" placeholder='{{ "type": "service_account", ... }}' style="min-height:150px;">{service_account_str}</textarea>
+                        </div>
+                        <button type="submit" class="btn" style="margin-top:15px; width: 100%;">💾 Зберегти і Перезапустити Firebase</button>
+                    </form>
+                </div>
             </div>
         </div>
     </body></html>
     """
 
+# ОБНОВЛЕНО: Получение настроек из БД и передача в шаблон
 @router.get("/admin/delivery", response_class=HTMLResponse)
 async def admin_delivery_page(
     message: str = "",
@@ -198,7 +231,16 @@ async def admin_delivery_page(
     partners = (await db.execute(select(DeliveryPartner).order_by(DeliveryPartner.id.desc()))).scalars().all()
     pwa_config = load_pwa_config()
     
-    return get_delivery_admin_html(couriers, partners, pwa_config, message)
+    # Загружаем настройки Firebase из базы
+    fb_conf = await db.get(SystemSetting, "firebase_config")
+    vapid = await db.get(SystemSetting, "vapid_key")
+    sa_conf = await db.get(SystemSetting, "firebase_service_account")
+    
+    fb_val = fb_conf.value if fb_conf else ""
+    vapid_val = vapid.value if vapid else ""
+    sa_val = sa_conf.value if sa_conf else ""
+    
+    return get_delivery_admin_html(couriers, partners, pwa_config, fb_val, vapid_val, sa_val, message)
 
 @router.post("/admin/delivery/courier/control")
 async def courier_control(
@@ -270,14 +312,66 @@ async def pwa_save_settings(
     save_pwa_config(config)
     return RedirectResponse("/admin/delivery?message=Налаштування PWA збережено", status_code=302)
 
+# НОВЫЙ РОУТ: Сохранение настроек Firebase
+@router.post("/admin/delivery/firebase_save")
+async def save_firebase_settings(
+    firebase_config_json: str = Form(...),
+    vapid_key: str = Form(...),
+    service_account_json: str = Form(""),
+    user: str = Depends(check_admin_auth),
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Сохраняем Client Config
+    conf_setting = await db.get(SystemSetting, "firebase_config")
+    if not conf_setting:
+        conf_setting = SystemSetting(key="firebase_config")
+        db.add(conf_setting)
+    conf_setting.value = firebase_config_json.strip()
+
+    # 2. Сохраняем VAPID
+    vapid_setting = await db.get(SystemSetting, "vapid_key")
+    if not vapid_setting:
+        vapid_setting = SystemSetting(key="vapid_key")
+        db.add(vapid_setting)
+    vapid_setting.value = vapid_key.strip()
+
+    # 3. Сохраняем Service Account (Server) и перезагружаем
+    msg_extra = ""
+    if service_account_json.strip():
+        sa_setting = await db.get(SystemSetting, "firebase_service_account")
+        if not sa_setting:
+            sa_setting = SystemSetting(key="firebase_service_account")
+            db.add(sa_setting)
+        sa_setting.value = service_account_json.strip()
+        
+        # --- МГНОВЕННАЯ ПЕРЕЗАГРУЗКА FIREBASE ADMIN ---
+        try:
+            cred_dict = json.loads(service_account_json)
+            cred = credentials.Certificate(cred_dict)
+            
+            # Удаляем старое приложение, если есть
+            try:
+                app = get_app()
+                delete_app(app)
+            except ValueError:
+                pass # Не было инициализировано
+            
+            firebase_admin.initialize_app(cred)
+            msg_extra = " (Server Creds Reloaded!)"
+            logging.info("Firebase Admin re-initialized via Admin Panel")
+        except Exception as e:
+            msg_extra = f" (ERROR Reloading: {e})"
+            logging.error(f"Error reloading Firebase: {e}")
+
+    await db.commit()
+    return RedirectResponse(f"/admin/delivery?message=Налаштування Firebase оновлено!{msg_extra}", status_code=302)
+
 @router.get("/courier/manifest.json")
 async def get_courier_manifest():
     conf = load_pwa_config()["courier"]
     return JSONResponse({
         "name": conf["name"],
         "short_name": conf["short_name"],
-        # ИЗМЕНЕНИЕ: Открываем приложение сразу, а не страницу входа.
-        # Это предотвращает повторный запрос логина, если куки живы.
         "start_url": "/courier/app", 
         "display": conf["display"],
         "background_color": conf["background_color"],
