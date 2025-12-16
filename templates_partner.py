@@ -29,7 +29,6 @@ def get_partner_auth_html(is_register=False, message=""):
 
     # Если регистрация - добавляем логику верификации И КАРТУ
     if is_register:
-        # Это обычная строка, поэтому фигурные скобки CSS здесь одинарные
         verify_style = """
         <style>
             .tg-verify-box { border: 2px dashed var(--border); padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center; background: rgba(255,255,255,0.02); transition: 0.3s; }
@@ -86,13 +85,12 @@ def get_partner_auth_html(is_register=False, message=""):
             <input type="text" id="addr_input" name="address" placeholder="Адреса закладу (почніть вводити)" required autocomplete="off">
             <div id="addr_results" class="autocomplete-results"></div>
         </div>
-        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті (перетягніть маркер)</div>
+        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті (Одеса)</div>
         <div id="picker-map"></div>
         <input type="hidden" id="form_lat">
         <input type="hidden" id="form_lon">
         """
 
-        # Это обычная строка, поэтому ${} для JS пишутся как есть (без двойных скобок)
         verify_script = """
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
@@ -136,7 +134,7 @@ def get_partner_auth_html(is_register=False, message=""):
             
             window.onload = initVerification;
 
-            // --- КАРТА И АВТОКОМПЛИТ ---
+            // --- КАРТА И ПОИСК ---
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
             const latInput = document.getElementById('form_lat');
@@ -146,20 +144,28 @@ def get_partner_auth_html(is_register=False, message=""):
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
-            let currentRequestController = null;
+            let latestReqId = 0; // Для отслеживания актуальности запроса
+
+            // КООРДИНАТЫ ОДЕССЫ ПО УМОЛЧАНИЮ
+            const ODESA_LAT = 46.4825;
+            const ODESA_LON = 30.7233;
 
             function initPickerMap(lat, lon) {
                 if (pickerMap) return;
                 pickerMapDiv.classList.add('visible');
                 mapHint.style.display = 'block';
                 
-                const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52];
+                const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
                 
                 pickerMap = L.map('picker-map').setView(startPos, 13);
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(pickerMap);
+                // Используем стандартные OpenStreetMap тайлы (Open Map)
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors'
+                }).addTo(pickerMap);
                 
                 pickerMarker = L.marker(startPos, {draggable: true}).addTo(pickerMap);
                 
+                // Слушатели перетаскивания
                 pickerMarker.on('dragend', function(e) {
                     const pos = e.target.getLatLng();
                     if(latInput) latInput.value = pos.lat;
@@ -178,7 +184,7 @@ def get_partner_auth_html(is_register=False, message=""):
             if(addrInput) {
                 addrInput.addEventListener('input', function() {
                     clearTimeout(searchTimeout);
-                    const query = this.value;
+                    const query = this.value.trim();
                     
                     if (!pickerMap) initPickerMap();
                     
@@ -190,34 +196,46 @@ def get_partner_auth_html(is_register=False, message=""):
                     
                     addrInput.classList.add('loading-input');
                     
+                    // Дебаунс 800мс, чтобы не дергать сервер слишком часто и не было отмен
                     searchTimeout = setTimeout(async () => {
+                        const reqId = ++latestReqId; // Увеличиваем счетчик запросов
+                        
                         try {
-                            if (currentRequestController) currentRequestController.abort();
-                            currentRequestController = new AbortController();
-                            const signal = currentRequestController.signal;
+                            // Используем Nominatim с приоритетом Одессы (viewbox)
+                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
                             
-                            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lat=50.45&lon=30.52`, { signal });
+                            const res = await fetch(url);
+                            
+                            // Если это не последний запрос, игнорируем ответ (но не отменяем его с ошибкой)
+                            if (reqId !== latestReqId) return;
+
+                            if (!res.ok) throw new Error("API Error");
                             const data = await res.json();
                             
                             addrResults.innerHTML = '';
-                            if(data.features && data.features.length > 0) {
-                                data.features.forEach(feat => {
-                                    const props = feat.properties;
+                            if(data && data.length > 0) {
+                                data.forEach(item => {
                                     const div = document.createElement('div');
                                     div.className = 'autocomplete-item';
                                     
-                                    let mainName = props.name || props.street || '';
-                                    if (props.housenumber) mainName += ', ' + props.housenumber;
-                                    let subName = [props.city, props.country].filter(Boolean).join(', ');
+                                    const displayName = item.display_name;
+                                    const parts = displayName.split(',');
+                                    const mainName = parts[0];
+                                    const subName = parts.slice(1).join(',').trim();
                                     
                                     div.innerHTML = `<span>${mainName}</span><small>${subName}</small>`;
                                     div.onclick = () => { 
-                                        addrInput.value = `${mainName}, ${props.city || ''}`;
+                                        // Вставляем более полный адрес (Город, Улица, Номер)
+                                        // Берем первые 5 частей, чтобы охватить номер, улицу, город
+                                        addrInput.value = parts.slice(0, 5).join(',').trim();
                                         addrResults.style.display = 'none';
-                                        const lat = feat.geometry.coordinates[1];
-                                        const lon = feat.geometry.coordinates[0];
+                                        
+                                        const lat = item.lat;
+                                        const lon = item.lon;
+                                        
                                         if(latInput) latInput.value = lat;
                                         if(lonInput) lonInput.value = lon;
+                                        
                                         if(pickerMap) {
                                             pickerMarker.setLatLng([lat, lon]);
                                             pickerMap.setView([lat, lon], 16);
@@ -228,15 +246,17 @@ def get_partner_auth_html(is_register=False, message=""):
                                     addrResults.appendChild(div);
                                 });
                                 addrResults.style.display = 'block';
-                            } else { addrResults.style.display = 'none'; }
+                            } else { 
+                                addrResults.style.display = 'none'; 
+                            }
                         } catch(e) {
-                             if (e.name !== 'AbortError') console.error(e);
+                             console.error("Search error:", e);
                         } finally {
-                             if (currentRequestController && !currentRequestController.signal.aborted) {
+                             if (reqId === latestReqId) {
                                  addrInput.classList.remove('loading-input');
                              }
                         }
-                    }, 500);
+                    }, 800);
                 });
                 
                 document.addEventListener('click', (e) => { 
@@ -277,8 +297,8 @@ def get_partner_auth_html(is_register=False, message=""):
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
-    Дашборд партнера. Адаптирован под мобильные устройства (Responsive).
-    ВАЖНО: Поскольку это f-строка, весь JS и CSS внутри должен использовать двойные фигурные скобки {{ }} для блоков и переменных JS.
+    Дашборд партнера. 
+    ОБНОВЛЕН: ОДЕССА ПО УМОЛЧАНИЮ + NOMINATIM + ИСПРАВЛЕНА ПОДСТАНОВКА АДРЕСА.
     """
     
     active_jobs = [j for j in jobs if j.status not in ['delivered', 'cancelled']]
@@ -499,14 +519,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             body {{ padding: 10px; }}
             .header-bar {{ margin-bottom: 20px; }}
             .header-bar h2 {{ font-size: 1.2rem; }}
-            
-            /* Panel Adjustments */
             .panel {{ padding: 15px; border-radius: 16px; }}
-            
-            /* HIDE Table Headers */
             thead {{ display: none; }}
-            
-            /* Rows as Cards */
             tr {{
                 display: block;
                 background: rgba(255,255,255,0.02);
@@ -516,7 +530,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 margin-bottom: 15px;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             }}
-            
             td {{
                 display: flex;
                 justify-content: space-between;
@@ -525,10 +538,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 border-bottom: 1px solid rgba(255,255,255,0.05);
                 text-align: right;
             }}
-            
             td:last-child {{ border-bottom: none; padding-bottom: 0; }}
-            
-            /* Add Labels via attr */
             td::before {{
                 content: attr(data-label);
                 font-weight: 600;
@@ -537,8 +547,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 text-align: left;
                 margin-right: 15px;
             }}
-            
-            /* Special handling for actions cell */
             .actions-cell {{
                 display: block;
                 margin-top: 10px;
@@ -547,11 +555,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             }}
             .actions-cell::before {{ display: none; }}
             .actions-cell > div {{ justify-content: space-between; width: 100%; }}
-            
-            /* Make buttons bigger on mobile */
             .btn-mini {{ width: 42px; height: 42px; font-size: 1.1rem; }}
-            
-            /* Payment options stack */
             .payment-options {{ grid-template-columns: 1fr; gap: 8px; }}
         }}
 
@@ -561,7 +565,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .track-card {{ max-width: 800px; height: 60vh; padding: 0; }}
         #track-map {{ flex: 1; width: 100%; min-height: 300px; }}
         
-        /* Chat */
         .chat-modal {{ height: 80vh; }}
         .chat-messages {{ flex: 1; overflow-y: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }}
         .msg {{ max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; position: relative; line-height: 1.4; }}
@@ -569,7 +572,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .msg.other {{ align-self: flex-start; background: #334155; color: white; border-bottom-left-radius: 4px; }}
         .msg-time {{ font-size: 0.7rem; opacity: 0.7; text-align: right; margin-top: 4px; }}
 
-        /* Payment Options */
         .payment-options {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }}
         .payment-option input {{ display: none; }}
         .payment-option label {{ display: block; background: rgba(255,255,255,0.05); padding: 12px; text-align: center; border-radius: 10px; cursor: pointer; border: 1px solid transparent; font-size: 0.9rem; transition: 0.2s; }}
@@ -591,7 +593,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .autocomplete-item small {{ color: #64748b; font-size: 0.8rem; margin-top:2px; }}
         .autocomplete-item:hover {{ background: var(--primary); color: white; }}
         
-        /* Spinner внутри инпута */
+        /* Spinner */
         .loading-input {{
             background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC%7Btransform-origin:center;animation:spinner_svv2 .75s infinite linear%7D@keyframes spinner_svv2%7B100%25%7Btransform:rotate(360deg)%7D%7D%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
@@ -653,7 +655,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             <div id="addr_results" class="autocomplete-results"></div>
                         </div>
                         
-                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Ви можете уточнити точку на карті перетягуванням!</div>
+                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Ви можете уточнити точку на карті (Одеса)</div>
                         <div id="picker-map"></div>
                         
                         <input type="hidden" name="lat" id="form_lat">
@@ -798,7 +800,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             }}
 
             // ==========================================
-            // ПОИСК АДРЕСА (PHOTON + LEAFLET MAP) - ИСПРАВЛЕНА ЛОГИКА ABORT
+            // ПОИСК АДРЕСА: ОБНОВЛЕН (Одесса + Nominatim + FIX "Только номер")
             // ==========================================
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
@@ -809,17 +811,27 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
-            let currentRequestController = null; // Для отмены старых запросов
+            let latestReqId = 0; // Счетчик запросов
+
+            // КООРДИНАТЫ ОДЕССЫ ПО УМОЛЧАНИЮ
+            const ODESA_LAT = 46.4825;
+            const ODESA_LON = 30.7233;
 
             function initPickerMap(lat, lon) {{
                 if (pickerMap) return;
                 try {{
                     pickerMapDiv.classList.add('visible');
                     mapHint.style.display = 'block';
-                    const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52];
+                    const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
+                    
                     pickerMap = L.map('picker-map').setView(startPos, 13);
-                    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(pickerMap);
+                    // Используем OpenStreetMap (Open Map)
+                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                        attribution: '&copy; OpenStreetMap contributors'
+                    }}).addTo(pickerMap);
+
                     pickerMarker = L.marker(startPos, {{draggable: true}}).addTo(pickerMap);
+                    
                     pickerMarker.on('dragend', function(e) {{
                         const pos = e.target.getLatLng();
                         latInput.value = pos.lat; lonInput.value = pos.lng;
@@ -835,7 +847,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             if(addrInput) {{
                 addrInput.addEventListener('input', function() {{
                     clearTimeout(searchTimeout);
-                    const query = this.value;
+                    const query = this.value.trim();
                     
                     if (!pickerMap) initPickerMap();
                     
@@ -847,55 +859,61 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                     
                     addrInput.classList.add('loading-input');
                     
+                    // Дебаунс 800мс
                     searchTimeout = setTimeout(async () => {{
+                        const reqId = ++latestReqId;
+                        
                         try {{
-                            // 1. Отменяем старый запрос
-                            if (currentRequestController) currentRequestController.abort();
-                            currentRequestController = new AbortController();
-                            const signal = currentRequestController.signal;
+                            // Используем Nominatim с приоритетом Одессы (viewbox)
+                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&accept-language=uk&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
                             
-                            let centerLat = 50.45, centerLon = 30.52;
-                            if (pickerMap) {{ const c = pickerMap.getCenter(); centerLat = c.lat; centerLon = c.lng; }}
+                            const res = await fetch(url);
+                            
+                            if (reqId !== latestReqId) return; // Игнорируем устаревший ответ
 
-                            // ВАЖНО: Используем двойные скобки для f-строки: ${{...}} превратится в ${...}
-                            const res = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=${{centerLat}}&lon=${{centerLon}}`, {{ signal }});
                             if (!res.ok) throw new Error("API Error");
                             const data = await res.json();
                             
                             addrResults.innerHTML = '';
-                            if(data.features && data.features.length > 0) {{
-                                data.features.forEach(feat => {{
-                                    const props = feat.properties;
-                                    const coords = feat.geometry.coordinates;
+                            if(data && data.length > 0) {{
+                                data.forEach(item => {{
                                     const div = document.createElement('div');
                                     div.className = 'autocomplete-item';
-                                    let mainName = props.name || props.street || '';
-                                    if (props.housenumber) mainName += ', ' + props.housenumber;
-                                    let details = [];
-                                    if(props.district) details.push(props.district);
-                                    if(props.city) details.push(props.city);
-                                    let subName = details.join(', ');
+                                    
+                                    const parts = item.display_name.split(',');
+                                    const mainName = parts[0];
+                                    const subName = parts.slice(1).join(',').trim();
+                                    
                                     div.innerHTML = `<span>${{mainName}}</span><small>${{subName}}</small>`;
                                     div.onclick = () => {{ 
-                                        addrInput.value = `${{mainName}}, ${{props.city || ''}}`;
+                                        // ИСПРАВЛЕНИЕ: Берем первые 5 частей адреса, чтобы включить
+                                        // Номер, Улицу и Город (порядок Nominatim может меняться, но начало самое важное)
+                                        addrInput.value = parts.slice(0, 5).join(',').trim();
                                         addrResults.style.display = 'none';
-                                        latInput.value = coords[1]; lonInput.value = coords[0];
-                                        if(pickerMap) {{ pickerMarker.setLatLng([coords[1], coords[0]]); pickerMap.setView([coords[1], coords[0]], 16); }} 
-                                        else {{ initPickerMap(coords[1], coords[0]); }}
+                                        
+                                        const lat = parseFloat(item.lat);
+                                        const lon = parseFloat(item.lon);
+                                        
+                                        latInput.value = lat; lonInput.value = lon;
+                                        if(pickerMap) {{ 
+                                            pickerMarker.setLatLng([lat, lon]); 
+                                            pickerMap.setView([lat, lon], 16); 
+                                        }} else {{ 
+                                            initPickerMap(lat, lon); 
+                                        }}
                                     }};
                                     addrResults.appendChild(div);
                                 }});
                                 addrResults.style.display = 'block';
                             }} else {{ addrResults.style.display = 'none'; }}
                         }} catch(e) {{ 
-                            if (e.name !== 'AbortError') console.error("Search error:", e); 
+                            console.error("Search error:", e); 
                         }} finally {{ 
-                            // 2. Убираем спиннер ТОЛЬКО если запрос не был отменен
-                            if (currentRequestController && !currentRequestController.signal.aborted) {{
+                            if (reqId === latestReqId) {{
                                 addrInput.classList.remove('loading-input'); 
                             }}
                         }}
-                    }}, 500); // Debounce 500ms
+                    }}, 800);
                 }});
                 document.addEventListener('click', (e) => {{ if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; }});
             }}
@@ -979,8 +997,10 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             function openTrackModal(jobId) {{
                 document.getElementById('trackModal').style.display = 'flex';
                 if(!map) {{
-                    map = L.map('track-map').setView([50.45, 30.52], 13);
-                    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
+                    map = L.map('track-map').setView([46.4825, 30.7233], 13);
+                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                        attribution: '&copy; OpenStreetMap contributors'
+                    }}).addTo(map);
                 }}
                 fetchLocation(jobId);
                 trackInterval = setInterval(() => fetchLocation(jobId), 5000);
