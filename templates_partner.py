@@ -46,6 +46,14 @@ def get_partner_auth_html(is_register=False, message=""):
             .autocomplete-item small { color: #64748b; font-size: 0.8rem; margin-top:2px; }
             .autocomplete-item:hover { background: var(--primary); color: white; }
             
+            /* Индикатор загрузки в поле ввода */
+            .loading-input {
+                background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC%7Btransform-origin:center;animation:spinner_svv2 .75s infinite linear%7D@keyframes spinner_svv2%7B100%25%7Btransform:rotate(360deg)%7D%7D%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 10px center;
+                background-size: 20px 20px;
+            }
+
             #picker-map { width: 100%; height: 250px; border-radius: 10px; margin-bottom: 15px; border: 1px solid var(--border); display:none; }
             #picker-map.visible { display: block; }
             .map-hint { font-size: 0.8rem; color: #facc15; margin-bottom: 10px; display:none; text-align: left; }
@@ -126,6 +134,7 @@ def get_partner_auth_html(is_register=False, message=""):
             
             window.onload = initVerification;
 
+            // --- КАРТА И АВТОКОМПЛИТ (ИСПРАВЛЕНО) ---
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
             const latInput = document.getElementById('form_lat');
@@ -135,6 +144,7 @@ def get_partner_auth_html(is_register=False, message=""):
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
+            let currentRequestController = null; // Для отмены старых запросов
 
             function initPickerMap(lat, lon) {
                 if (pickerMap) return;
@@ -167,13 +177,28 @@ def get_partner_auth_html(is_register=False, message=""):
                 addrInput.addEventListener('input', function() {
                     clearTimeout(searchTimeout);
                     const query = this.value;
+                    
                     if (!pickerMap) initPickerMap();
-                    if(query.length < 3) { addrResults.style.display = 'none'; return; }
+                    
+                    if(query.length < 3) { 
+                        addrResults.style.display = 'none';
+                        addrInput.classList.remove('loading-input'); 
+                        return; 
+                    }
+                    
+                    addrInput.classList.add('loading-input');
                     
                     searchTimeout = setTimeout(async () => {
                         try {
-                            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lat=50.45&lon=30.52`);
+                            // 1. Отменяем предыдущий запрос если он еще висит
+                            if (currentRequestController) currentRequestController.abort();
+                            currentRequestController = new AbortController();
+                            const signal = currentRequestController.signal;
+                            
+                            // 2. Делаем новый запрос
+                            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lat=50.45&lon=30.52`, { signal });
                             const data = await res.json();
+                            
                             addrResults.innerHTML = '';
                             if(data.features && data.features.length > 0) {
                                 data.features.forEach(feat => {
@@ -204,8 +229,15 @@ def get_partner_auth_html(is_register=False, message=""):
                                 });
                                 addrResults.style.display = 'block';
                             } else { addrResults.style.display = 'none'; }
-                        } catch(e) {}
-                    }, 400);
+                        } catch(e) {
+                             if (e.name !== 'AbortError') console.error(e);
+                        } finally {
+                             // ВАЖНО: Снимаем спиннер ТОЛЬКО если этот запрос не был отменен
+                             if (currentRequestController && !currentRequestController.signal.aborted) {
+                                 addrInput.classList.remove('loading-input');
+                             }
+                        }
+                    }, 500); // Увеличен таймаут до 500мс
                 });
                 
                 document.addEventListener('click', (e) => { 
@@ -313,25 +345,25 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
         # --- КНОПКА ДЕЙСТВИЯ (ACTION BTN) ---
         if j.status == 'pending':
-            action_btn = f'''
+            action_btn = f"""
             <button class="btn-mini warn" onclick="boostOrder({j.id})" title="Підняти ціну (+10 грн)">
                 <i class="fa-solid fa-fire"></i> +10
             </button>
-            '''
+            """
         elif j.status == 'returning':
-            action_btn = f'''
+            action_btn = f"""
             <button class="btn-mini success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей">
                 <i class="fa-solid fa-sack-dollar"></i> Гроші
             </button>
-            '''
+            """
         elif j.status in ['assigned', 'arrived_pickup']:
             is_ready = (j.ready_at is not None) or (j.status == 'ready')
             if not is_ready:
-                action_btn = f'''
+                action_btn = f"""
                 <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
                     <i class="fa-solid fa-utensils"></i> Готово
                 </button>
-                '''
+                """
             else:
                 action_btn = '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
         
@@ -344,7 +376,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         if getattr(j, 'is_return_required', False):
             pay_info += "<br><span style='color:#f97316; font-size:0.7rem;'>↺ Повернення</span>"
 
-        t_created = j.created_at.strftime('%H:%M') # ДОБАВЛЕНО: Время создания заказа
+        t_created = j.created_at.strftime('%H:%M') 
 
         active_rows += f"""
         <tr id="row-{j.id}">
@@ -559,6 +591,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .autocomplete-item small {{ color: #64748b; font-size: 0.8rem; margin-top:2px; }}
         .autocomplete-item:hover {{ background: var(--primary); color: white; }}
         
+        /* Spinner внутри инпута */
         .loading-input {{
             background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC%7Btransform-origin:center;animation:spinner_svv2 .75s infinite linear%7D@keyframes spinner_svv2%7B100%25%7Btransform:rotate(360deg)%7D%7D%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
@@ -765,7 +798,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             }}
 
             // ==========================================
-            // ПОИСК АДРЕСА (PHOTON + LEAFLET MAP)
+            // ПОИСК АДРЕСА (PHOTON + LEAFLET MAP) - ИСПРАВЛЕНА ЛОГИКА ABORT
             // ==========================================
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
@@ -776,7 +809,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
-            let currentRequestController = null;
+            let currentRequestController = null; // Для отмены старых запросов
 
             function initPickerMap(lat, lon) {{
                 if (pickerMap) return;
@@ -803,20 +836,30 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 addrInput.addEventListener('input', function() {{
                     clearTimeout(searchTimeout);
                     const query = this.value;
+                    
                     if (!pickerMap) initPickerMap();
-                    if(query.length < 3) {{ addrResults.style.display = 'none'; addrInput.classList.remove('loading-input'); return; }}
+                    
+                    if(query.length < 3) {{ 
+                        addrResults.style.display = 'none'; 
+                        addrInput.classList.remove('loading-input');
+                        return; 
+                    }}
                     
                     addrInput.classList.add('loading-input');
+                    
                     searchTimeout = setTimeout(async () => {{
                         try {{
+                            // 1. Отменяем старый запрос
                             if (currentRequestController) currentRequestController.abort();
                             currentRequestController = new AbortController();
                             const signal = currentRequestController.signal;
+                            
                             let centerLat = 50.45, centerLon = 30.52;
                             if (pickerMap) {{ const c = pickerMap.getCenter(); centerLat = c.lat; centerLon = c.lng; }}
 
                             const res = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=${{centerLat}}&lon=${{centerLon}}`, {{ signal }});
                             const data = await res.json();
+                            
                             addrResults.innerHTML = '';
                             if(data.features && data.features.length > 0) {{
                                 data.features.forEach(feat => {{
@@ -842,8 +885,15 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                 }});
                                 addrResults.style.display = 'block';
                             }} else {{ addrResults.style.display = 'none'; }}
-                        }} catch(e) {{ if (e.name !== 'AbortError') console.error(e); }} finally {{ addrInput.classList.remove('loading-input'); }}
-                    }}, 300); 
+                        }} catch(e) {{ 
+                            if (e.name !== 'AbortError') console.error(e); 
+                        }} finally {{ 
+                            // 2. Убираем спиннер ТОЛЬКО если запрос не был отменен
+                            if (currentRequestController && !currentRequestController.signal.aborted) {{
+                                addrInput.classList.remove('loading-input'); 
+                            }}
+                        }}
+                    }}, 500); // Debounce 500ms
                 }});
                 document.addEventListener('click', (e) => {{ if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; }});
             }}
@@ -950,3 +1000,4 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     </body>
     </html>
     """
+
