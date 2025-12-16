@@ -1,4 +1,3 @@
-
 from typing import List, Dict
 from templates_saas import GLOBAL_STYLES
 
@@ -345,13 +344,21 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         if getattr(j, 'is_return_required', False):
             pay_info += "<br><span style='color:#f97316; font-size:0.7rem;'>↺ Повернення</span>"
 
+        t_created = j.created_at.strftime('%H:%M') # ДОБАВЛЕНО: Время создания заказа
+
         active_rows += f"""
         <tr id="row-{j.id}">
             <td data-label="ID">#{j.id}</td>
+            <td data-label="Створено">
+                <div style="font-size:0.85rem"><i class="fa-regular fa-clock"></i> {t_created}</div>
+            </td>
             <td data-label="Адреса">{j.dropoff_address}</td>
-            <td data-label="Оплата">
+            <td data-label="Клієнт (Чек)">
                 <div style="font-weight:bold;">{j.order_price} грн</div>
                 <div style="font-size:0.75rem;">{pay_info}</div>
+            </td>
+            <td data-label="Кур'єру (Fee)">
+                <div style="font-weight:bold; color: #facc15;">{j.delivery_fee} грн</div>
             </td>
             <td data-label="Статус"><span class="status-badge" style="background:{status_bg}; color:{status_fg};">{status_text}</span></td>
             <td class="courier-cell" data-label="Кур'єр">{courier_info}</td>
@@ -645,7 +652,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         <h3 style="margin-top:0; color:white;"><i class="fa-solid fa-list-ul" style="color:#facc15"></i> Активні доставки</h3>
                         <div style="overflow-x:auto;">
                             <table>
-                                <thead><tr><th>ID</th><th>Адреса</th><th>Інфо</th><th>Статус</th><th>Кур'єр</th><th>Дія</th></tr></thead>
+                                <thead><tr><th>ID</th><th>Створено</th><th>Адреса</th><th>Клієнт (Чек)</th><th>Кур'єру (Fee)</th><th>Статус</th><th>Кур'єр</th><th>Дія</th></tr></thead>
                                 <tbody>{active_rows}</tbody>
                             </table>
                         </div>
