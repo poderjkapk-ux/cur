@@ -29,6 +29,7 @@ def get_partner_auth_html(is_register=False, message=""):
 
     # Если регистрация - добавляем логику верификации И КАРТУ
     if is_register:
+        # Это обычная строка, поэтому фигурные скобки CSS здесь одинарные
         verify_style = """
         <style>
             .tg-verify-box { border: 2px dashed var(--border); padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center; background: rgba(255,255,255,0.02); transition: 0.3s; }
@@ -91,6 +92,7 @@ def get_partner_auth_html(is_register=False, message=""):
         <input type="hidden" id="form_lon">
         """
 
+        # Это обычная строка, поэтому ${} для JS пишутся как есть (без двойных скобок)
         verify_script = """
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
@@ -134,7 +136,7 @@ def get_partner_auth_html(is_register=False, message=""):
             
             window.onload = initVerification;
 
-            // --- КАРТА И АВТОКОМПЛИТ (ИСПРАВЛЕНО) ---
+            // --- КАРТА И АВТОКОМПЛИТ ---
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
             const latInput = document.getElementById('form_lat');
@@ -144,7 +146,7 @@ def get_partner_auth_html(is_register=False, message=""):
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
-            let currentRequestController = null; // Для отмены старых запросов
+            let currentRequestController = null;
 
             function initPickerMap(lat, lon) {
                 if (pickerMap) return;
@@ -190,12 +192,10 @@ def get_partner_auth_html(is_register=False, message=""):
                     
                     searchTimeout = setTimeout(async () => {
                         try {
-                            // 1. Отменяем предыдущий запрос если он еще висит
                             if (currentRequestController) currentRequestController.abort();
                             currentRequestController = new AbortController();
                             const signal = currentRequestController.signal;
                             
-                            // 2. Делаем новый запрос
                             const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lat=50.45&lon=30.52`, { signal });
                             const data = await res.json();
                             
@@ -232,12 +232,11 @@ def get_partner_auth_html(is_register=False, message=""):
                         } catch(e) {
                              if (e.name !== 'AbortError') console.error(e);
                         } finally {
-                             // ВАЖНО: Снимаем спиннер ТОЛЬКО если этот запрос не был отменен
                              if (currentRequestController && !currentRequestController.signal.aborted) {
                                  addrInput.classList.remove('loading-input');
                              }
                         }
-                    }, 500); // Увеличен таймаут до 500мс
+                    }, 500);
                 });
                 
                 document.addEventListener('click', (e) => { 
@@ -279,12 +278,13 @@ def get_partner_auth_html(is_register=False, message=""):
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
     Дашборд партнера. Адаптирован под мобильные устройства (Responsive).
+    ВАЖНО: Поскольку это f-строка, весь JS и CSS внутри должен использовать двойные фигурные скобки {{ }} для блоков и переменных JS.
     """
     
     active_jobs = [j for j in jobs if j.status not in ['delivered', 'cancelled']]
     history_jobs = [j for j in jobs if j.status in ['delivered', 'cancelled']]
     
-    # --- ТАБЛИЦА АКТИВНЫХ ЗАКАЗОВ (Генерация с Data Labels) ---
+    # --- ТАБЛИЦА АКТИВНЫХ ЗАКАЗОВ ---
     active_rows = ""
     for j in active_jobs:
         track_btn = ""
@@ -857,7 +857,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             let centerLat = 50.45, centerLon = 30.52;
                             if (pickerMap) {{ const c = pickerMap.getCenter(); centerLat = c.lat; centerLon = c.lng; }}
 
+                            // ВАЖНО: Используем двойные скобки для f-строки: ${{...}} превратится в ${...}
                             const res = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=${{centerLat}}&lon=${{centerLon}}`, {{ signal }});
+                            if (!res.ok) throw new Error("API Error");
                             const data = await res.json();
                             
                             addrResults.innerHTML = '';
@@ -886,7 +888,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                 addrResults.style.display = 'block';
                             }} else {{ addrResults.style.display = 'none'; }}
                         }} catch(e) {{ 
-                            if (e.name !== 'AbortError') console.error(e); 
+                            if (e.name !== 'AbortError') console.error("Search error:", e); 
                         }} finally {{ 
                             // 2. Убираем спиннер ТОЛЬКО если запрос не был отменен
                             if (currentRequestController && !currentRequestController.signal.aborted) {{
@@ -1000,4 +1002,3 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     </body>
     </html>
     """
-
