@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta
 
-# --- 1. Импорты модулей проекта ---
+# --- 1. Імпорти модулів проекту ---
 import provision
 import auth 
 import templates_saas
@@ -39,7 +39,7 @@ from auth import check_admin_auth
 import firebase_admin
 from firebase_admin import credentials, messaging, get_app, delete_app
 
-# --- 2. Конфигурация ---
+# --- 2. Конфігурація ---
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 ROOT_DOMAIN = os.environ.get("ROOT_DOMAIN", "restify.site")
@@ -53,7 +53,7 @@ class ConnectionManager:
         self.active_couriers: Dict[int, WebSocket] = {}
         self.active_partners: Dict[int, WebSocket] = {}
 
-    # --- Методы для КУРЬЕРОВ ---
+    # --- Методи для КУР'ЄРІВ ---
     async def connect_courier(self, websocket: WebSocket, courier_id: int):
         await websocket.accept()
         self.active_couriers[courier_id] = websocket
@@ -72,7 +72,7 @@ class ConnectionManager:
                 logging.error(f"WS Error (Courier {courier_id}): {e}")
                 self.disconnect_courier(courier_id)
 
-    # --- Методы для ПАРТНЕРОВ (Ресторанов) ---
+    # --- Методи для ПАРТНЕРІВ (Ресторанів) ---
     async def connect_partner(self, websocket: WebSocket, partner_id: int):
         await websocket.accept()
         self.active_partners[partner_id] = websocket
@@ -92,9 +92,9 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# --- ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ FIREBASE ИЗ БД ---
+# --- ФУНКЦІЯ ІНІЦІАЛІЗАЦІЇ FIREBASE ІЗ БД ---
 async def init_firebase_startup():
-    """Загружает Service Account JSON из базы данных и инициализирует Firebase Admin."""
+    """Завантажує Service Account JSON із бази даних та ініціалізує Firebase Admin."""
     async with async_session_maker() as db:
         setting = await db.get(SystemSetting, "firebase_service_account")
         if setting and setting.value:
@@ -102,12 +102,12 @@ async def init_firebase_startup():
                 cred_dict = json.loads(setting.value)
                 cred = credentials.Certificate(cred_dict)
                 
-                # Если приложение уже существует (например, при релоаде), удаляем его
+                # Якщо додаток вже існує (наприклад, при релоаді), видаляємо його
                 try:
                     app = get_app()
                     delete_app(app)
                 except ValueError:
-                    pass # Не инициализировано
+                    pass # Не ініціалізовано
                 
                 firebase_admin.initialize_app(cred)
                 logging.info("Firebase Admin initialized from Database.")
@@ -122,10 +122,10 @@ async def lifespan(app: FastAPI):
     logging.info("Startup: Connecting DB & Creating tables...")
     await create_db_tables()
     
-    # Загрузка конфига при старте
+    # Завантаження конфіга при старті
     load_config() 
     
-    # Инициализация Firebase из БД
+    # Ініціалізація Firebase з БД
     await init_firebase_startup()
     
     # Запуск Telegram бота
@@ -135,7 +135,7 @@ async def lifespan(app: FastAPI):
     else:
         logging.warning("TG_BOT_TOKEN not set, bot disabled.")
     
-    # Запуск монитора заказов
+    # Запуск монітора замовлень
     asyncio.create_task(order_monitor.monitor_stale_orders(manager))
     logging.info("Order Monitor started.")
     
@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Restify SaaS Control Plane", lifespan=lifespan)
 
-# Подключение роутера админки доставки
+# Підключення роутера адмінки доставки
 app.include_router(admin_delivery.router)
 
 os.makedirs("static", exist_ok=True)
@@ -423,6 +423,96 @@ async def admin_control(
     
     await db.commit()
     return RedirectResponse("/admin", status_code=302)
+
+@app.get("/api/admin/delivery/map_data")
+async def get_realtime_map_data(db: AsyncSession = Depends(get_db), _ = Depends(check_admin_auth)):
+    
+    # 1. Fetch Active Couriers
+    courier_results = await db.execute(
+        select(Courier).where(
+            Courier.is_online == True, 
+            Courier.lat.is_not(None), 
+            Courier.lon.is_not(None)
+        )
+    )
+    active_couriers = courier_results.scalars().all()
+    
+    couriers_data = []
+    for c in active_couriers:
+        couriers_data.append({
+            "id": c.id,
+            "name": c.name,
+            "phone": c.phone,
+            "lat": c.lat,
+            "lon": c.lon,
+            "last_seen": c.last_seen.strftime('%Y-%m-%dT%H:%M:%SZ') if c.last_seen else None,
+            "avg_rating": c.avg_rating,
+            "job_id": None # Will be filled in job loop
+        })
+    
+    # 2. Fetch Active Jobs
+    job_results = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+    )
+    active_jobs = job_results.scalars().all()
+    
+    jobs_data = []
+    # Cache for partner coordinates to avoid re-geocoding the same address
+    partner_coord_cache = {} 
+    
+    for job in active_jobs:
+        partner_name = job.partner.name if job.partner else "Невідомий заклад"
+        partner_address = job.partner.address if job.partner else "Адреса не знайдена"
+        
+        # Get Partner/Restaurant Coordinates
+        if partner_address and partner_address not in partner_coord_cache:
+            rest_lat, rest_lon = await geocode_address(partner_address)
+            partner_coord_cache[partner_address] = (rest_lat, rest_lon)
+        elif partner_address:
+            rest_lat, rest_lon = partner_coord_cache[partner_address]
+        else:
+            rest_lat, rest_lon = None, None
+
+        # Link courier to job
+        if job.courier_id:
+            for c_data in couriers_data:
+                if c_data['id'] == job.courier_id:
+                    c_data['job_id'] = job.id
+                    break
+
+        jobs_data.append({
+            "id": job.id,
+            "status": job.status,
+            "created_at": job.created_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "delivery_fee": job.delivery_fee,
+            "order_price": job.order_price,
+            "payment_type": job.payment_type,
+            "is_return_required": job.is_return_required,
+            "partner": {
+                "id": job.partner_id,
+                "name": partner_name,
+                "address": partner_address,
+                "lat": rest_lat,
+                "lon": rest_lon,
+            },
+            "dropoff": {
+                "address": job.dropoff_address,
+                "lat": job.dropoff_lat,
+                "lon": job.dropoff_lon,
+                "customer_phone": job.customer_phone
+            },
+            "courier": {
+                "id": job.courier_id,
+                "name": job.courier.name if job.courier else None,
+            }
+        })
+
+    return JSONResponse({
+        "couriers": couriers_data,
+        "jobs": jobs_data
+    })
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(_ = Depends(check_admin_auth)):

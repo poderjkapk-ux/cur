@@ -52,6 +52,252 @@ def save_pwa_config(config):
     with open(PWA_CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
 
+# --- НОВИЙ HTML ШАБЛОН: Карта Операцій ---
+def get_ops_map_html(message=""):
+    """HTML для сторінки Real-time Ops Map."""
+    
+    return f"""
+    <!DOCTYPE html><html><head><title>Карта Операцій</title>{GLOBAL_STYLES}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {{ padding: 0; margin: 0; height: 100vh; overflow: hidden; display: block; }}
+        #map {{ height: 100vh; width: 100%; z-index: 1; }}
+        .map-header {{ 
+            position: absolute; top: 0; left: 0; right: 0; 
+            padding: 15px 20px; background: rgba(15, 23, 42, 0.9); 
+            backdrop-filter: blur(10px); z-index: 1000; color: white;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            height: 60px; /* Фіксована висота */
+        }}
+        .map-header h1 {{ margin: 0; font-size: 1.5rem; }}
+        .map-info {{ font-size: 0.9rem; color: #94a3b8; }}
+        .map-info span {{ color: #4ade80; font-weight: bold; margin-right: 15px; }}
+        .leaflet-popup-content-wrapper {{ background: #1e293b; color: white; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); }}
+        .leaflet-popup-tip {{ background: #1e293b; border-top: 1px solid rgba(255,255,255,0.1); }}
+        .job-popup h4 {{ margin-top: 0; color: #facc15; }}
+        .job-popup p {{ margin: 5px 0; font-size: 0.9rem; }}
+        .courier-popup h4 {{ margin-top: 0; color: #6366f1; }}
+        .dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }}
+        
+        .legend {{ 
+            position: absolute; bottom: 10px; right: 10px; z-index: 1000; 
+            background: rgba(30, 41, 59, 0.8); padding: 10px; border-radius: 8px; 
+            color: white; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.1);
+        }}
+        .legend div {{ margin-bottom: 5px; display: flex; align-items: center; }}
+        
+        /* Custom Icons */
+        .courier-icon {{ 
+            background: #6366f1; width: 30px; height: 30px; border-radius: 50%; 
+            color: white; text-align: center; line-height: 30px; font-size: 14px; 
+            border: 2px solid white; font-weight: bold; box-shadow: 0 0 0 3px #6366f1; 
+        }}
+        .job-dropoff-icon {{ 
+            background: #facc15; width: 20px; height: 20px; border-radius: 50%; 
+            border: 2px solid white; box-shadow: 0 0 0 3px #facc15; 
+        }}
+        .rest-icon {{ 
+            background: #94a3b8; width: 25px; height: 25px; border-radius: 50%; 
+            border: 2px solid white; box-shadow: 0 0 0 3px #94a3b8; 
+            font-size: 12px; color: white; line-height: 21px; text-align: center;
+        }}
+    </style>
+    </head>
+    <body>
+        <div class="map-header">
+            <h1>Карта Операцій <i class="fa-solid fa-map-location-dot"></i></h1>
+            <div class="map-info">
+                <span id="courier-count">Кур'єрів: 0</span>
+                <span id="job-count">Замовлень: 0</span>
+                <a href="/admin/delivery" class="btn" style="width:auto; padding: 5px 15px; font-size:0.9rem; margin:0; background: #334155;">← Список</a>
+            </div>
+        </div>
+        <div id="map"></div>
+        
+        <div class="legend">
+            <div><span class="dot" style="background:#6366f1;"></span> Кур'єр на зміні</div>
+            <div><span class="dot" style="background:#94a3b8;"></span> Заклад (Pickup)</div>
+            <div><span class="dot" style="background:#facc15;"></span> Адреса Доставки (Dropoff)</div>
+            <div style="margin-top: 10px; color:#facc15;">Очікує -> Призначено: Жовтий</div>
+            <div style="color:#4ade80;">В дорозі -> Повернення: Зелений</div>
+        </div>
+
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script>
+            // --- JS Map Logic ---
+            const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 12);
+            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
+
+            let courierLayer = L.layerGroup().addTo(map);
+            let jobLayer = L.layerGroup().addTo(map);
+            let jobLinesLayer = L.layerGroup().addTo(map);
+            let bounds = new L.LatLngBounds();
+
+            const statusColors = {{
+                "pending": "#facc15",
+                "assigned": "#facc15",
+                "arrived_pickup": "#facc15",
+                "ready": "#facc15",
+                "picked_up": "#4ade80",
+                "returning": "#4ade80",
+            }};
+            
+            const jobStatusText = {{
+                "pending": "Очікує призначення",
+                "assigned": "Кур'єр прийняв",
+                "arrived_pickup": "Кур'єр прибув в заклад",
+                "ready": "Замовлення готове",
+                "picked_up": "В дорозі до клієнта",
+                "returning": "Повернення коштів",
+            }};
+            
+            function timeSince(dateString) {{
+                const seconds = Math.floor((new Date() - new Date(dateString)) / 1000);
+                if (seconds < 60) return `щойно`;
+                const minutes = Math.floor(seconds / 60);
+                if (minutes < 60) return `${{minutes}} хв. тому`;
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) return `${{hours}} год. тому`;
+                return `більше 1 доби тому`;
+            }}
+
+            async function fetchMapData() {{
+                try {{
+                    const res = await fetch('/api/admin/delivery/map_data');
+                    const data = await res.json();
+                    
+                    document.getElementById('courier-count').innerText = `Кур'єрів: ${{data.couriers.length}}`;
+                    document.getElementById('job-count').innerText = `Замовлень: ${{data.jobs.length}}`;
+
+                    updateMapMarkers(data.couriers, data.jobs);
+                    
+                }} catch (e) {{
+                    console.error("Error fetching map data:", e);
+                }}
+            }}
+
+            function updateMapMarkers(couriers, jobs) {{
+                courierLayer.clearLayers();
+                jobLayer.clearLayers();
+                jobLinesLayer.clearLayers();
+                bounds = new L.LatLngBounds();
+
+                // 1. Courier Markers
+                couriers.forEach(c => {{
+                    if (c.lat && c.lon) {{
+                        const iconHtml = `<div class="courier-icon" title="${{c.name}}">
+                                            <i class="fa-solid fa-motorcycle"></i>
+                                         </div>`;
+                        const courierIcon = L.divIcon({{ className: 'custom-icon', html: iconHtml, iconSize: [30, 30], iconAnchor: [15, 15] }});
+                        
+                        let jobStatus = c.job_id ? `Замовлення #${{c.job_id}}` : 'Вільний';
+                        
+                        const popupContent = `
+                            <div class="courier-popup">
+                                <h4>🚴 ${{c.name}}</h4>
+                                <p><b>Статус:</b> ${{jobStatus}}</p>
+                                <p><b>Телефон:</b> ${{c.phone}}</p>
+                                <p><b>Рейтинг:</b> ⭐ ${{c.avg_rating}}</p>
+                                <p><b>Оновлено:</b> ${{timeSince(c.last_seen)}}</p>
+                            </div>
+                        `;
+                        const marker = L.marker([c.lat, c.lon], {{ icon: courierIcon }}).bindPopup(popupContent);
+                        courierLayer.addLayer(marker);
+                        bounds.extend([c.lat, c.lon]);
+                    }}
+                }});
+
+                // 2. Job Markers and Lines
+                jobs.forEach(j => {{
+                    // A. Restaurant / Pickup Marker
+                    if (j.partner.lat && j.partner.lon) {{
+                        const restIconHtml = `<div class="rest-icon"><i class="fa-solid fa-shop"></i></div>`;
+                        const restIcon = L.divIcon({{ 
+                            className: 'custom-icon', 
+                            html: restIconHtml, 
+                            iconSize: [25, 25], 
+                            iconAnchor: [12, 12] 
+                        }});
+                        
+                        const restPopupContent = `
+                            <div class="job-popup">
+                                <h4>🏪 ${{j.partner.name}} (#${{j.id}})</h4>
+                                <p><b>Адреса:</b> ${{j.partner.address}}</p>
+                                <p><b>Створено:</b> ${{timeSince(j.created_at)}}</p>
+                                <p><b>Статус:</b> <span style="color:${{statusColors[j.status] || '#94a3b8'}}">${{jobStatusText[j.status] || j.status}}</span></p>
+                                <p><b>Кур'єр:</b> ${{j.courier.name || 'Очікується'}}</p>
+                            </div>
+                        `;
+                        const restMarker = L.marker([j.partner.lat, j.partner.lon], {{ icon: restIcon }}).bindPopup(restPopupContent);
+                        jobLayer.addLayer(restMarker);
+                        bounds.extend([j.partner.lat, j.partner.lon]);
+
+                        // B. Dropoff Marker (if coordinates are available)
+                        if (j.dropoff.lat && j.dropoff.lon) {{
+                            let dropoffColor = statusColors[j.status] || '#94a3b8';
+                            let dropoffIconHtml = `<div class="job-dropoff-icon" style="background:${{dropoffColor}}; box-shadow: 0 0 0 3px ${{dropoffColor}};"></div>`;
+                            let dropoffIcon = L.divIcon({{ className: 'custom-icon', html: dropoffIconHtml, iconSize: [20, 20], iconAnchor: [10, 10] }});
+                            
+                            const dropoffPopupContent = `
+                                <div class="job-popup">
+                                    <h4>📍 ${{j.dropoff.address}} (#${{j.id}})</h4>
+                                    <p><b>Клієнт:</b> ${{j.dropoff.customer_phone}}</p>
+                                    <p><b>Сума:</b> ${{j.order_price}} грн (+${{j.delivery_fee}} грн)</p>
+                                    <p><b>Статус:</b> <span style="color:${{dropoffColor}}">${{jobStatusText[j.status] || j.status}}</span></p>
+                                </div>
+                            `;
+                            const dropoffMarker = L.marker([j.dropoff.lat, j.dropoff.lon], {{ icon: dropoffIcon }}).bindPopup(dropoffPopupContent);
+                            jobLayer.addLayer(dropoffMarker);
+                            bounds.extend([j.dropoff.lat, j.dropoff.lon]);
+
+                            // C. Draw Line (Pickup to Dropoff)
+                            const line = L.polyline([
+                                [j.partner.lat, j.partner.lon], 
+                                [j.dropoff.lat, j.dropoff.lon]
+                            ], {{ color: dropoffColor, weight: 3, dashArray: '8, 8' }});
+                            jobLinesLayer.addLayer(line);
+                            
+                            // D. Draw line from Courier to Pickup/Dropoff (if assigned and courier is located)
+                            const courier = couriers.find(c => c.id === j.courier.id);
+                            if (courier && courier.lat && courier.lon) {{
+                                let target_lat = j.partner.lat;
+                                let target_lon = j.partner.lon;
+                                let line_color = '#94a3b8'; // Grey line for courier path to pickup
+
+                                if (['picked_up', 'returning'].includes(j.status)) {{
+                                    // Courier is heading to dropoff
+                                    target_lat = j.dropoff.lat;
+                                    target_lon = j.dropoff.lon;
+                                    line_color = '#6366f1'; // Blue line for courier path to client
+                                }}
+
+                                const courierLine = L.polyline([
+                                    [courier.lat, courier.lon], 
+                                    [target_lat, target_lon]
+                                ], {{ color: line_color, weight: 2 }});
+                                jobLinesLayer.addLayer(courierLine);
+                            }}
+                        }}
+                    }}
+                }});
+
+                // 3. Auto-fit map to all markers
+                if (bounds.isValid()) {{
+                    map.fitBounds(bounds, {{ padding: [100, 100] }});
+                }} else {{
+                     map.setView([50.45, 30.52], 12);
+                }}
+            }}
+
+            fetchMapData();
+            setInterval(fetchMapData, 10000); // Update every 10 seconds
+        </script>
+    </body></html>
+    """
+# --- КОНЕЦ НОВОГО HTML ШАБЛОНУ ---
+
 # --- HTML TEMPLATE ---
 def get_delivery_admin_html(couriers, partners, pwa_config, fb_config_str, vapid_key, service_account_str, message=""):
     courier_rows = ""
@@ -137,7 +383,10 @@ def get_delivery_admin_html(couriers, partners, pwa_config, fb_config_str, vapid
         <div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <h1>🚴 Delivery Control</h1>
-                <a href="/admin" class="btn" style="width:auto; padding: 10px 20px;">← Назад в SaaS Admin</a>
+                <div>
+                    <a href="/admin/delivery/map" class="btn" style="width:auto; padding: 10px 20px; margin-right: 10px; background: #6366f1;">Реалтайм Карта</a>
+                    <a href="/admin" class="btn" style="width:auto; padding: 10px 20px;">← Назад в SaaS Admin</a>
+                </div>
             </div>
             
             {f'<div class="message success">{message}</div>' if message else ''}
@@ -188,7 +437,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, fb_config_str, vapid
                             <input type="text" name="p_short_name" value="{pwa_config['partner']['short_name']}">
                             <label>URL іконки</label>
                             <input type="text" name="p_icon" value="{pwa_config['partner']['icon_url']}">
-                            <label>Колір теми</label>
+                            <label>Колір теми</йlabel>
                             <input type="color" name="p_color" value="{pwa_config['partner']['theme_color']}" style="height:40px;">
                         </div>
                         
@@ -240,7 +489,17 @@ async def admin_delivery_page(
     vapid_val = vapid.value if vapid else ""
     sa_val = sa_conf.value if sa_conf else ""
     
+    # sa_val передается в get_delivery_admin_html как service_account_str
     return get_delivery_admin_html(couriers, partners, pwa_config, fb_val, vapid_val, sa_val, message)
+
+# --- НОВИЙ РОУТ ДЛЯ КАРТИ ---
+@router.get("/admin/delivery/map", response_class=HTMLResponse)
+async def admin_delivery_map_page(
+    user: str = Depends(check_admin_auth)
+):
+    # Используем новую функцию-шаблон
+    return get_ops_map_html() 
+# --- КОНЕЦ НОВОГО РОУТА ДЛЯ КАРТИ ---
 
 @router.post("/admin/delivery/courier/control")
 async def courier_control(
