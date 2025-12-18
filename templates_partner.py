@@ -158,14 +158,12 @@ def get_partner_auth_html(is_register=False, message=""):
                 const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
                 
                 pickerMap = L.map('picker-map').setView(startPos, 13);
-                // Используем стандартные OpenStreetMap тайлы (Open Map)
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '&copy; OpenStreetMap contributors'
                 }).addTo(pickerMap);
                 
                 pickerMarker = L.marker(startPos, {draggable: true}).addTo(pickerMap);
                 
-                // Слушатели перетаскивания
                 pickerMarker.on('dragend', function(e) {
                     const pos = e.target.getLatLng();
                     if(latInput) latInput.value = pos.lat;
@@ -196,17 +194,16 @@ def get_partner_auth_html(is_register=False, message=""):
                     
                     addrInput.classList.add('loading-input');
                     
-                    // Дебаунс 800мс, чтобы не дергать сервер слишком часто и не было отмен
+                    // Дебаунс 800мс
                     searchTimeout = setTimeout(async () => {
-                        const reqId = ++latestReqId; // Увеличиваем счетчик запросов
+                        const reqId = ++latestReqId;
                         
                         try {
-                            // Используем Nominatim с приоритетом Одессы (viewbox)
-                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
+                            // Добавили addressdetails=1 чтобы получить структуру (город, улица) отдельно
+                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
                             
                             const res = await fetch(url);
                             
-                            // Если это не последний запрос, игнорируем ответ (но не отменяем его с ошибкой)
                             if (reqId !== latestReqId) return;
 
                             if (!res.ok) throw new Error("API Error");
@@ -218,6 +215,7 @@ def get_partner_auth_html(is_register=False, message=""):
                                     const div = document.createElement('div');
                                     div.className = 'autocomplete-item';
                                     
+                                    // Формируем отображение в списке (красивое)
                                     const displayName = item.display_name;
                                     const parts = displayName.split(',');
                                     const mainName = parts[0];
@@ -225,9 +223,26 @@ def get_partner_auth_html(is_register=False, message=""):
                                     
                                     div.innerHTML = `<span>${mainName}</span><small>${subName}</small>`;
                                     div.onclick = () => { 
-                                        // Вставляем более полный адрес (Город, Улица, Номер)
-                                        // Берем первые 5 частей, чтобы охватить номер, улицу, город
-                                        addrInput.value = parts.slice(0, 5).join(',').trim();
+                                        // --- СБОРКА АДРЕСА БЕЗ РАЙОНА ---
+                                        const a = item.address;
+                                        const cleanParts = [];
+                                        
+                                        // 1. Улица / Название места
+                                        if (a.road) cleanParts.push(a.road);
+                                        else if (a.pedestrian) cleanParts.push(a.pedestrian);
+                                        else if (a.hamlet) cleanParts.push(a.hamlet);
+                                        else cleanParts.push(mainName); // Фолбек, если улицы нет
+                                        
+                                        // 2. Номер дома
+                                        if (a.house_number) cleanParts.push(a.house_number);
+                                        
+                                        // 3. Город (без района!)
+                                        if (a.city) cleanParts.push(a.city);
+                                        else if (a.town) cleanParts.push(a.town);
+                                        else if (a.village) cleanParts.push(a.village);
+                                        
+                                        // Результат: "Дерибасівська вулиця, 1, Одеса"
+                                        addrInput.value = cleanParts.join(', ');
                                         addrResults.style.display = 'none';
                                         
                                         const lat = item.lat;
@@ -298,7 +313,7 @@ def get_partner_auth_html(is_register=False, message=""):
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
     Дашборд партнера. 
-    ОБНОВЛЕН: ОДЕССА ПО УМОЛЧАНИЮ + NOMINATIM + ИСПРАВЛЕНА ПОДСТАНОВКА АДРЕСА.
+    ОБНОВЛЕН: ЛОГИКА АДРЕСА БЕЗ РАЙОНА.
     """
     
     active_jobs = [j for j in jobs if j.status not in ['delivered', 'cancelled']]
@@ -800,7 +815,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             }}
 
             // ==========================================
-            // ПОИСК АДРЕСА: ОБНОВЛЕН (Одесса + Nominatim + FIX "Только номер")
+            // ПОИСК АДРЕСА: ОБНОВЛЕН (Одесса + Nominatim + БЕЗ РАЙОНА)
             // ==========================================
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
@@ -864,8 +879,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         const reqId = ++latestReqId;
                         
                         try {{
-                            // Используем Nominatim с приоритетом Одессы (viewbox)
-                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&accept-language=uk&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
+                            // Добавили addressdetails=1 чтобы разбить адрес на части
+                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
                             
                             const res = await fetch(url);
                             
@@ -880,15 +895,33 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                     const div = document.createElement('div');
                                     div.className = 'autocomplete-item';
                                     
-                                    const parts = item.display_name.split(',');
+                                    const displayName = item.display_name;
+                                    const parts = displayName.split(',');
                                     const mainName = parts[0];
                                     const subName = parts.slice(1).join(',').trim();
                                     
                                     div.innerHTML = `<span>${{mainName}}</span><small>${{subName}}</small>`;
                                     div.onclick = () => {{ 
-                                        // ИСПРАВЛЕНИЕ: Берем первые 5 частей адреса, чтобы включить
-                                        // Номер, Улицу и Город (порядок Nominatim может меняться, но начало самое важное)
-                                        addrInput.value = parts.slice(0, 5).join(',').trim();
+                                        // --- СБОРКА КОРОТКОГО АДРЕСА ---
+                                        const a = item.address;
+                                        const cleanParts = [];
+                                        
+                                        // 1. Улица / Место
+                                        if (a.road) cleanParts.push(a.road);
+                                        else if (a.pedestrian) cleanParts.push(a.pedestrian);
+                                        else if (a.hamlet) cleanParts.push(a.hamlet);
+                                        else cleanParts.push(mainName);
+                                        
+                                        // 2. Дом
+                                        if (a.house_number) cleanParts.push(a.house_number);
+                                        
+                                        // 3. Город (без района)
+                                        if (a.city) cleanParts.push(a.city);
+                                        else if (a.town) cleanParts.push(a.town);
+                                        else if (a.village) cleanParts.push(a.village);
+                                        
+                                        // Результат: "Улица, Номер, Город"
+                                        addrInput.value = cleanParts.join(', ');
                                         addrResults.style.display = 'none';
                                         
                                         const lat = parseFloat(item.lat);

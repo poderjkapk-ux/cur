@@ -6,264 +6,341 @@ try:
 except ImportError:
     class Courier: pass
 
-# --- Добавляем стили специально для карты и PWA ---
+# --- ОБНОВЛЕННЫЕ СТИЛИ (SUPER DESIGNER PWA) ---
 PWA_STYLES = """
 <style>
-    /* Глобальный сброс для PWA */
-    * { box-sizing: border-box; }
+    :root {
+        --bg-deep: #0f172a;
+        --bg-glass: rgba(30, 41, 59, 0.7);
+        --bg-card: #1e293b;
+        --primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        --accent-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        --danger-gradient: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+        --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+        --shadow-soft: 0 10px 40px -10px rgba(0,0,0,0.5);
+        --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.3);
+        --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
 
-    /* Отключаем скролл страницы, чтобы ощущалось как Native App */
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
     body, html { 
-        height: 100%; 
-        overflow: hidden; 
-        overscroll-behavior: none;
-        padding: 0 !important; /* Сбрасываем padding из GLOBAL_STYLES */
-        margin: 0 !important;
+        height: 100%; width: 100%;
+        overflow: hidden; overscroll-behavior: none;
+        padding: 0 !important; margin: 0 !important;
+        background: var(--bg-deep); font-family: 'Inter', sans-serif;
+        color: #f8fafc;
     }
     
-    /* Карта на весь фон */
-    #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-    #map.hidden { visibility: hidden; } /* Скрываем карту, когда активна лента */
+    /* Утилиты */
+    .glass {
+        background: var(--bg-glass);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: var(--glass-border);
+    }
+    .icon-btn { 
+        background: rgba(255,255,255,0.05); border: none; color: white; 
+        width: 44px; height: 44px; border-radius: 12px; 
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.2rem; cursor: pointer; transition: 0.2s;
+    }
+    .icon-btn:active { transform: scale(0.9); background: rgba(255,255,255,0.1); }
 
-    /* Верхняя панель (Header) */
+    /* Карта */
+    #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+    #map.hidden { visibility: hidden; }
+
+    /* HEADER */
     .app-header {
         position: absolute; top: 0; left: 0; right: 0;
-        background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px);
         padding: 15px 20px; z-index: 100;
         display: flex; justify-content: space-between; align-items: center;
-        border-bottom: 1px solid var(--border);
-        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-        height: 60px; /* Фиксированная высота для расчетов */
+        padding-top: max(15px, env(safe-area-inset-top));
+        background: linear-gradient(to bottom, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0) 100%);
+        pointer-events: none; /* Чтобы кликать сквозь градиент */
     }
-    .status-indicator { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.9rem; cursor: pointer; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; box-shadow: 0 0 10px currentColor; }
-    .dot.online { background: var(--status-active); color: var(--status-active); }
-    .dot.offline { background: var(--status-delete); color: var(--status-delete); }
-    .icon-btn { background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 5px; }
+    .app-header > * { pointer-events: auto; } /* Возвращаем клики элементам */
 
-    /* --- НИЖНЯЯ НАВИГАЦИЯ (TABS) --- */
+    .status-capsule {
+        display: flex; align-items: center; gap: 10px;
+        background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(10px);
+        padding: 8px 16px; border-radius: 30px; border: var(--glass-border);
+        font-weight: 700; font-size: 0.85rem; cursor: pointer;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: 0.3s;
+    }
+    .status-capsule:active { transform: scale(0.95); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 10px currentColor; transition: 0.3s; }
+    .dot.online { background: #4ade80; color: #4ade80; box-shadow: 0 0 15px #4ade80; }
+    .dot.offline { background: #f87171; color: #f87171; }
+
+    /* BOTTOM NAV */
     .bottom-nav {
-        position: fixed; bottom: 0; left: 0; right: 0;
-        height: 70px; background: #1e293b;
+        position: fixed; bottom: 20px; left: 20px; right: 20px;
+        height: 70px; border-radius: 24px;
         display: flex; justify-content: space-around; align-items: center;
-        border-top: 1px solid var(--border);
         z-index: 500; padding-bottom: env(safe-area-inset-bottom);
-        box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        border: 1px solid rgba(255,255,255,0.1);
+        overflow: hidden;
     }
     .nav-item {
-        color: var(--text-muted); text-align: center;
-        font-size: 0.75rem; flex: 1; height: 100%;
-        display: flex; flex-direction: column; justify-content: center; align-items: center;
-        gap: 5px; transition: 0.3s; cursor: pointer;
+        flex: 1; height: 100%; display: flex; flex-direction: column; 
+        justify-content: center; align-items: center; gap: 4px;
+        color: #94a3b8; font-size: 0.7rem; font-weight: 600;
+        transition: 0.3s; cursor: pointer; position: relative;
     }
-    .nav-item i { font-size: 1.4rem; transition: 0.3s; }
-    .nav-item.active { color: var(--primary); }
-    .nav-item.active i { transform: translateY(-2px); text-shadow: 0 0 10px var(--primary); }
-
-    /* Контейнеры экранов */
-    .screen { 
-        display: none; 
-        height: 100%; 
-        width: 100%; 
-        position: relative; /* Важно для абсолютного позиционирования внутри */
+    .nav-item i { font-size: 1.4rem; transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    .nav-item.active { color: white; }
+    .nav-item.active i { transform: translateY(-3px); color: #818cf8; text-shadow: 0 0 15px rgba(99, 102, 241, 0.6); }
+    /* Индикатор активной вкладки (Glow effect) */
+    .nav-item.active::after {
+        content: ''; position: absolute; bottom: 0; width: 40%; height: 3px;
+        background: #818cf8; border-radius: 10px 10px 0 0;
+        box-shadow: 0 -5px 15px #818cf8;
     }
-    .screen.active { display: block; }
 
-    /* --- ЛЕНТА ЗАКАЗОВ (FEED) --- */
+    /* SCREENS */
+    .screen { display: none; height: 100%; width: 100%; position: relative; }
+    .screen.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* FEED (ORDERS) */
     .feed-container {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 70px; /* Отступ снизу равен высоте меню */
-        
-        padding: 80px 15px 20px 15px; /* Отступ сверху для хедера (60px + 20px) */
-        
-        overflow-y: auto; 
-        -webkit-overflow-scrolling: touch; /* Плавный скролл на iOS */
-        background: var(--bg-body);
+        position: absolute; inset: 0;
+        padding: 90px 20px 100px 20px; /* Отступы под header и nav */
+        overflow-y: auto; -webkit-overflow-scrolling: touch;
+        background: var(--bg-deep);
+        background-image: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.15), transparent 40%);
     }
-    
-    .feed-header {
-        margin-bottom: 20px; display: flex; justify-content: space-between; align-items: end;
-    }
-    .feed-title { font-size: 1.5rem; font-weight: 800; color: white; margin: 0; }
-    
-    .loading-indicator { font-size: 0.8rem; color: var(--text-muted); animation: pulse 1s infinite; }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    .feed-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 25px; }
+    .feed-title { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.5px; margin: 0; }
+    .loading-indicator { font-size: 0.85rem; color: #94a3b8; display: flex; align-items: center; gap: 6px; }
+    .loading-indicator i { animation: spin 1s linear infinite; }
 
-    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); margin-top: 50px; }
-    .empty-state i { font-size: 3rem; margin-bottom: 15px; opacity: 0.3; }
-
-    /* Карточка заказа в ленте */
+    /* ORDER CARD */
     .order-card {
-        background: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 15px;
+        background: rgba(30, 41, 59, 0.6);
         border: 1px solid rgba(255,255,255,0.05);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        border-radius: 20px; padding: 20px; margin-bottom: 20px;
         position: relative; overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
     }
-    .order-card::before {
-        content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
-        background: var(--primary);
-    }
-    .order-card.high-price::before { background: var(--status-active); } /* Зеленая полоска для дорогих */
-
-    .oc-header { display: flex; justify-content: space-between; margin-bottom: 12px; }
-    .oc-dist-badge { 
-        background: rgba(99, 102, 241, 0.15); color: #818cf8; 
-        padding: 4px 10px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; 
-        display: flex; align-items: center; gap: 5px;
-    }
-    .oc-price { font-size: 1.4rem; font-weight: 800; color: white; }
-
-    .oc-route { display: flex; flex-direction: column; gap: 10px; position: relative; padding-left: 20px; margin-bottom: 15px; }
-    .oc-route::after {
-        content: ''; position: absolute; left: 6px; top: 5px; bottom: 5px; width: 2px;
-        background: #334155; z-index: 0;
-    }
-    .oc-point { position: relative; z-index: 1; font-size: 0.95rem; color: #cbd5e1; }
-    .oc-point::before {
-        content: ''; position: absolute; left: -20px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
-    }
-    .oc-point.rest::before { background: #facc15; border: 2px solid #1e293b; }
-    .oc-point.client::before { background: #22c55e; border: 2px solid #1e293b; }
+    .order-card:active { transform: scale(0.98); }
+    .order-card.high-price { border: 1px solid rgba(16, 185, 129, 0.3); background: linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, rgba(30, 41, 59, 0.6) 100%); }
     
-    /* Доп. инфо о маршруте (дистанция поездки) */
-    .route-meta {
-        position: absolute; left: -5px; top: 50%; transform: translateY(-50%);
-        background: var(--bg-card); color: var(--text-muted); font-size: 0.7rem;
-        padding: 2px 0; z-index: 2;
-    }
+    .oc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+    .oc-price { font-size: 1.5rem; font-weight: 800; color: white; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+    .oc-dist { background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; color: #cbd5e1; }
 
-    .oc-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 15px; }
-    .oc-tags { display: flex; gap: 5px; flex-wrap: wrap; }
-    .oc-tag { font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; background: #334155; color: #94a3b8; text-transform: uppercase; }
+    .oc-timeline { position: relative; padding-left: 24px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 15px; }
+    .oc-timeline::before {
+        content: ''; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 2px;
+        background: linear-gradient(to bottom, #facc15 0%, #4ade80 100%); opacity: 0.3;
+    }
+    .oc-point { position: relative; }
+    .oc-point::after {
+        content: ''; position: absolute; left: -24px; top: 4px; width: 10px; height: 10px; border-radius: 50%;
+        border: 2px solid var(--bg-card); z-index: 2;
+    }
+    .oc-point.rest::after { background: #facc15; box-shadow: 0 0 10px rgba(250, 204, 21, 0.4); }
+    .oc-point.client::after { background: #4ade80; box-shadow: 0 0 10px rgba(74, 222, 128, 0.4); }
+    
+    .oc-title { font-weight: 700; font-size: 1rem; color: #f1f5f9; line-height: 1.2; }
+    .oc-sub { font-size: 0.85rem; color: #94a3b8; margin-top: 2px; }
 
     .btn-accept {
-        background: var(--primary); color: white; border: none; 
-        padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer;
-        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        width: 100%; border: none; padding: 14px; border-radius: 14px;
+        background: var(--primary-gradient); color: white; font-weight: 700; font-size: 1rem;
+        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4); cursor: pointer;
+        display: flex; justify-content: center; align-items: center; gap: 8px;
     }
-    .btn-accept:active { transform: scale(0.95); }
 
-    /* --- ШТОРКА АКТИВНОГО ЗАКАЗА (Bottom Sheet) --- */
+    /* BOTTOM SHEET (JOB) */
     .bottom-sheet {
         position: absolute; bottom: 0; left: 0; right: 0;
-        background: var(--bg-card);
-        border-radius: 20px 20px 0 0;
-        padding: 25px;
-        z-index: 200;
-        box-shadow: 0 -5px 30px rgba(0,0,0,0.4);
-        transform: translateY(110%); /* Скрыта по умолчанию */
-        transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        max-height: 85vh;
-        overflow-y: auto;
+        background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(20px);
+        border-radius: 30px 30px 0 0; border-top: 1px solid rgba(255,255,255,0.1);
+        padding: 10px 20px 30px 20px; z-index: 200;
+        box-shadow: 0 -10px 40px rgba(0,0,0,0.4);
+        transform: translateY(110%); transition: transform 0.4s var(--ease-spring);
+        max-height: 85vh; overflow-y: auto;
     }
     .bottom-sheet.active { transform: translateY(0); }
+    .drag-pill { width: 40px; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; margin: 10px auto 25px; }
+
+    /* STEPPER */
+    .stepper { display: flex; gap: 6px; margin-bottom: 25px; }
+    .step { flex: 1; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; transition: 0.3s; }
+    .step.active { background: #818cf8; box-shadow: 0 0 10px #818cf8; }
+    .step.done { background: #10b981; }
+
+    /* JOB INFO */
+    .job-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+    .job-id { font-size: 1.5rem; font-weight: 800; color: white; }
+    .job-income { font-size: 1.2rem; font-weight: 700; color: #4ade80; background: rgba(74, 222, 128, 0.1); padding: 4px 10px; border-radius: 8px; }
+    .job-status-text { color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px; }
+
+    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
     
-    .drag-handle { width: 40px; height: 5px; background: rgba(255,255,255,0.2); border-radius: 5px; margin: 0 auto 20px; }
-    .stepper { display: flex; margin-bottom: 20px; }
-    .step { flex: 1; height: 4px; background: #334155; margin-right: 5px; border-radius: 2px; }
-    .step.active { background: var(--primary); }
-    .step.done { background: var(--status-active); }
+    .btn-main {
+        grid-column: span 2;
+        background: var(--primary-gradient); color: white; border: none;
+        padding: 16px; border-radius: 16px; font-weight: 700; font-size: 1.1rem;
+        box-shadow: 0 5px 20px rgba(99, 102, 241, 0.4); cursor: pointer; transition: 0.2s;
+    }
+    .btn-main:active { transform: scale(0.97); }
+    .btn-sec {
+        background: rgba(255,255,255,0.05); color: white; border: none;
+        padding: 14px; border-radius: 14px; font-weight: 600; cursor: pointer;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
 
-    .sheet-title { font-size: 1.4rem; font-weight: 800; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
-    .sheet-subtitle { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px; }
+    /* MODALS */
+    .full-modal {
+        position: fixed; inset: 0; background: var(--bg-deep); z-index: 600;
+        display: flex; flex-direction: column;
+        transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .full-modal.open { transform: translateY(0); }
+    .modal-header {
+        padding: 20px; display: flex; align-items: center; gap: 15px;
+        background: rgba(15,23,42,0.9); border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .modal-title { font-size: 1.2rem; font-weight: 700; flex: 1; }
+
+    /* CHAT */
+    .chat-area { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+    .msg { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 0.95rem; line-height: 1.4; position: relative; }
+    .msg.me { align-self: flex-end; background: #6366f1; color: white; border-bottom-right-radius: 4px; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3); }
+    .msg.other { align-self: flex-start; background: #334155; color: #f1f5f9; border-bottom-left-radius: 4px; }
     
-    .info-block { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid var(--border); }
-    .info-label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
-    .info-value { font-size: 1.1rem; font-weight: 600; color: #f8fafc; }
-    .info-value i { color: var(--primary); width: 20px; }
+    .chat-input-bar {
+        padding: 15px; background: #1e293b; display: flex; gap: 10px;
+        border-top: 1px solid rgba(255,255,255,0.05); padding-bottom: max(15px, env(safe-area-inset-bottom));
+    }
+    .chat-field {
+        flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 25px; padding: 12px 20px; color: white; outline: none; transition: 0.3s;
+    }
+    .chat-field:focus { border-color: #818cf8; background: rgba(99, 102, 241, 0.1); }
+    .chat-send {
+        width: 46px; height: 46px; border-radius: 50%; border: none;
+        background: var(--primary-gradient); color: white; font-size: 1rem;
+        box-shadow: 0 0 15px rgba(99, 102, 241, 0.4); cursor: pointer;
+    }
 
-    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-    .btn-nav { background: #3b82f6; color: white; border: none; padding: 15px; border-radius: 12px; font-weight: 600; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; font-size: 1rem; }
-    .btn-main { background: var(--status-active); color: #0f172a; border: none; padding: 15px; border-radius: 12px; font-weight: 700; width: 100%; font-size: 1.1rem; cursor: pointer; transition: 0.2s; }
+    /* POPUP MODAL (NEW ORDER) */
+    .popup-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+        z-index: 2000;
+        display: none; /* Скрыт по умолчанию */
+        align-items: center; justify-content: center;
+    }
+    /* ИСПРАВЛЕНИЕ: show добавляет flex для показа */
+    .popup-overlay.show { display: flex; animation: fadeIn 0.3s ease-out; }
     
-    /* Модалки (История, Чат) */
-    .history-modal, .chat-sheet {
-        position: fixed; inset: 0; background: var(--bg-body); z-index: 600;
-        padding: 20px; transform: translateX(100%); transition: 0.3s; overflow-y: auto;
+    .popup-card {
+        background: #1e293b; width: 85%; max-width: 360px; border-radius: 24px;
+        padding: 25px; text-align: center; border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        transform: scale(0.9); transition: transform 0.3s var(--ease-spring);
     }
-    .history-modal.open, .chat-sheet.open { transform: translateX(0); }
+    .popup-overlay.show .popup-card { transform: scale(1); }
 
-    /* Чат (стили) */
-    .chat-header { padding-bottom: 15px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-    .chat-body { flex: 1; padding: 15px 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; height: calc(100% - 130px); }
-    .chat-footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 15px; background: var(--bg-card); display: flex; gap: 10px; }
-    .msg { max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; color: white; }
-    .msg.me { align-self: flex-end; background: var(--primary); border-bottom-right-radius: 4px; }
-    .msg.other { align-self: flex-start; background: #334155; border-bottom-left-radius: 4px; }
-    .chat-input { flex: 1; background: #1e293b; border: 1px solid var(--border); padding: 12px; border-radius: 25px; color: white; }
+    .pulse-ring {
+        width: 80px; height: 80px; border-radius: 50%; background: rgba(99, 102, 241, 0.2);
+        margin: 0 auto 15px; display: flex; align-items: center; justify-content: center;
+        position: relative;
+    }
+    .pulse-ring::after {
+        content: ''; position: absolute; inset: 0; border-radius: 50%;
+        border: 2px solid #6366f1; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+    @keyframes ping { 75%, 100% { transform: scale(1.6); opacity: 0; } }
 
-    /* --- НОВЫЕ СТИЛИ ДЛЯ ОПЛАТЫ И ГОТОВНОСТИ --- */
-    .client-pay-box {
-        background: #fce7f3; color: #be185d; 
-        padding: 10px; border-radius: 8px; margin-bottom: 15px; 
-        font-weight: bold; text-align: center; border: 1px dashed #be185d;
+    /* OFFLINE SCREEN */
+    .offline-screen {
+        display: none; position: absolute; inset: 0; z-index: 50;
+        background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(10px);
+        flex-direction: column; align-items: center; justify-content: center;
     }
-    .ready-badge {
-        background: #4ade80; color: #064e3b; padding: 5px 10px; 
-        border-radius: 6px; font-weight: bold; display: inline-block; 
-        margin-bottom: 10px; animation: popIn 0.3s;
+    .btn-go-online {
+        width: 180px; height: 180px; border-radius: 50%; border: none;
+        background: var(--primary-gradient); color: white; font-weight: 800; font-size: 1.5rem;
+        box-shadow: 0 0 50px rgba(99, 102, 241, 0.5); cursor: pointer;
+        transition: 0.3s; text-transform: uppercase; letter-spacing: 1px;
     }
-    @keyframes popIn { from { transform: scale(0.5); opacity:0; } to { transform: scale(1); opacity:1; } }
+    .btn-go-online:active { transform: scale(0.95); box-shadow: 0 0 20px rgba(99, 102, 241, 0.8); }
+
+    /* TOAST */
+    #toast {
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-100px);
+        background: rgba(16, 185, 129, 0.9); backdrop-filter: blur(8px); color: white;
+        padding: 12px 24px; border-radius: 50px; font-weight: 600;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3); z-index: 9999;
+        transition: transform 0.4s var(--ease-spring); display: flex; align-items: center; gap: 10px;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* Доп. стили статусов */
+    .badge-ready { background: #10b981; color: white; padding: 4px 10px; border-radius: 6px; font-weight: 700; font-size: 0.8rem; display: inline-block; margin-bottom: 8px; }
+    .badge-cash { background: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3); padding: 10px; border-radius: 12px; margin-bottom: 15px; font-weight: 600; text-align: center; }
 </style>
 """
 
 def get_courier_login_page(message="", msg_type="error"):
-    """Страница входа для курьеров"""
     pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
     return f"""
     <!DOCTYPE html><html lang="uk"><head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Вхід для кур'єрів</title>{GLOBAL_STYLES}{pwa_meta}</head>
-    <body><div class="container">
-        <h1>🚴 Courier App</h1>
+    <body><div class="container glass">
+        <h1 style="margin-bottom:10px;">🚴 Courier App</h1>
+        <p style="color:#94a3b8; margin-bottom:30px;">Увійдіть, щоб почати зміну</p>
         <form method="post" action="/api/courier/login">
             <input type="tel" name="phone" placeholder="Телефон" required>
             <input type="password" name="password" placeholder="Пароль" required>
-            <button type="submit" class="btn">Почати зміну</button>
+            <button type="submit" class="btn" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">Почати зміну</button>
         </form>
         {f"<div class='message {msg_type}'>{message}</div>" if message else ""}
-        <a href="/courier/register">Стати кур'єром</a>
+        <a href="/courier/register" style="margin-top:20px; color:#94a3b8; font-size:0.9rem;">Немає акаунту? Реєстрація</a>
     </div></body></html>
     """
 
 def get_courier_register_page():
-    """Страница регистрации для курьеров с Telegram Verification"""
     return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Реєстрація кур'єра</title>{GLOBAL_STYLES}
+    <!DOCTYPE html><html lang="uk"><head><title>Реєстрація</title>{GLOBAL_STYLES}
     <style>
-        .tg-verify-box {{ border: 2px dashed var(--border); padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center; background: rgba(255,255,255,0.02); }}
-        .tg-verify-box.verified {{ border-color: var(--status-active); background: rgba(74, 222, 128, 0.1); }}
-        .tg-btn {{ background: #24A1DE; color: white; padding: 12px 20px; border-radius: 8px; text-decoration: none; display: inline-flex; align-items: center; gap: 10px; font-weight: 600; margin-top: 10px; }}
+        .tg-verify-box {{ border: 2px dashed rgba(255,255,255,0.2); padding: 20px; border-radius: 16px; margin-bottom: 20px; text-align: center; background: rgba(255,255,255,0.03); }}
+        .tg-verify-box.verified {{ border-color: #4ade80; background: rgba(74, 222, 128, 0.1); }}
+        .tg-btn {{ background: #24A1DE; color: white; padding: 12px 20px; border-radius: 10px; text-decoration: none; display: inline-flex; align-items: center; gap: 10px; font-weight: 600; margin-top: 10px; }}
         .hidden {{ display: none; }}
-        .spinner {{ display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }}
-        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
     </style>
     </head>
-    <body><div class="container">
-        <h1>Реєстрація Кур'єра</h1>
+    <body><div class="container glass">
+        <h1>Новий Кур'єр</h1>
         <form id="regForm" method="post" action="/api/courier/register">
             <input type="text" name="name" placeholder="Ваше Ім'я" required>
-            <input type="password" name="password" placeholder="Пароль" required>
+            <input type="password" name="password" placeholder="Придумайте пароль" required>
             <div id="tg-step" class="tg-verify-box">
                 <div id="tg-initial">
-                    <p style="margin:0 0 10px 0; color:var(--text-muted);">Підтвердіть телефон через Telegram:</p>
-                    <a href="#" id="tg-link" target="_blank" class="tg-btn"><i class="fa-brands fa-telegram"></i> Підтвердити</a>
+                    <p style="margin:0 0 10px 0; color:#cbd5e1;">Підтвердіть телефон через Telegram:</p>
+                    <a href="#" id="tg-link" target="_blank" class="tg-btn"><i class="fa-brands fa-telegram"></i> Відкрити бота</a>
                 </div>
                 <div id="tg-waiting" class="hidden">
-                    <p style="margin:0; color:var(--text-muted);"><span class="spinner"></span> Очікуємо...</p>
-                    <small style="color:#666">Натисніть "Start" та "Share Contact"</small>
+                    <p style="margin:0; color:#cbd5e1;">Очікуємо...</p>
+                    <small style="color:#64748b">Натисніть "Start" та "Share Contact"</small>
                 </div>
                 <div id="tg-success" class="hidden">
-                    <div style="color: var(--status-active); font-size: 1.2rem; margin-bottom: 5px;"><i class="fa-solid fa-circle-check"></i> Підтверджено!</div>
+                    <div style="color: #4ade80; font-size: 1.2rem; margin-bottom: 5px;"><i class="fa-solid fa-circle-check"></i> Успішно!</div>
                     <div id="user-phone-display" style="font-weight:bold; color:white;"></div>
                 </div>
             </div>
             <input type="hidden" name="phone" id="real_phone">
             <input type="hidden" name="verification_token" id="verification_token">
-            <button type="submit" class="btn" id="submitBtn" disabled>Зареєструватися</button>
+            <button type="submit" class="btn" id="submitBtn" disabled style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">Створити акаунт</button>
         </form>
         <div id="msg" class="message" style="display:none"></div>
     </div>
@@ -319,14 +396,11 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key: str):
     """
-    Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK.
-    ОБНОВЛЕНО: Принимает настройки Firebase из аргументов.
+    PREMIUM DESIGNER PWA INTERFACE
     """
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
     pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
-
-    # Если конфиг не настроен, используем заглушку
     safe_firebase_config = firebase_config_json if firebase_config_json else "{}"
     safe_vapid_key = vapid_key if vapid_key else ""
 
@@ -336,59 +410,71 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Courier App</title>
+        <title>Courier Pro</title>
         {GLOBAL_STYLES}
         {PWA_STYLES}
         {pwa_meta}
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     </head>
     <body>
-        <div class="app-header">
+        <div class="app-header glass">
             <button class="icon-btn" onclick="toggleHistory(true)"><i class="fa-solid fa-clock-rotate-left"></i></button>
-            <div class="status-indicator" onclick="toggleShift()" style="position: relative;">
-                <div id="connection-dot" style="position: absolute; top:-2px; right:-2px; width:6px; height:6px; border-radius:50%; background:red; border:1px solid #0f172a;" title="Connection Status"></div>
+            
+            <div class="status-capsule glass" onclick="toggleShift()">
                 <div id="status-dot" class="dot {status_class}"></div>
                 <span id="status-text">{status_text}</span>
             </div>
+            
             <a href="/courier/logout" class="icon-btn"><i class="fa-solid fa-right-from-bracket"></i></a>
         </div>
 
-        <div id="offline-msg" style="display: {'none' if courier.is_online else 'flex'}; position: absolute; inset:0; background:rgba(15,23,42,0.8); z-index: 50; align-items:center; justify-content:center; flex-direction:column; backdrop-filter:blur(3px);">
-            <h2>Ви зараз офлайн</h2>
-            <button class="btn" style="width:200px" onclick="toggleShift()">Вийти на лінію</button>
+        <div id="offline-msg" class="offline-screen" style="display: {'none' if courier.is_online else 'flex'};">
+            <div style="opacity:0.6; margin-bottom:20px; font-size:4rem;"><i class="fa-solid fa-power-off"></i></div>
+            <h2 style="margin-bottom:30px; font-weight:800;">Ви Офлайн</h2>
+            <button class="btn-go-online" onclick="toggleShift()">GO</button>
         </div>
 
         <div id="screen-map" class="screen active">
             <div id="map"></div>
             
-            <div id="job-sheet" class="bottom-sheet">
-                <div class="drag-handle"></div>
-                <div class="stepper"><div id="step-1" class="step"></div><div id="step-2" class="step"></div></div>
-                <div class="sheet-title">
-                    <span id="job-title">Замовлення #...</span>
-                    <span id="job-price" style="color: var(--status-active)">+0 ₴</span>
+            <div id="job-sheet" class="bottom-sheet glass">
+                <div class="drag-pill"></div>
+                
+                <div class="stepper">
+                    <div id="step-1" class="step"></div>
+                    <div id="step-2" class="step"></div>
+                </div>
+
+                <div class="job-header-row">
+                    <div class="job-id" id="job-title">#...</div>
+                    <div class="job-income" id="job-price">+0 ₴</div>
                 </div>
                 
-                <div class="sheet-subtitle" id="job-status-desc">Статус...</div>
+                <div class="job-status-text" id="job-status-desc">Очікування...</div>
+
+                <div style="background:rgba(255,255,255,0.03); border-radius:16px; padding:15px; margin-bottom:15px;">
+                    <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; margin-bottom:5px;" id="addr-label">Адреса</div>
+                    <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-bottom:5px;" id="current-target-addr">...</div>
+                    <div style="font-size:0.9rem; color:#94a3b8;" id="current-target-name">...</div>
+                </div>
+
+                <div id="client-info-block" style="display:none; background:rgba(255,255,255,0.03); border-radius:16px; padding:15px; margin-bottom:15px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase;">Клієнт</div>
+                            <div style="font-weight:600;" id="client-name">Name</div>
+                            <div style="color:#var(--primary); font-size:0.9rem;" id="job-comment"></div>
+                        </div>
+                        <a href="#" id="client-phone" class="icon-btn" style="background:#10b981; border-radius:50%;"><i class="fa-solid fa-phone"></i></a>
+                    </div>
+                </div>
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
-                    <a href="#" id="btn-call" class="btn-nav" style="background: #334155; display:none;"><i class="fa-solid fa-phone"></i> Дзвінок</a>
-                    <button id="btn-chat" class="btn-nav" style="background: #334155; cursor: pointer;"><i class="fa-solid fa-comments"></i> Чат</button>
-                </div>
-                <div class="info-block">
-                    <div class="info-label" id="addr-label">Адреса:</div>
-                    <div class="info-value" id="current-target-addr">...</div>
-                    <div style="margin-top:5px; color:var(--text-muted); font-size:0.9rem;" id="current-target-name">...</div>
-                </div>
-                <div class="info-block" id="client-info-block" style="display:none;">
-                    <div class="info-label">Клієнт</div>
-                    <div class="info-value"><i class="fa-solid fa-user"></i> <span id="client-name"></span></div>
-                    <div class="info-value"><i class="fa-solid fa-phone"></i> <a href="#" id="client-phone" style="color:white; text-decoration:none;"></a></div>
-                    <div style="margin-top:5px; color:var(--accent);" id="job-comment"></div>
-                </div>
                 <div class="action-grid">
-                    <a href="#" id="btn-nav" target="_blank" class="btn-nav"><i class="fa-solid fa-location-arrow"></i> Навігація</a>
-                    <button id="btn-action" class="btn-main" onclick="advanceJobState()">Дія</button>
+                    <a href="#" id="btn-call" class="btn-sec" style="display:none;"><i class="fa-solid fa-phone"></i> Заклад</a>
+                    <button id="btn-chat" class="btn-sec"><i class="fa-solid fa-comments"></i> Чат</button>
+                    <a href="#" id="btn-nav" target="_blank" class="btn-sec"><i class="fa-solid fa-location-arrow"></i> Навігація</a>
+                    <button id="btn-action" class="btn-main" onclick="advanceJobState()">ДІЯ</button>
                 </div>
             </div>
         </div>
@@ -396,155 +482,121 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
         <div id="screen-orders" class="screen">
             <div class="feed-container">
                 <div class="feed-header">
-                    <h1 class="feed-title">Стрічка замовлень</h1>
-                    <div id="feed-loader" class="loading-indicator"><i class="fa-solid fa-satellite-dish"></i> Пошук...</div>
+                    <h1 class="feed-title">Актуальні</h1>
+                    <div id="feed-loader" class="loading-indicator"><i class="fa-solid fa-circle-notch"></i> Пошук...</div>
                 </div>
                 <div id="orders-list"></div>
             </div>
         </div>
 
-        <div class="bottom-nav">
+        <div class="bottom-nav glass">
             <div class="nav-item active" onclick="switchTab('map')" id="nav-map">
                 <i class="fa-solid fa-map-location-dot"></i>
                 <span>Карта</span>
             </div>
             <div class="nav-item" onclick="switchTab('orders')" id="nav-orders">
                 <div style="position:relative;">
-                    <i class="fa-solid fa-list-ul"></i>
-                    <div id="orders-badge" style="display:none; position:absolute; top:-2px; right:-8px; width:10px; height:10px; background:var(--accent); border-radius:50%; border:2px solid #1e293b;"></div>
+                    <i class="fa-solid fa-layer-group"></i>
+                    <div id="orders-badge" style="display:none; position:absolute; top:-2px; right:-5px; width:8px; height:8px; background:#ef4444; border-radius:50%; box-shadow:0 0 5px #ef4444;"></div>
                 </div>
                 <span>Замовлення</span>
             </div>
         </div>
 
-        <div id="chat-sheet" class="chat-sheet">
-             <div class="chat-header">
-                <button class="icon-btn" onclick="document.getElementById('chat-sheet').classList.remove('open')" style="color:white;"><i class="fa-solid fa-arrow-left"></i></button>
-                <div style="font-weight:bold;">Чат</div><div style="width:24px"></div>
+        <div id="chat-sheet" class="full-modal">
+             <div class="modal-header">
+                <button class="icon-btn" onclick="document.getElementById('chat-sheet').classList.remove('open')"><i class="fa-solid fa-chevron-down"></i></button>
+                <div class="modal-title">Чат замовлення</div>
             </div>
-            <div id="chat-body" class="chat-body"></div>
-            <form class="chat-footer" onsubmit="sendChatMessage(event)">
-                <input type="text" id="chat-input" class="chat-input" placeholder="..." autocomplete="off" required>
-                <button type="submit" class="icon-btn" style="background:var(--primary); border-radius:50%; width:40px; height:40px;"><i class="fa-solid fa-paper-plane"></i></button>
+            <div id="chat-body" class="chat-area"></div>
+            <form class="chat-input-bar" onsubmit="sendChatMessage(event)">
+                <input type="text" id="chat-input" class="chat-field" placeholder="Повідомлення..." autocomplete="off" required>
+                <button type="submit" class="chat-send"><i class="fa-solid fa-paper-plane"></i></button>
             </form>
         </div>
 
-        <div id="history-modal" class="history-modal">
-            <div style="display:flex; justify-content:space-between; margin-bottom:20px;"><h2>Історія</h2><button class="icon-btn" onclick="toggleHistory(false)">×</button></div>
-            <div id="history-list"></div>
+        <div id="history-modal" class="full-modal">
+            <div class="modal-header">
+                <button class="icon-btn" onclick="toggleHistory(false)"><i class="fa-solid fa-chevron-down"></i></button>
+                <div class="modal-title">Історія змін</div>
+            </div>
+            <div id="history-list" style="padding:20px; overflow-y:auto;"></div>
         </div>
 
-        <div id="orderModal" class="order-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(5px);">
-             <div style="background:white; color:black; padding:25px; border-radius:20px; width:90%; max-width:350px; text-align:center;">
-                <h2 style="margin-top:0; margin-bottom:10px;">🔥 Нове замовлення!</h2>
-                <div style="font-size:2.5rem; font-weight:800; color:var(--primary); margin-bottom:10px;" id="modal-fee">50 ₴</div>
+        <div id="orderModal" class="popup-overlay">
+             <div class="popup-card glass">
+                <div class="pulse-ring">
+                    <i class="fa-solid fa-bolt" style="font-size:2rem; color:#6366f1;"></i>
+                </div>
+                <h2 style="margin:0 0 5px 0; font-weight:800;">Нове Замовлення!</h2>
+                <div id="modal-fee" style="font-size:2.5rem; font-weight:900; color:#10b981; margin-bottom:15px; text-shadow:0 0 20px rgba(16,185,129,0.3);">+50 ₴</div>
+                
                 <div id="warning-placeholder"></div>
                 
-                <div id="modal-route" style="margin:15px 0;"></div>
+                <div id="modal-route" style="text-align:left; background:rgba(255,255,255,0.05); padding:15px; border-radius:16px; margin-bottom:20px;"></div>
                 
                 <input type="hidden" id="modal-job-id">
-                <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
-                <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline; font-size:0.9rem;">Закрити</button>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <button onclick="closeOrderModal()" class="btn-sec" style="justify-content:center;">Пропустити</button>
+                    <button onclick="acceptOrder()" class="btn-main" style="grid-column:auto; background:var(--accent-gradient);">ПРИЙНЯТИ</button>
+                </div>
              </div>
         </div>
 
-        <div id="toast" style="display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); background:rgba(16, 185, 129, 0.95); color:white; padding:15px 25px; border-radius:50px; z-index:9999; box-shadow:0 10px 30px rgba(0,0,0,0.3); font-weight:bold; backdrop-filter:blur(5px); width:max-content; max-width:90%;">
-            🔔 Нове замовлення!
+        <div id="toast">
+            <i class="fa-solid fa-bell" style="color:#fbbf24;"></i> <span id="toast-text">Сповіщення</span>
         </div>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
         <script>
-            // --- FIREBASE INIT (ДИНАМИЧЕСКИЙ) ---
+            // --- FIREBASE & PUSH ---
             const firebaseConfig = {safe_firebase_config};
             let messaging = null;
-            
             try {{
-                if (firebaseConfig.apiKey) {{
-                    firebase.initializeApp(firebaseConfig);
-                    messaging = firebase.messaging();
-                }} else {{
-                    console.warn("Firebase config is missing from DB");
-                }}
-            }} catch(e) {{ console.error("Firebase init error", e); }}
-
+                if (firebaseConfig.apiKey) {{ firebase.initializeApp(firebaseConfig); messaging = firebase.messaging(); }}
+            }} catch(e) {{}}
+            
             const VAPID_KEY = "{safe_vapid_key}";
 
-            // --- PUSH & WAKE LOCK ---
             async function initPushNotifications() {{
                 if (!messaging) return; 
                 try {{
                     const permission = await Notification.requestPermission();
                     if (permission === 'granted') {{
-                        console.log('Push permission granted.');
                         const token = await messaging.getToken({{ vapidKey: VAPID_KEY }});
-                        if (token) {{
-                            console.log('FCM Token:', token);
-                            await sendTokenToServer(token);
-                        }}
+                        if (token) sendTokenToServer(token);
                     }}
-                }} catch (err) {{
-                    console.error('Push Token Error:', err);
-                }}
+                }} catch (err) {{}}
             }}
 
             if (messaging) {{
-                messaging.onTokenRefresh(() => {{
-                    messaging.getToken().then((refreshedToken) => {{
-                        sendTokenToServer(refreshedToken);
-                    }}).catch((err) => {{}});
-                }});
-
                 messaging.onMessage((payload) => {{
-                    console.log('Message received.', payload);
-                    
-                    const audio = new Audio('/static/notification.mp3'); 
-                    audio.play().catch(e => console.log('Audio play failed:', e));
-                    
-                    showToast(`🔔 ${{payload.notification?.title || "Нове замовлення!"}}`);
-
-                    if (payload.data && payload.data.job_id) {{
-                        if(activeTab === 'orders') fetchOrders();
-                    }}
+                    const audio = new Audio('/static/notification.mp3'); audio.play().catch(e => {{}});
+                    showToast(payload.notification?.title || "Нове замовлення!");
+                    if (payload.data?.job_id && activeTab === 'orders') fetchOrders();
                 }});
             }}
 
             async function sendTokenToServer(token) {{
-                const fd = new FormData();
-                fd.append('token', token);
-                try {{
-                    await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
-                }} catch(e) {{}}
+                const fd = new FormData(); fd.append('token', token);
+                try {{ await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }}); }} catch(e) {{}}
             }}
 
             function showToast(text) {{
                 const t = document.getElementById('toast');
-                t.innerText = text;
-                t.style.display = 'block';
-                setTimeout(() => t.style.display = 'none', 5000);
+                document.getElementById('toast-text').innerText = text;
+                t.classList.add('show');
+                setTimeout(() => t.classList.remove('show'), 4000);
             }}
 
-            // WAKE LOCK (Щоб екран не гас і WS не рвався)
-            let wakeLock = null;
-            async function requestWakeLock() {{
-                if ('wakeLock' in navigator) {{
-                    try {{
-                        wakeLock = await navigator.wakeLock.request('screen');
-                        document.addEventListener('visibilitychange', async () => {{
-                            if (wakeLock !== null && document.visibilityState === 'visible') {{
-                                wakeLock = await navigator.wakeLock.request('screen');
-                            }}
-                        }});
-                    }} catch (err) {{ console.log('Wake Lock error:', err); }}
-                }}
-            }}
-
+            // --- WAKE LOCK ---
             document.addEventListener('click', () => {{
                 initPushNotifications();
-                requestWakeLock();
+                // FIX: catch empty lambda syntax for py f-string
+                if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(()=>{{}});
             }}, {{ once: true }});
 
             // --- APP LOGIC ---
@@ -554,8 +606,11 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
             let activeTab = 'map';
             let socket = null, pingInterval = null;
 
+            // INIT MAP (Dark Theme)
             const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
-            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
+            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                attribution: '© OpenStreetMap', subdomains: 'abcd', maxZoom: 19
+            }}).addTo(map);
             let marker = null, targetMarker = null, routeLine = null;
 
             function switchTab(tab) {{
@@ -563,6 +618,7 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
                 document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
                 document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
                 
+                // FIX: string interpolation with ${{}}
                 document.getElementById(`screen-${{tab}}`).classList.add('active');
                 document.getElementById(`nav-${{tab}}`).classList.add('active');
                 
@@ -577,13 +633,12 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
 
             async function fetchOrders() {{
                 if (!isOnline || !currentLat) return;
-                const loader = document.getElementById('feed-loader');
-                loader.style.opacity = '1';
+                const loader = document.getElementById('feed-loader'); loader.style.opacity = '1';
                 try {{
                     const res = await fetch(`/api/courier/open_orders?lat=${{currentLat}}&lon=${{currentLon}}`);
                     const orders = await res.json();
                     renderOrders(orders);
-                }} catch(e) {{ console.error(e); }} finally {{ loader.style.opacity = '0.5'; }}
+                }} catch(e) {{}} finally {{ loader.style.opacity = '0'; }}
             }}
 
             function renderOrders(orders) {{
@@ -591,45 +646,62 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
                 const badge = document.getElementById('orders-badge');
                 
                 if (orders.length === 0) {{
-                    container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-mug-hot"></i><h3>Поки тихо...</h3><p>Немає доступних замовлень поблизу.</p></div>`;
+                    container.innerHTML = `<div style="text-align:center; padding:40px; color:#64748b;"><i class="fa-solid fa-mug-hot" style="font-size:3rem; margin-bottom:10px;"></i><p>Замовлень поки немає</p></div>`;
                     badge.style.display = 'none';
                     return;
                 }}
 
                 badge.style.display = 'block';
                 container.innerHTML = orders.map(o => {{
-                    const isHighPrice = o.fee > 100;
-                    const cardClass = isHighPrice ? 'order-card high-price' : 'order-card';
-                    let badgesHtml = '';
-                    if (o.payment_type === 'cash') badgesHtml += '<span class="oc-tag" style="color:#facc15">Готівка</span>';
-                    if (o.payment_type === 'buyout') badgesHtml += '<span class="oc-tag" style="color:#ec4899">Викуп</span>';
-                    if (o.is_return) badgesHtml += '<span class="oc-tag" style="color:#f97316">Повернення</span>';
+                    const isHigh = o.fee > 100;
+                    const cardClass = isHigh ? 'order-card high-price' : 'order-card';
                     
-                    let distText = o.dist_to_rest !== null ? o.dist_to_rest.toFixed(1) + ' км' : '?';
-                    let tripText = o.dist_trip ? `🏁 ${{parseFloat(o.dist_trip).toFixed(1)}} км` : '';
+                    // --- ИСПРАВЛЕНО: Правильные ключи и отображение дистанции ---
+                    // dist_to_rest - до ресторана
+                    // dist_trip - от ресторана до клиента (это то, что приходит с сервера)
+                    
+                    // Безопасное отображение
+                    let toRestText = (o.dist_to_rest !== null && o.dist_to_rest !== undefined) ? o.dist_to_rest.toFixed(1) + ' км' : '?';
+                    let tripText = (o.dist_trip !== null && o.dist_trip !== undefined && o.dist_trip !== '?') ? parseFloat(o.dist_trip).toFixed(1) + ' км' : '?';
+
+                    // --- NEW: Payment Badges in List ---
+                    let badges = '';
+                    if (o.payment_type === 'buyout') {{
+                        badges += `<div class="badge-cash" style="color:#ec4899; border-color:#ec4899; background:rgba(236,72,153,0.15); margin-bottom:10px;">💰 Викуп: ${{o.price}} ₴</div>`;
+                    }} else if (o.is_return) {{
+                        badges += `<div class="badge-cash" style="color:#f97316; border-color:#f97316; background:rgba(249,115,22,0.15); margin-bottom:10px;">↩️ Повернути: ${{o.price}} ₴</div>`;
+                    }} else if (o.payment_type === 'cash') {{
+                        badges += `<div class="badge-cash" style="margin-bottom:10px;">💵 До сплати: ${{o.price}} ₴</div>`;
+                    }}
 
                     return `
                     <div class="${{cardClass}}">
                         <div class="oc-header">
-                            <div class="oc-dist-badge"><i class="fa-solid fa-person-walking"></i> ${{distText}}</div>
                             <div class="oc-price">+${{o.fee}} ₴</div>
+                            <div class="oc-dist"><i class="fa-solid fa-person-walking"></i> ${{toRestText}}</div>
                         </div>
-                        <div class="oc-route">
-                            <div class="oc-point rest"><div style="font-weight:600; color:white;">${{o.restaurant_name}}</div><div style="font-size:0.8rem;">${{o.restaurant_address}}</div></div>
-                            <div class="oc-point client"><div style="font-weight:600; color:white;">Клієнт</div><div style="font-size:0.8rem;">${{o.dropoff_address}}</div></div>
-                            ${{tripText ? `<div style="position:absolute; left:0; top:50%; transform:translateY(-50%); font-size:0.75rem; background:var(--bg-card); color:#94a3b8; padding:2px 0; z-index:2;">${{tripText}}</div>` : ''}}
+                        
+                        ${{badges}}
+
+                        <div class="oc-timeline">
+                            <div class="oc-point rest">
+                                <div class="oc-title">${{o.restaurant_name}}</div>
+                                <div class="oc-sub">${{o.restaurant_address}}</div>
+                            </div>
+                            <div class="oc-point client">
+                                <div class="oc-title">Клієнт</div>
+                                <div class="oc-sub">${{o.dropoff_address}} <span style="color:#4ade80; font-weight:bold;">(${{tripText}})</span></div>
+                            </div>
                         </div>
-                        ${{o.comment ? `<div style="font-size:0.85rem; color:#94a3b8; margin-bottom:10px; background:rgba(255,255,255,0.03); padding:8px; border-radius:8px;">💬 ${{o.comment}}</div>` : ''}}
-                        <div class="oc-footer">
-                            <div class="oc-tags">${{badgesHtml}}</div>
-                            <button class="btn-accept" onclick="acceptOrderFromFeed(${{o.id}})">ПРИЙНЯТИ</button>
-                        </div>
+                        <button class="btn-accept" onclick="acceptOrderFromFeed(${{o.id}})">
+                            <span>ПРИЙНЯТИ</span>
+                        </button>
                     </div>`;
                 }}).join('');
             }}
-            
+
             async function acceptOrderFromFeed(id) {{
-                if(!confirm("Прийняти це замовлення?")) return;
+                if(!confirm("Прийняти замовлення?")) return;
                 document.getElementById('modal-job-id').value = id;
                 await acceptOrder();
                 switchTab('map');
@@ -641,77 +713,63 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
                 socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/courier`);
 
                 socket.onopen = () => {{
-                    document.getElementById('connection-dot').style.background = '#4ade80';
+                    document.getElementById('status-dot').style.boxShadow = '0 0 15px #4ade80';
                     clearInterval(pingInterval);
                     pingInterval = setInterval(() => {{ if (socket.readyState === WebSocket.OPEN) socket.send("ping"); }}, 15000);
                 }};
                 socket.onmessage = (e) => {{
                     if (e.data === "pong") return; 
                     const msg = JSON.parse(e.data);
-                    
                     if(msg.type === 'new_order') {{
+                        // Force Modal Show logic + audio play
                         if (activeTab === 'orders') fetchOrders(); 
-                        else showNewOrderModal(msg.data); 
-                        
-                        // ЗВУК ПРИ ВХОДЯЩЕМ WS СООБЩЕНИИ (Дублирование для надежности)
-                        const audio = new Audio('/static/notification.mp3'); 
-                        audio.play().catch(e => {{}});
+                        showNewOrderModal(msg.data);
+                        // FIX: catch empty lambda syntax for py f-string
+                        new Audio('/static/notification.mp3').play().catch(()=>{{}});
                     }}
                     else if (msg.type === 'job_update') checkActiveJob();
                     else if (msg.type === 'job_ready') {{
-                        if (currentJob) {{
-                            currentJob.is_ready = true;
-                            renderJobSheet();
-                            if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
-                            alert(msg.message);
-                        }}
+                        if (currentJob) {{ currentJob.is_ready = true; renderJobSheet(); showToast("🍳 ЗАМОВЛЕННЯ ГОТОВЕ!"); }}
                     }}
                     else if (msg.type === 'chat_message') {{
-                        const sheetOpen = document.getElementById('chat-sheet').classList.contains('open');
-                        if (sheetOpen && currentJob && currentJob.id == msg.job_id) renderSingleMsg(msg);
-                        else showToast(`💬 ${{msg.text}}`);
+                        if (document.getElementById('chat-sheet').classList.contains('open')) renderSingleMsg(msg);
+                        else showToast("💬 Нове повідомлення");
                     }}
                 }};
                 socket.onclose = () => {{
-                    document.getElementById('connection-dot').style.background = 'red';
                     if (isOnline) setTimeout(connectWS, 3000);
                 }};
             }}
             
+            // GEOLOCATION
             if (navigator.geolocation) {{
                 navigator.geolocation.watchPosition((pos) => {{
                     const {{ latitude, longitude }} = pos.coords;
                     currentLat = latitude; currentLon = longitude;
-
                     if (!marker) {{ marker = L.marker([latitude, longitude]).addTo(map); map.setView([latitude, longitude], 15); }}
                     else marker.setLatLng([latitude, longitude]);
                     
                     if (activeTab === 'orders' && isOnline) fetchOrders();
-
-                    if(isOnline && socket && socket.readyState === WebSocket.OPEN) {{
-                        const fd = new FormData(); fd.append('lat', latitude); fd.append('lon', longitude);
-                        navigator.sendBeacon('/api/courier/location', fd);
-                        socket.send(JSON.stringify({{type: 'init_location', lat: latitude, lon: longitude}}));
+                    
+                    if(isOnline && socket?.readyState === WebSocket.OPEN) {{
+                         const fd = new FormData(); fd.append('lat', latitude); fd.append('lon', longitude);
+                         navigator.sendBeacon('/api/courier/location', fd);
                     }}
-                }}, console.error, {{ enableHighAccuracy: true }});
+                }}, null, {{ enableHighAccuracy: true }});
             }}
-            
-            setInterval(() => {{
-                if (activeTab === 'orders' && isOnline && currentLat) fetchOrders();
-            }}, 15000);
 
             async function toggleShift() {{
                 try {{
                     const res = await fetch('/api/courier/toggle_status', {{method:'POST'}});
                     const data = await res.json();
                     isOnline = data.is_online;
-                    
                     document.getElementById('offline-msg').style.display = isOnline ? 'none' : 'flex';
-                    document.getElementById('status-dot').className = isOnline ? 'dot online' : 'dot offline';
-                    document.getElementById('status-text').innerText = isOnline ? 'НА ЗМІНІ' : 'ОФЛАЙН';
+                    const dot = document.getElementById('status-dot');
+                    const txt = document.getElementById('status-text');
                     
-                    if(isOnline) connectWS(); else if(socket) socket.close();
-                }} catch(e) {{ alert("Помилка з'єднання"); }}
+                    if(isOnline) {{ dot.className='dot online'; txt.innerText='НА ЗМІНІ'; connectWS(); }}
+                    else {{ dot.className='dot offline'; txt.innerText='ОФЛАЙН'; socket?.close(); }}
+                }} catch(e) {{}}
             }}
             if(isOnline) connectWS();
 
@@ -720,10 +778,9 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
                     const res = await fetch('/api/courier/active_job');
                     const data = await res.json();
                     if(data.active) {{
-                        currentJob = data.job;
-                        renderJobSheet();
-                        switchTab('map');
+                        currentJob = data.job; renderJobSheet(); switchTab('map');
                         document.querySelector('.bottom-nav').style.display = 'none';
+                        document.querySelector('.feed-container').style.paddingBottom = '0';
                     }} else {{
                         document.getElementById('job-sheet').classList.remove('active');
                         currentJob = null;
@@ -736,27 +793,28 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
             checkActiveJob();
 
             function renderJobSheet() {{
-                const sheet = document.getElementById('job-sheet');
-                sheet.classList.add('active');
-                
-                document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
+                const sheet = document.getElementById('job-sheet'); sheet.classList.add('active');
+                document.getElementById('job-title').innerText = `#${{currentJob.id}}`;
                 document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
                 
                 const statusDesc = document.getElementById('job-status-desc');
                 statusDesc.innerHTML = '';
                 
-                if (currentJob.is_ready) {{
-                    statusDesc.innerHTML += '<div class="ready-badge">🍳 ЗАМОВЛЕННЯ ГОТОВЕ!</div><br>';
-                }}
+                if (currentJob.is_ready) statusDesc.innerHTML += '<div class="badge-ready">🍳 ГОТОВО</div> ';
                 
-                if (currentJob.payment_type === 'cash' || currentJob.payment_type === 'buyout') {{
-                     let label = currentJob.payment_type === 'cash' ? '💵 ВЗЯТИ ГОТІВКУ:' : '💰 ВИКУП (Свої гроші):';
-                     statusDesc.innerHTML += `<div class="client-pay-box">${{label}} ${{currentJob.order_price}} ₴</div>`;
-                }}
+                // --- NEW: Payment details in Active Job Sheet ---
+                if (currentJob.payment_type === 'cash' && !currentJob.is_return_required) 
+                    statusDesc.innerHTML += `<div class="badge-cash">💵 Клієнт платить: ${{currentJob.order_price}} ₴</div>`;
+
+                if (currentJob.payment_type === 'buyout') 
+                    statusDesc.innerHTML += `<div class="badge-cash" style="color:#ec4899; border-color:#ec4899">💰 Викуп: ${{currentJob.order_price}} ₴</div>`;
+
+                if (currentJob.is_return_required) 
+                    statusDesc.innerHTML += `<div class="badge-cash" style="color:#f97316; border-color:#f97316">↩️ Повернути: ${{currentJob.order_price}} ₴</div>`;
+                // ------------------------------------------------
 
                 document.getElementById('current-target-name').innerText = currentJob.partner_name;
                 document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
-                document.getElementById('client-phone').innerText = currentJob.customer_phone;
                 document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
                 
                 const btnNav = document.getElementById('btn-nav');
@@ -769,116 +827,120 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
                 document.getElementById('btn-chat').onclick = openChat;
 
                 let destAddr = "";
+                // Logic phases
                 if (['assigned', 'ready', 'arrived_pickup'].includes(currentJob.status)) {{
                     destAddr = currentJob.partner_address;
-                    document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
+                    document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ';
                     document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('client-info-block').style.display = 'none';
                     document.getElementById('step-1').className = 'step active'; document.getElementById('step-2').className = 'step';
                     
                     if (currentJob.status === 'arrived_pickup') {{
-                        btnAct.innerText = '📦 Забрав замовлення';
-                        btnAct.style.background = 'var(--status-active)';
+                        btnAct.innerText = 'ЗАБРАВ';
+                        btnAct.style.background = 'var(--accent-gradient)';
                         btnAct.onclick = () => updateStatus('picked_up');
-                        if (!currentJob.is_ready) statusDesc.innerHTML += '<span style="color:#aaa">Очікуйте видачі...</span>';
                     }} else {{
-                        btnAct.innerText = '👋 Я на місці';
-                        btnAct.style.background = 'var(--status-active)';
+                        btnAct.innerText = 'Я НА МІСЦІ';
+                        btnAct.style.background = 'var(--primary-gradient)';
                         btnAct.onclick = async () => {{
                              await fetch('/api/courier/arrived_pickup', {{method:'POST', body: new URLSearchParams({{job_id: currentJob.id}})}});
                              currentJob.status = 'arrived_pickup'; renderJobSheet();
                         }};
-                        if (!currentJob.is_ready) statusDesc.innerHTML += '<span style="color:#aaa">Прямуйте до закладу</span>';
                     }}
                 }} else {{
                     destAddr = currentJob.customer_address;
-                    document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
+                    document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ';
                     document.getElementById('current-target-addr').innerText = destAddr;
                     document.getElementById('client-info-block').style.display = 'block';
                     document.getElementById('step-1').className = 'step done'; document.getElementById('step-2').className = 'step active';
                     
-                    if (currentJob.payment_type === 'cash') statusDesc.innerHTML = `<div class="client-pay-box">💵 ОТРИМАЙТЕ ГОТІВКУ: ${{currentJob.order_price}} ₴</div>`;
-                    else if (currentJob.payment_type === 'buyout') statusDesc.innerHTML = `<div class="client-pay-box">💰 ЗАБЕРІТЬ СВОЇ: ${{currentJob.order_price}} ₴</div>`;
-                    else statusDesc.innerHTML = 'Везіть до клієнта';
-
                     if (currentJob.is_return_required) {{
-                        btnAct.innerText = '💰 Забрав гроші (Везу назад)';
+                        btnAct.innerText = 'ПОВЕРНЕННЯ';
                         btnAct.onclick = () => {{ if(confirm("Везти гроші в заклад?")) updateStatus('delivered'); }};
                     }} else if (currentJob.status === 'returning') {{
-                         statusDesc.innerHTML = '<b style="color:red">↩️ ПОВЕРНІТЬ ГРОШІ!</b>';
-                         document.getElementById('addr-label').innerText = 'ВЕЗТИ ГРОШІ СЮДИ:';
+                         statusDesc.innerHTML = '<b style="color:#ef4444">↩️ ПОВЕРНІТЬ ГРОШІ!</b>';
+                         document.getElementById('addr-label').innerText = 'ВЕЗТИ ГРОШІ СЮДИ';
                          document.getElementById('current-target-addr').innerText = currentJob.partner_address;
-                         btnAct.innerText = '💵 Гроші віддав';
-                         btnAct.style.background = '#fb923c';
-                         btnAct.onclick = () => alert("Чекайте підтвердження від закладу.");
+                         btnAct.innerText = 'ВІДДАВ';
+                         btnAct.style.background = '#f97316';
+                         btnAct.onclick = () => alert("Чекайте підтвердження закладу.");
                     }} else {{
-                        btnAct.innerText = '✅ Доставив';
+                        btnAct.innerText = 'ДОСТАВИВ';
+                        btnAct.style.background = 'var(--accent-gradient)';
                         btnAct.onclick = () => updateStatus('delivered');
                     }}
                     
-                    if (currentJob.customer_lat && currentJob.customer_lon && !targetMarker) {{
+                    // Draw Line on Map
+                    if (currentJob.customer_lat && !targetMarker) {{
                         const pos = [currentJob.customer_lat, currentJob.customer_lon];
                         targetMarker = L.marker(pos).addTo(map);
                         if(marker) {{
-                             routeLine = L.polyline([marker.getLatLng(), pos], {{color: '#6366f1', weight: 4, dashArray: '10, 10'}}).addTo(map);
+                             routeLine = L.polyline([marker.getLatLng(), pos], {{color: '#818cf8', weight: 4, dashArray: '10, 10'}}).addTo(map);
                              map.fitBounds(routeLine.getBounds(), {{padding:[50,50]}});
                         }}
                     }}
                 }}
-                btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(destAddr)}}`;
+                
+                // FIX: Use Google Maps Search query with correctly encoded address
+                btnNav.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(destAddr);
             }}
 
-            async function updateStatus(newStatus) {{
-                const fd = new FormData(); fd.append('job_id', currentJob.id); fd.append('status', newStatus);
-                await fetch('/api/courier/update_job_status', {{method:'POST', body:fd}});
-                checkActiveJob();
+            async function updateStatus(s) {{
+                const fd = new FormData(); fd.append('job_id', currentJob.id); fd.append('status', s);
+                await fetch('/api/courier/update_job_status', {{method:'POST', body:fd}}); checkActiveJob();
             }}
 
             async function acceptOrder() {{
-                const jobId = document.getElementById('modal-job-id').value;
-                const fd = new FormData(); fd.append('job_id', jobId);
+                const id = document.getElementById('modal-job-id').value;
+                const fd = new FormData(); fd.append('job_id', id);
                 try {{
                     const res = await fetch('/api/courier/accept_order', {{method:'POST', body:fd}});
                     const data = await res.json();
                     closeOrderModal();
                     if(data.status === 'ok') checkActiveJob(); else alert(data.message);
-                }} catch(e) {{ alert("Помилка"); }}
+                }} catch(e) {{}}
             }}
 
             function showNewOrderModal(data) {{
-                document.getElementById('modal-fee').innerText = data.fee + ' ₴';
-                let warning = "";
-                if (data.payment_type === 'buyout') warning = `<div style="background:#fce7f3; color:#db2777; padding:10px; border-radius:8px; margin-bottom:10px; font-weight:bold;">💰 ПОТРІБЕН ВИКУП: ${{data.price}} грн</div>`;
-                document.getElementById('warning-placeholder').innerHTML = warning;
+                document.getElementById('modal-fee').innerText = `+${{data.fee}} ₴`;
                 
-                document.getElementById('modal-route').innerHTML = `
-                    <div style="text-align:left; background:rgba(0,0,0,0.05); padding:10px; border-radius:8px; font-size:0.9rem;">
-                        <div style="margin-bottom:8px;"><i class="fa-solid fa-shop" style="color:#f59e0b"></i> <b>${{data.restaurant}}</b><br><span style="color:#555; font-size:0.8rem">${{data.restaurant_address}}</span></div>
-                        <div><i class="fa-solid fa-location-dot" style="color:#ef4444"></i> <b>Клієнт</b><br><span style="color:#555; font-size:0.8rem">${{data.address}}</span></div>
-                    </div>
-                `;
+                let warningHtml = '';
                 
-                document.getElementById('modal-job-id').value = data.id;
-                document.getElementById('orderModal').style.display = 'flex';
+                // 1. Выкуп (Buyout)
+                if (data.payment_type === 'buyout') {{
+                    warningHtml += `<div class="badge-cash" style="color:#ec4899; border-color:#ec4899; background:rgba(236,72,153,0.15);">💰 ПОТРІБЕН ВИКУП: ${{data.price}} ₴</div>`;
+                }}
                 
-                // ЗВУК ПРИ ПОЯВЛЕНИИ МОДАЛКИ (Дублирование для надежности)
-                const audio = new Audio('/static/notification.mp3'); 
-                audio.play().catch(e => {{}});
-            }}
-            function closeOrderModal() {{ document.getElementById('orderModal').style.display = 'none'; }}
+                // 2. Повернення коштів (Return)
+                if (data.is_return) {{
+                    warningHtml += `<div class="badge-cash" style="color:#f97316; border-color:#f97316; background:rgba(249,115,22,0.15);">↩️ ТРЕБА ПОВЕРНУТИ КОШТИ</div>`;
+                }}
+                
+                // 3. Готівка (Cash) - якщо не викуп і не повернення
+                if (data.payment_type === 'cash' && !data.is_return) {{
+                     warningHtml += `<div class="badge-cash">💵 ОПЛАТА ГОТІВКОЮ: ${{data.price}} ₴</div>`;
+                }}
 
+                document.getElementById('warning-placeholder').innerHTML = warningHtml;
+                document.getElementById('modal-route').innerHTML = `<div>🏪 <b>${{data.restaurant}}</b></div><div style="margin-top:5px; color:#cbd5e1; font-size:0.9rem;">${{data.restaurant_address}}</div><div style="margin-top:10px;">📍 <b>Клієнт</b></div><div style="margin-top:5px; color:#cbd5e1; font-size:0.9rem;">${{data.address}}</div>`;
+                document.getElementById('modal-job-id').value = data.id;
+                document.getElementById('orderModal').classList.add('show');
+            }}
+            function closeOrderModal() {{ document.getElementById('orderModal').classList.remove('show'); }}
+
+            // CHAT & HISTORY
             async function toggleHistory(show) {{
-                const modal = document.getElementById('history-modal');
+                const el = document.getElementById('history-modal');
                 if(show) {{
                     const res = await fetch('/api/courier/history');
                     const jobs = await res.json();
                     document.getElementById('history-list').innerHTML = jobs.map(j => `
-                        <div style="padding:15px; border-bottom:1px solid #333; display:flex; justify-content:space-between">
-                            <div><b>#${{j.id}}</b> ${{j.address}}<br><small style="color:#888">${{j.date}}</small></div>
-                            <div style="color:#4ade80">+${{j.price}}₴</div>
+                        <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:15px; margin-bottom:10px; display:flex; justify-content:space-between;">
+                            <div><div style="font-weight:700">#${{j.id}}</div><div style="font-size:0.8rem; color:#94a3b8">${{j.address}}</div></div>
+                            <div style="color:#4ade80; font-weight:700">+${{j.price}}₴</div>
                         </div>`).join('');
-                    modal.classList.add('open');
-                }} else modal.classList.remove('open');
+                    el.classList.add('open');
+                }} else el.classList.remove('open');
             }}
             
             async function openChat() {{
@@ -886,26 +948,20 @@ def get_courier_pwa_html(courier: Courier, firebase_config_json: str, vapid_key:
                 document.getElementById('chat-sheet').classList.add('open');
                 const res = await fetch(`/api/chat/history/${{currentJob.id}}`);
                 const msgs = await res.json();
-                const container = document.getElementById('chat-body');
-                container.innerHTML = '';
+                const box = document.getElementById('chat-body'); box.innerHTML = '';
                 msgs.forEach(renderSingleMsg);
             }}
             function renderSingleMsg(m) {{
-                const container = document.getElementById('chat-body');
+                const box = document.getElementById('chat-body');
                 const div = document.createElement('div');
                 div.className = `msg ${{m.role === 'courier' ? 'me' : 'other'}}`;
-                div.innerText = m.text;
-                container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
+                div.innerText = m.text; box.appendChild(div); box.scrollTop = box.scrollHeight;
             }}
             async function sendChatMessage(e) {{
-                e.preventDefault();
-                const input = document.getElementById('chat-input');
-                const text = input.value.trim();
-                if(!text || !currentJob) return;
-                input.value = '';
-                renderSingleMsg({{role:'courier', text:text}}); 
-                const fd = new FormData(); fd.append('job_id', currentJob.id); fd.append('message', text); fd.append('role', 'courier');
+                e.preventDefault(); const inp = document.getElementById('chat-input');
+                const txt = inp.value.trim(); if(!txt || !currentJob) return;
+                inp.value = ''; renderSingleMsg({{role:'courier', text:txt}});
+                const fd = new FormData(); fd.append('job_id', currentJob.id); fd.append('message', txt); fd.append('role', 'courier');
                 await fetch('/api/chat/send', {{method: 'POST', body: fd}});
             }}
         </script>
