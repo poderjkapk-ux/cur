@@ -6,7 +6,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.orm import joinedload
 
 # Импортируем auth вместо app, чтобы избежать циклического импорта
@@ -575,6 +575,13 @@ async def courier_control(
         courier.is_active = True
         msg = f"Кур'єр {courier.name} розблокований."
     elif action == "delete":
+        # 1. Відв'язуємо кур'єра від усіх замовлень (щоб не було помилки ForeignKey)
+        await db.execute(
+            update(DeliveryJob)
+            .where(DeliveryJob.courier_id == courier.id)
+            .values(courier_id=None)
+        )
+        # 2. Видаляємо самого кур'єра
         await db.delete(courier)
         msg = "Кур'єр видалений."
     
