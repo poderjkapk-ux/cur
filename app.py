@@ -652,12 +652,6 @@ async def get_firebase_sw():
 
 
 # --- WEBSOCKET COURIER (UPDATED LOGIC) ---
-# ... (внутри app.py)
-
-# ... (внутри app.py)
-
-# ... (внутри app.py)
-
 @app.websocket("/ws/courier")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -695,9 +689,6 @@ async def websocket_endpoint(
                     lat = float(data.get("lat"))
                     lon = float(data.get("lon"))
                     
-                    # Здесь нам нужен объект courier для обновления полей.
-                    # Т.к. мы делаем expire_all ниже, лучше обновить объект запросом или не использовать expire_all так агрессивно.
-                    # Но самое простое — просто обновить поля, так как expire произойдет ПОСЛЕ.
                     courier.lat = lat
                     courier.lon = lon
                     courier.last_seen = datetime.utcnow()
@@ -711,7 +702,7 @@ async def websocket_endpoint(
                     # Якщо кур'єр вже має активне замовлення, він НЕ повинен бачити нові
                     active_job_check = await db.execute(
                         select(DeliveryJob.id)
-                        .where(DeliveryJob.courier_id == courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
+                        .where(DeliveryJob.courier_id == courier_id) 
                         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
                     )
                     
@@ -719,10 +710,8 @@ async def websocket_endpoint(
                          # Кур'єр зайнятий - нічого не відправляємо
                          pass
                     else:
-                        # ... (код поиска заказов остается тем же) ...
                         pass 
                 
-                # ... (обработка ping остается той же) ...
                 elif data == "ping":
                     await websocket.send_text("pong")
 
@@ -731,10 +720,10 @@ async def websocket_endpoint(
                     await websocket.send_text("pong")
 
     except WebSocketDisconnect:
-        manager.disconnect_courier(courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
+        manager.disconnect_courier(courier_id) 
     except Exception as e:
         logging.error(f"WS Error: {e}")
-        manager.disconnect_courier(courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
+        manager.disconnect_courier(courier_id) 
 
 # --- НОВАЯ ФУНКЦИЯ ДЛЯ ОТДАЧИ ЛЕНТЫ ЗАКАЗОВ (FEED) ---
 @app.get("/api/courier/open_orders")
@@ -905,6 +894,12 @@ async def courier_arrived_pickup(
         "message": f"👋 Кур'єр {courier.name} прибув і чекає на замовлення!"
     })
     
+    # --- ИСПРАВЛЕНИЕ: Отправка уведомления в Telegram партнеру ---
+    partner = await db.get(DeliveryPartner, job.partner_id)
+    if partner and partner.telegram_chat_id:
+        tg_text = f"👋 <b>Кур'єр {courier.name} прибув!</b>\nЗамовлення #{job.id}. Видайте пакунок."
+        asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+    
     return JSONResponse({"status": "ok"})
 
 # --- ОБНОВЛЕННЫЙ РОУТ СТАТУСА: Обработка возврата ---
@@ -930,6 +925,12 @@ async def update_job_status(
             "status_text": "Повернення коштів", "status_color": color,
             "message": msg_text
         })
+        
+        # --- ИСПРАВЛЕНИЕ: Отправка уведомления в Telegram партнеру о возврате ---
+        partner = await db.get(DeliveryPartner, job.partner_id)
+        if partner and partner.telegram_chat_id:
+            tg_text = f"💰 <b>Замовлення #{job.id}</b>\n{msg_text}"
+            asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
     else:
         # Стандартная логика
         job.status = status
@@ -1424,6 +1425,11 @@ async def partner_boost_order(
                  job_id=job.id, 
                  fee=job.delivery_fee
              )
+             
+        # --- ИСПРАВЛЕНИЕ: Отправка уведомления в Telegram курьеру о повышении цены ---
+        if c.telegram_chat_id:
+            tg_msg = f"🔥 <b>Ціна зросла!</b>\nНова ціна: 💰 {job.delivery_fee} грн\n📍 {job.dropoff_address}"
+            asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
         
     return JSONResponse({"status": "ok", "new_fee": job.delivery_fee})
 
@@ -1441,15 +1447,24 @@ async def track_courier_location(
         "name": courier.name, "phone": courier.phone, "job_status": job.status
     })
 
+# --- ИСПРАВЛЕНИЕ: Безопасное подключение WebSocket для Партнера ---
 @app.websocket("/ws/partner")
 async def websocket_partner_endpoint(websocket: WebSocket, db: AsyncSession = Depends(get_db)):
     token = websocket.cookies.get("partner_token")
-    if not token: await websocket.close(); return
+    if not token: 
+        await websocket.close()
+        return
+        
+    pid = None # Инициализация переменной, чтобы избежать UnboundLocalError
     try:
         pid = int(auth.jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])["sub"].split(":")[1])
         await manager.connect_partner(websocket, pid)
-        while True: await websocket.receive_text()
-    except: manager.disconnect_partner(pid)
+        while True: 
+            await websocket.receive_text()
+    except Exception as e: 
+        logging.error(f"Partner WS Disconnected: {e}")
+        if pid: # Проверка перед удалением
+            manager.disconnect_partner(pid)
 
 async def send_tg_notification(name, phone, plan, result_data):
     if not TG_BOT_TOKEN or not TG_CHAT_ID: return
