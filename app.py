@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta
 
-# --- 1. Імпорти модулів проекту ---
+# --- 1. Импорты модулей проекта ---
 import provision
 import auth 
 import templates_saas
@@ -31,15 +31,15 @@ import order_monitor
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, 
     DeliveryPartner, DeliveryJob, PendingVerification, ChatMessage, 
-    SystemSetting, create_db_tables, get_db
+    create_db_tables, get_db
 )
 from auth import check_admin_auth
 
 # --- FIREBASE IMPORTS ---
 import firebase_admin
-from firebase_admin import credentials, messaging, get_app, delete_app
+from firebase_admin import credentials, messaging
 
-# --- 2. Конфігурація ---
+# --- 2. Конфигурация ---
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 ROOT_DOMAIN = os.environ.get("ROOT_DOMAIN", "restify.site")
@@ -47,13 +47,25 @@ BOT_USERNAME = os.environ.get("BOT_USERNAME", "Restify_Bot")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
+# Инициализация Firebase Admin SDK
+if not firebase_admin._apps:
+    try:
+        if os.path.exists("firebase_credentials.json"):
+            cred = credentials.Certificate("firebase_credentials.json")
+            firebase_admin.initialize_app(cred)
+            logging.info("Firebase Admin initialized successfully.")
+        else:
+            logging.warning("firebase_credentials.json not found! Push notifications will not work.")
+    except Exception as e:
+        logging.warning(f"Firebase Init Error: {e}")
+
 # --- WebSocket Manager ---
 class ConnectionManager:
     def __init__(self):
         self.active_couriers: Dict[int, WebSocket] = {}
         self.active_partners: Dict[int, WebSocket] = {}
 
-    # --- Методи для КУР'ЄРІВ ---
+    # --- Методы для КУРЬЕРОВ ---
     async def connect_courier(self, websocket: WebSocket, courier_id: int):
         await websocket.accept()
         self.active_couriers[courier_id] = websocket
@@ -72,7 +84,7 @@ class ConnectionManager:
                 logging.error(f"WS Error (Courier {courier_id}): {e}")
                 self.disconnect_courier(courier_id)
 
-    # --- Методи для ПАРТНЕРІВ (Ресторанів) ---
+    # --- Методы для ПАРТНЕРОВ (Ресторанов) ---
     async def connect_partner(self, websocket: WebSocket, partner_id: int):
         await websocket.accept()
         self.active_partners[partner_id] = websocket
@@ -92,41 +104,14 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# --- ФУНКЦІЯ ІНІЦІАЛІЗАЦІЇ FIREBASE ІЗ БД ---
-async def init_firebase_startup():
-    """Завантажує Service Account JSON із бази даних та ініціалізує Firebase Admin."""
-    async with async_session_maker() as db:
-        setting = await db.get(SystemSetting, "firebase_service_account")
-        if setting and setting.value:
-            try:
-                cred_dict = json.loads(setting.value)
-                cred = credentials.Certificate(cred_dict)
-                
-                # Якщо додаток вже існує (наприклад, при релоаді), видаляємо його
-                try:
-                    app = get_app()
-                    delete_app(app)
-                except ValueError:
-                    pass # Не ініціалізовано
-                
-                firebase_admin.initialize_app(cred)
-                logging.info("Firebase Admin initialized from Database.")
-            except Exception as e:
-                logging.error(f"Firebase Init Error (from DB): {e}")
-        else:
-            logging.warning("No Firebase Service Account found in DB. Push notifications disabled.")
-
 # --- LIFESPAN (Запуск/Остановка) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.info("Startup: Connecting DB & Creating tables...")
     await create_db_tables()
     
-    # Завантаження конфіга при старті
+    # Загрузка конфига при старте
     load_config() 
-    
-    # Ініціалізація Firebase з БД
-    await init_firebase_startup()
     
     # Запуск Telegram бота
     if bot_service.bot:
@@ -135,7 +120,7 @@ async def lifespan(app: FastAPI):
     else:
         logging.warning("TG_BOT_TOKEN not set, bot disabled.")
     
-    # Запуск монітора замовлень
+    # Запуск монитора заказов
     asyncio.create_task(order_monitor.monitor_stale_orders(manager))
     logging.info("Order Monitor started.")
     
@@ -144,7 +129,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Restify SaaS Control Plane", lifespan=lifespan)
 
-# Підключення роутера адмінки доставки
+# Подключение роутера админки доставки
 app.include_router(admin_delivery.router)
 
 os.makedirs("static", exist_ok=True)
@@ -424,96 +409,6 @@ async def admin_control(
     await db.commit()
     return RedirectResponse("/admin", status_code=302)
 
-@app.get("/api/admin/delivery/map_data")
-async def get_realtime_map_data(db: AsyncSession = Depends(get_db), _ = Depends(check_admin_auth)):
-    
-    # 1. Fetch Active Couriers
-    courier_results = await db.execute(
-        select(Courier).where(
-            Courier.is_online == True, 
-            Courier.lat.is_not(None), 
-            Courier.lon.is_not(None)
-        )
-    )
-    active_couriers = courier_results.scalars().all()
-    
-    couriers_data = []
-    for c in active_couriers:
-        couriers_data.append({
-            "id": c.id,
-            "name": c.name,
-            "phone": c.phone,
-            "lat": c.lat,
-            "lon": c.lon,
-            "last_seen": c.last_seen.strftime('%Y-%m-%dT%H:%M:%SZ') if c.last_seen else None,
-            "avg_rating": c.avg_rating,
-            "job_id": None # Will be filled in job loop
-        })
-    
-    # 2. Fetch Active Jobs
-    job_results = await db.execute(
-        select(DeliveryJob)
-        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
-        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
-    )
-    active_jobs = job_results.scalars().all()
-    
-    jobs_data = []
-    # Cache for partner coordinates to avoid re-geocoding the same address
-    partner_coord_cache = {} 
-    
-    for job in active_jobs:
-        partner_name = job.partner.name if job.partner else "Невідомий заклад"
-        partner_address = job.partner.address if job.partner else "Адреса не знайдена"
-        
-        # Get Partner/Restaurant Coordinates
-        if partner_address and partner_address not in partner_coord_cache:
-            rest_lat, rest_lon = await geocode_address(partner_address)
-            partner_coord_cache[partner_address] = (rest_lat, rest_lon)
-        elif partner_address:
-            rest_lat, rest_lon = partner_coord_cache[partner_address]
-        else:
-            rest_lat, rest_lon = None, None
-
-        # Link courier to job
-        if job.courier_id:
-            for c_data in couriers_data:
-                if c_data['id'] == job.courier_id:
-                    c_data['job_id'] = job.id
-                    break
-
-        jobs_data.append({
-            "id": job.id,
-            "status": job.status,
-            "created_at": job.created_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            "delivery_fee": job.delivery_fee,
-            "order_price": job.order_price,
-            "payment_type": job.payment_type,
-            "is_return_required": job.is_return_required,
-            "partner": {
-                "id": job.partner_id,
-                "name": partner_name,
-                "address": partner_address,
-                "lat": rest_lat,
-                "lon": rest_lon,
-            },
-            "dropoff": {
-                "address": job.dropoff_address,
-                "lat": job.dropoff_lat,
-                "lon": job.dropoff_lon,
-                "customer_phone": job.customer_phone
-            },
-            "courier": {
-                "id": job.courier_id,
-                "name": job.courier.name if job.courier else None,
-            }
-        })
-
-    return JSONResponse({
-        "couriers": couriers_data,
-        "jobs": jobs_data
-    })
-
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(_ = Depends(check_admin_auth)):
     config = load_config()
@@ -582,21 +477,9 @@ async def api_courier_login(
     resp.set_cookie(key="courier_token", value=token, httponly=True, max_age=604800, samesite="lax", secure=is_secure)
     return resp
 
-# ОБНОВЛЕНО: Получаем конфиги из БД и передаем в шаблон
 @app.get("/courier/app", response_class=HTMLResponse)
-async def courier_pwa_main(
-    courier: Courier = Depends(auth.get_current_courier),
-    db: AsyncSession = Depends(get_db)
-):
-    # Получаем настройки из БД
-    fb_conf = await db.get(SystemSetting, "firebase_config")
-    vapid = await db.get(SystemSetting, "vapid_key")
-    
-    # Если их нет, передаем пустые строки
-    fb_json = fb_conf.value if fb_conf else ""
-    vapid_key = vapid.value if vapid else ""
-
-    return templates_courier.get_courier_pwa_html(courier, fb_json, vapid_key)
+async def courier_pwa_main(courier: Courier = Depends(auth.get_current_courier)):
+    return templates_courier.get_courier_pwa_html(courier)
 
 @app.get("/courier/logout")
 async def courier_logout():
@@ -631,29 +514,34 @@ async def update_fcm_token(
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- Helper for Push ---
+# --- Helper for Push (ОБНОВЛЕННАЯ ФУНКЦИЯ) ---
+# Добавлен параметр fee для передачи цены в payload
 async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str, job_id: int = None, fee: float = None):
     if not courier_tokens: return
     try:
-        # Проверяем, инициализирован ли Firebase
-        if not firebase_admin._apps:
-             logging.warning("Firebase not initialized. Skip push.")
-             return
-
         for token in courier_tokens:
             msg = messaging.Message(
                 token=token,
+                # ВАЖНО: Передаем всю информацию через data, чтобы Service Worker мог ее перехватить
                 data={
                     "title": title,
                     "body": body,
                     "url": "/courier/app",
                     "job_id": str(job_id) if job_id else "",
+                    # Передаем цену, чтобы фильтровать спам
                     "fee": str(fee) if fee is not None else "0"
                 },
-                android=messaging.AndroidConfig(priority='high', ttl=0),
+                # Настройки для Android для гарантированной доставки и пробуждения
+                android=messaging.AndroidConfig(
+                    priority='high',
+                    ttl=0, # Time to live 0 = немедленная доставка
+                ),
+                # Настройки для iOS (APNs)
                 apns=messaging.APNSConfig(
                     headers={'apns-priority': '10'},
-                    payload=messaging.APNSPayload(aps=messaging.Aps(content_available=True))
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(content_available=True)
+                    )
                 )
             )
             messaging.send(msg) 
@@ -661,107 +549,115 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
     except Exception as e:
         logging.error(f"Push Error: {e}")
 
-# ОБНОВЛЕНО: Генерируем SW с конфигом из БД
+# --- ОБНОВЛЕННЫЙ SERVICE WORKER С ФИЛЬТРАЦИЕЙ СПАМА ---
+# Использует IndexedDB для проверки, видел ли курьер этот заказ с такой ценой
 @app.get("/firebase-messaging-sw.js")
-async def get_firebase_sw(db: AsyncSession = Depends(get_db)):
-    # Получаем настройки из БД
-    fb_conf = await db.get(SystemSetting, "firebase_config")
-    
-    # Если в базе пусто, подставим пустой объект
-    config_json = fb_conf.value if fb_conf else "{}"
-    
-    content = f"""
+async def get_firebase_sw():
+    content = """
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
     
-    const firebaseConfig = {config_json};
+    // ВАШ КОНФИГ FIREBASE
+    firebase.initializeApp({
+        apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
+        authDomain: "restifysite.firebaseapp.com",
+        projectId: "restifysite",
+        storageBucket: "restifysite.firebasestorage.app",
+        messagingSenderId: "679234031594",
+        appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
+    });
 
-    if (firebaseConfig.apiKey) {{
-        try {{
-            firebase.initializeApp(firebaseConfig);
-            const messaging = firebase.messaging();
+    const messaging = firebase.messaging();
 
-            // --- ФИЛЬТР СПАМА (IndexedDB) ---
-            function checkAndSaveOrder(jobId, fee) {{
-                return new Promise((resolve) => {{
-                    if(!jobId || !fee) {{ resolve(true); return; }} 
+    // --- ФИЛЬТР СПАМА (IndexedDB) ---
+    // Если курьер уже видел этот заказ с такой же (или меньшей) ценой - не показываем.
+    // Если цена выросла - показываем и обновляем запись.
+    function checkAndSaveOrder(jobId, fee) {
+        return new Promise((resolve) => {
+            if(!jobId || !fee) { resolve(true); return; } 
 
-                    var req = indexedDB.open('RestifyPushDB', 1);
-                    req.onupgradeneeded = function(e) {{ 
-                        e.target.result.createObjectStore('jobs'); 
-                    }};
-                    req.onsuccess = function(e) {{
-                        var db = e.target.result;
-                        var tx = db.transaction('jobs', 'readwrite');
-                        var store = tx.objectStore('jobs');
-                        var getReq = store.get(jobId);
-                        
-                        getReq.onsuccess = function() {{
-                            var lastFee = getReq.result;
-                            // Если старая цена есть и она больше или равна новой -> СПАМ
-                            if (lastFee && parseFloat(lastFee) >= parseFloat(fee)) {{
-                                resolve(false); 
-                            }} else {{
-                                store.put(fee, jobId); // Сохраняем новую (высокую) цену
-                                resolve(true); 
-                            }}
-                        }};
-                        getReq.onerror = function() {{ resolve(true); }};
-                    }};
-                    req.onerror = function() {{ resolve(true); }};
-                }});
-            }}
+            var req = indexedDB.open('RestifyPushDB', 1);
+            req.onupgradeneeded = function(e) { 
+                e.target.result.createObjectStore('jobs'); 
+            };
+            req.onsuccess = function(e) {
+                var db = e.target.result;
+                var tx = db.transaction('jobs', 'readwrite');
+                var store = tx.objectStore('jobs');
+                var getReq = store.get(jobId);
+                
+                getReq.onsuccess = function() {
+                    var lastFee = getReq.result;
+                    // Если старая цена есть и она больше или равна новой -> СПАМ
+                    if (lastFee && parseFloat(lastFee) >= parseFloat(fee)) {
+                        resolve(false); 
+                    } else {
+                        store.put(fee, jobId); // Сохраняем новую (высокую) цену
+                        resolve(true); 
+                    }
+                };
+                getReq.onerror = function() { resolve(true); };
+            };
+            req.onerror = function() { resolve(true); };
+        });
+    }
 
-            // Обработка сообщений в фоне
-            messaging.onBackgroundMessage(function(payload) {{
-              console.log('[firebase-messaging-sw.js] Received background message ', payload);
-              
-              const data = payload.data || {{}};
-              const notificationTitle = data.title || "Restify Courier";
-              
-              // Проверяем на спам перед показом
-              return checkAndSaveOrder(data.job_id, data.fee).then(function(shouldShow) {{
-                  if (shouldShow) {{
-                      const notificationOptions = {{
-                        body: data.body || "Нове повідомлення",
-                        icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png',
-                        tag: 'job-' + data.job_id, // Группировка по ID заказа
-                        requireInteraction: true,
-                        data: {{ url: data.url || '/courier/app' }}
-                      }};
-                      return self.registration.showNotification(notificationTitle, notificationOptions);
-                  }} else {{
-                      console.log('[SW] Notification suppressed (Duplicate/Spam) for Job ' + data.job_id);
-                  }}
-              }});
-            }});
-        }} catch(e) {{ console.error("SW Init error", e); }}
-    }}
-    
+    // Обработка сообщений в фоне
+    messaging.onBackgroundMessage(function(payload) {
+      console.log('[firebase-messaging-sw.js] Received background message ', payload);
+      
+      const data = payload.data || {};
+      const notificationTitle = data.title || "Restify Courier";
+      
+      // Проверяем на спам перед показом
+      return checkAndSaveOrder(data.job_id, data.fee).then(function(shouldShow) {
+          if (shouldShow) {
+              const notificationOptions = {
+                body: data.body || "Нове повідомлення",
+                icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png',
+                tag: 'job-' + data.job_id, // Группировка по ID заказа
+                requireInteraction: true,
+                data: { url: data.url || '/courier/app' }
+              };
+              return self.registration.showNotification(notificationTitle, notificationOptions);
+          } else {
+              console.log('[SW] Notification suppressed (Duplicate/Spam) for Job ' + data.job_id);
+          }
+      });
+    });
+
     // Клик по уведомлению открывает приложение
-    self.addEventListener('notificationclick', function(event) {{
+    self.addEventListener('notificationclick', function(event) {
         event.notification.close();
+        
+        // Получаем URL из данных уведомления
         const urlToOpen = event.notification.data.url || '/courier/app';
 
         event.waitUntil(
-            clients.matchAll({{type: 'window', includeUncontrolled: true}}).then(windowClients => {{
-                for (var i = 0; i < windowClients.length; i++) {{
+            clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
+                for (var i = 0; i < windowClients.length; i++) {
                     var client = windowClients[i];
-                    if (client.url.indexOf(urlToOpen) !== -1 && 'focus' in client) {{
+                    if (client.url.indexOf(urlToOpen) !== -1 && 'focus' in client) {
                         return client.focus();
-                    }}
-                }}
-                if (clients.openWindow) {{
+                    }
+                }
+                if (clients.openWindow) {
                     return clients.openWindow(urlToOpen);
-                }}
-            }})
+                }
+            })
         );
-    }});
+    });
     """
     return Response(content=content, media_type="application/javascript")
 
 
-# --- WEBSOCKET COURIER ---
+# --- WEBSOCKET COURIER (UPDATED LOGIC) ---
+# ... (внутри app.py)
+
+# ... (внутри app.py)
+
+# ... (внутри app.py)
+
 @app.websocket("/ws/courier")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -778,37 +674,55 @@ async def websocket_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    # --- ИСПРАВЛЕНИЕ: Сохраняем ID в переменную ---
     courier_id = courier.id 
+    # Используем courier_id вместо courier.id в дальнейшем
     
     await manager.connect_courier(websocket, courier_id)
     
     try:
         while True:
+            # Чекаємо повідомлення від клієнта (PWA)
             data_text = await websocket.receive_text()
+            
             try:
+                # Намагаємося розпарсити JSON (на випадок init_location)
                 data = json.loads(data_text)
+                
+                # --- ЛОГІКА "РУКОСТИСКАННЯ" (HANDSHAKE) ---
                 if data.get("type") == "init_location":
+                    # 1. Оновлюємо координати кур'єра СВІЖИМИ даними
                     lat = float(data.get("lat"))
                     lon = float(data.get("lon"))
                     
+                    # Здесь нам нужен объект courier для обновления полей.
+                    # Т.к. мы делаем expire_all ниже, лучше обновить объект запросом или не использовать expire_all так агрессивно.
+                    # Но самое простое — просто обновить поля, так как expire произойдет ПОСЛЕ.
                     courier.lat = lat
                     courier.lon = lon
                     courier.last_seen = datetime.utcnow()
-                    await db.commit() 
+                    await db.commit() # Зберігаємо в БД
                     
                     logging.info(f"Courier {courier_id} updated location via WS: {lat}, {lon}")
                     
-                    db.expire_all() 
+                    db.expire_all() # Сбрасываем сессию
                     
+                    # --- ВИПРАВЛЕННЯ: ПЕРЕВІРКА ЗАЙНЯТОСТІ ---
+                    # Якщо кур'єр вже має активне замовлення, він НЕ повинен бачити нові
                     active_job_check = await db.execute(
                         select(DeliveryJob.id)
-                        .where(DeliveryJob.courier_id == courier_id)
+                        .where(DeliveryJob.courier_id == courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
                         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
                     )
                     
-                    if not active_job_check.scalar():
-                         pass # Логика отправки заказов
+                    if active_job_check.scalar():
+                         # Кур'єр зайнятий - нічого не відправляємо
+                         pass
+                    else:
+                        # ... (код поиска заказов остается тем же) ...
+                        pass 
                 
+                # ... (обработка ping остается той же) ...
                 elif data == "ping":
                     await websocket.send_text("pong")
 
@@ -817,25 +731,32 @@ async def websocket_endpoint(
                     await websocket.send_text("pong")
 
     except WebSocketDisconnect:
-        manager.disconnect_courier(courier_id)
+        manager.disconnect_courier(courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
     except Exception as e:
         logging.error(f"WS Error: {e}")
-        manager.disconnect_courier(courier_id)
+        manager.disconnect_courier(courier_id) # <--- ИСПОЛЬЗУЕМ СОХРАНЕННЫЙ ID
 
+# --- НОВАЯ ФУНКЦИЯ ДЛЯ ОТДАЧИ ЛЕНТЫ ЗАКАЗОВ (FEED) ---
 @app.get("/api/courier/open_orders")
 async def get_open_orders(
     lat: float, lon: float, 
     courier: Courier = Depends(auth.get_current_courier),
     db: AsyncSession = Depends(get_db)
 ):
+    """
+    Повертає список доступних замовлень, відсортованих за відстанню до закладу.
+    ВИПРАВЛЕНО: Якщо кур'єр зайнятий, повертає порожній список.
+    """
+    # 1. Перевірка зайнятості
     active_check = await db.execute(
         select(DeliveryJob.id)
         .where(DeliveryJob.courier_id == courier.id)
         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
     )
     if active_check.scalar():
-        return JSONResponse([]) 
+        return JSONResponse([]) # Зайнятий кур'єр не бачить стрічку
 
+    # 2. Берем все заказы со статусом pending
     result = await db.execute(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.partner))
@@ -848,18 +769,23 @@ async def get_open_orders(
     for job in jobs:
         if not job.partner: continue
         
+        # 3. Получаем координаты ресторана (используем кэш геокодера)
         rest_lat, rest_lon = await geocode_address(job.partner.address)
         
         dist_to_rest = None
         if rest_lat and rest_lon:
             dist_to_rest = calculate_distance(lat, lon, rest_lat, rest_lon)
         
+        # Если не удалось посчитать дистанцию или она > 30 км, пропускаем (или ставим в конец)
         sort_dist = dist_to_rest if dist_to_rest is not None else 9999
         
+        # Считаем дистанцию доставки (от ресторана до клиента)
         dist_trip = "?"
         if job.dropoff_lat and job.dropoff_lon and rest_lat and rest_lon:
             val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
             if val: dist_trip = val
+
+        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
 
         response_data.append({
             "id": job.id,
@@ -868,15 +794,17 @@ async def get_open_orders(
             "dropoff_address": job.dropoff_address,
             "fee": job.delivery_fee,
             "price": job.order_price,
-            "dist_to_rest": dist_to_rest,
-            "dist_trip": dist_trip,
+            "dist_to_rest": dist_to_rest, # Дистанция подлета
+            "dist_trip": dist_trip,       # Дистанция поездки
             "payment_type": job.payment_type,
             "is_return": job.is_return_required,
             "comment": job.comment,
             "_sort_key": sort_dist
         })
 
+    # 4. Сортируем: сначала ближайшие рестораны
     response_data.sort(key=lambda x: x["_sort_key"])
+    
     return JSONResponse(response_data)
 
 
@@ -924,7 +852,10 @@ async def get_active_job(
     
     payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
     
-    server_status = job.status 
+    # Дополнительная инфа для статусов
+    server_status = job.status # Для фронта
+
+    # --- ИЗМЕНЕНИЕ: Флаг готовности, не зависящий от статуса ---
     is_ready = True if (job.ready_at or job.status == 'ready') else False
 
     return JSONResponse({
@@ -932,8 +863,8 @@ async def get_active_job(
         "job": {
             "id": job.id,
             "status": job.status,
-            "server_status": server_status, 
-            "is_ready": is_ready,
+            "server_status": server_status, # Поле для проверки готовности
+            "is_ready": is_ready,           # <--- НОВОЕ ПОЛЕ
             "partner_name": partner_name,
             "partner_address": partner_address,
             "partner_phone": partner_phone, 
@@ -950,6 +881,7 @@ async def get_active_job(
         }
     })
 
+# --- НОВЫЙ РОУТ: Курьер прибыл в ресторан ---
 @app.post("/api/courier/arrived_pickup")
 async def courier_arrived_pickup(
     job_id: int = Form(...),
@@ -964,16 +896,18 @@ async def courier_arrived_pickup(
     job.arrived_at_pickup_at = datetime.utcnow()
     await db.commit()
     
+    # Уведомляем партнера (ЗВУК!)
     await manager.notify_partner(job.partner_id, {
         "type": "order_update", 
         "job_id": job.id, 
         "status": "arrived_pickup",
-        "status_color": "#facc15", 
+        "status_color": "#facc15", # Желтый
         "message": f"👋 Кур'єр {courier.name} прибув і чекає на замовлення!"
     })
     
     return JSONResponse({"status": "ok"})
 
+# --- ОБНОВЛЕННЫЙ РОУТ СТАТУСА: Обработка возврата ---
 @app.post("/api/courier/update_job_status")
 async def update_job_status(
     job_id: int = Form(...), status: str = Form(...),
@@ -983,17 +917,21 @@ async def update_job_status(
     if not job or job.courier_id != courier.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
+    # ЛОГИКА ВОЗВРАТА СРЕДСТВ
     if status == "delivered" and job.is_return_required:
+        # Если нужен возврат, мы не закрываем заказ, а ставим статус "returning"
         job.status = "returning"
         msg_text = f"💰 Кур'єр {courier.name} віддав замовлення і везе гроші назад!"
-        color = "#fb923c" 
+        color = "#fb923c" # Оранжевый
         
+        # Уведомляем партнера
         await manager.notify_partner(job.partner_id, {
             "type": "order_update", "job_id": job.id, "status": "returning",
             "status_text": "Повернення коштів", "status_color": color,
             "message": msg_text
         })
     else:
+        # Стандартная логика
         job.status = status
         if status == "picked_up": 
             job.picked_up_at = datetime.utcnow()
@@ -1013,6 +951,7 @@ async def update_job_status(
             "courier_name": courier.name, "message": msg_text
         })
         
+        # Отправка в TG партнеру, если есть
         partner = await db.get(DeliveryPartner, job.partner_id)
         if partner and partner.telegram_chat_id and status in ["picked_up", "delivered"]:
             tg_text = f"📦 <b>Замовлення #{job.id}</b>\n{msg_text}\nКур'єр: {courier.name}"
@@ -1092,7 +1031,7 @@ async def send_chat_message(
     request: Request,
     job_id: int = Form(...),
     message: str = Form(...),
-    role: str = Form(...), 
+    role: str = Form(...), # 'partner' или 'courier'
     db: AsyncSession = Depends(get_db)
 ):
     msg = ChatMessage(job_id=job_id, sender_role=role, message=message)
@@ -1195,6 +1134,7 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
     )
     return templates_partner.get_partner_dashboard_html(partner, result.scalars().all())
 
+# --- НОВЫЙ РОУТ: Партнер подтверждает получение возврата денег ---
 @app.post("/api/partner/confirm_return")
 async def partner_confirm_return(
     job_id: int = Form(...),
@@ -1205,10 +1145,11 @@ async def partner_confirm_return(
     if not job or job.partner_id != partner.id:
         return JSONResponse({"status": "error"}, 404)
         
-    job.status = "delivered" 
+    job.status = "delivered" # Теперь окончательно закрываем
     job.delivered_at = datetime.utcnow()
     await db.commit()
     
+    # Уведомляем курьера, что он свободен
     if job.courier_id:
         await manager.notify_courier(job.courier_id, {
             "type": "job_update", 
@@ -1218,6 +1159,7 @@ async def partner_confirm_return(
         
     return JSONResponse({"status": "ok"})
 
+# --- ОНОВЛЕНИЙ РОУТ СТВОРЕННЯ ЗАМОВЛЕННЯ ---
 @app.post("/api/partner/create_order")
 async def create_partner_order(
     dropoff_address: str = Form(...), 
@@ -1228,27 +1170,36 @@ async def create_partner_order(
     comment: str = Form(""),
     payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
+    # --- НОВЫЕ ПОЛЯ: Принимаем координаты прямо из формы ---
     lat: float = Form(None),
     lon: float = Form(None),
+    # -------------------------------------------------------
     db: AsyncSession = Depends(get_db), 
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
+    # 1. Логика координат:
+    # Если фронтенд прислал координаты (через карту), используем их.
+    # Если нет — пробуем найти сами по старинке.
     client_lat, client_lon = lat, lon
     
     if not client_lat or not client_lon:
+        # Пытаемся найти сами, если карта не использовалась
         client_lat, client_lon = await geocode_address(dropoff_address)
 
+    # Получаем координаты ресторана для расчета
     rest_lat, rest_lon = await geocode_address(partner.address)
 
+    # Автоматичне доповнення коментаря
     full_comment = comment
     if is_return_required:
         full_comment = f"⚠️ ПОВЕРНЕННЯ КОШТІВ! {full_comment}"
     if payment_type == 'buyout':
         full_comment = f"💰 ВИКУП ({order_price} грн)! {full_comment}"
 
+    # 2. Create Job
     job = DeliveryJob(
         partner_id=partner.id, dropoff_address=dropoff_address, 
-        dropoff_lat=client_lat, dropoff_lon=client_lon, 
+        dropoff_lat=client_lat, dropoff_lon=client_lon, # Используем точные координаты
         customer_phone=customer_phone, customer_name=customer_name,
         order_price=order_price, delivery_fee=delivery_fee,
         comment=full_comment, payment_type=payment_type,
@@ -1259,6 +1210,8 @@ async def create_partner_order(
     await db.commit()
     await db.refresh(job)
 
+    # 3. Notify Couriers
+    # ВИПРАВЛЕННЯ: Спочатку знаходимо всіх ЗАЙНЯТИХ кур'єрів
     busy_couriers_res = await db.execute(
         select(DeliveryJob.courier_id)
         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
@@ -1266,6 +1219,7 @@ async def create_partner_order(
     )
     busy_ids = set(busy_couriers_res.scalars().all())
 
+    # Знаходимо всіх онлайн кур'єрів
     res = await db.execute(select(Courier).where(Courier.is_online == True))
     online_couriers = res.scalars().all()
     
@@ -1299,14 +1253,18 @@ async def create_partner_order(
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
         
         if courier.fcm_token:
+            # ИСПОЛЬЗУЕМ ОБНОВЛЕННУЮ ФУНКЦИЮ ПУШЕЙ с ценой
             await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн", job_id=job.id, fee=delivery_fee)
 
     for c in online_couriers:
+        # ПРОПУСКАЄМО ЗАЙНЯТИХ КУР'ЄРІВ
         if c.id in busy_ids: continue
         asyncio.create_task(notify_courier_async(c))
 
+    # 4. Notify TG
     res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
     for c in res_tg.scalars().all():
+        # Теж пропускаємо зайнятих для TG сповіщень
         if c.id in busy_ids: continue
         asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {delivery_fee} грн\n📍 {partner.name}"))
 
@@ -1319,9 +1277,12 @@ async def partner_order_ready(
     job = await db.get(DeliveryJob, job_id)
     if not job or job.partner_id != partner.id: return JSONResponse({"status": "error"}, 404)
     
+    # --- ИЗМЕНЕНИЕ: Не меняем статус, только метку времени ---
+    # job.status = "ready" 
     job.ready_at = datetime.utcnow()
     await db.commit()
     
+    # Отправляем курьеру событие о готовности
     if job.courier_id:
         await manager.notify_courier(job.courier_id, {"type": "job_ready", "message": "🍳 Замовлення готове!"})
         
@@ -1337,6 +1298,7 @@ async def partner_cancel_order(
     await db.commit()
     return JSONResponse({"status": "ok"})
 
+# --- 1. ОБНОВЛЕНИЕ РЕЙТИНГА КУРЬЕРА ---
 @app.post("/api/partner/rate_courier")
 async def partner_rate_courier(
     job_id: int = Form(...), 
@@ -1350,21 +1312,25 @@ async def partner_rate_courier(
         job.courier_rating = rating
         job.courier_review = review
         
+        # --- LOGIC UPDATE: Recalculate Courier Rating ---
         if job.courier_id:
             courier = await db.get(Courier, job.courier_id)
             if courier:
                 current_avg = courier.avg_rating or 5.0
                 current_count = courier.rating_count or 0
                 
+                # New Average Formula
                 new_count = current_count + 1
                 new_avg = ((current_avg * current_count) + rating) / new_count
                 
                 courier.avg_rating = round(new_avg, 2)
                 courier.rating_count = new_count
+        # ------------------------------------------------
         
         await db.commit()
     return JSONResponse({"status": "ok"})
 
+# --- 2. НОВЫЙ ЭНДПОИНТ: BOOST PRICE (Поднятие цены) ---
 @app.post("/api/partner/boost_order")
 async def partner_boost_order(
     job_id: int = Form(...),
@@ -1372,6 +1338,11 @@ async def partner_boost_order(
     partner: DeliveryPartner = Depends(get_current_partner),
     db: AsyncSession = Depends(get_db)
 ):
+    """
+    Увеличивает цену доставки и рассылает ПОЛНЫЙ объект данных,
+    чтобы у курьера корректно отобразились адреса и новая цена.
+    """
+    # 1. Загружаем заказ сразу с Партнером, чтобы взять адрес ресторана
     result = await db.execute(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.partner))
@@ -1385,26 +1356,35 @@ async def partner_boost_order(
     if job.status != "pending":
          return JSONResponse({"status": "error", "message": "Замовлення вже прийнято або скасовано"}, status_code=400)
     
+    # 2. Увеличиваем цену
     job.delivery_fee += amount
     await db.commit()
     
+    # 3. Подготовка данных для отправки (ГЕОКОДИНГ + СБОР ПОЛНОГО ОБЪЕКТА)
+    # Нам нужно рассчитать дистанцию заново или взять из кэша, чтобы данные были полными
     rest_lat, rest_lon = await geocode_address(job.partner.address)
+    
     payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
     
+    # Формируем ПОЛНЫЙ пакет данных, как в create_order
+    # Это исправит проблему с пустыми адресами
     full_job_data = {
         "id": job.id,
         "address": job.dropoff_address,
         "restaurant": job.partner.name,
         "restaurant_address": job.partner.address,
-        "fee": job.delivery_fee,
+        "fee": job.delivery_fee,          # Новая цена
         "price": job.order_price,
         "comment": f"[{payment_label}] {job.comment or ''}",
         "payment_type": job.payment_type,
         "is_return": job.is_return_required,
+        # Дистанцию ставим приблизительную или "?", так как для каждого курьера она своя.
+        # Но для модального окна она не критична, главное адреса.
         "dist_to_rest": "?", 
         "dist_rest_to_client": "?" 
     }
 
+    # 4. Фильтруем занятых курьеров
     busy_couriers_res = await db.execute(
         select(DeliveryJob.courier_id)
         .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
@@ -1412,24 +1392,30 @@ async def partner_boost_order(
     )
     busy_ids = set(busy_couriers_res.scalars().all())
 
+    # 5. Рассылаем всем онлайн-курьерам
     online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
     
     for c in online_couriers:
         if c.id in busy_ids: continue
         
+        # Пересчитываем дистанцию для конкретного курьера (если нужно идеально точно)
+        # Но для скорости можно отправить "?" или пересчитать:
         current_dist = "?"
         if c.lat and c.lon and rest_lat and rest_lon:
             d = calculate_distance(c.lat, c.lon, rest_lat, rest_lon)
             if d: current_dist = d
         
+        # Обновляем дистанцию в пакете для конкретного курьера
         courier_specific_data = full_job_data.copy()
         courier_specific_data["dist_to_rest"] = current_dist
 
+        # 1. WebSocket (обновит интерфейс без перезагрузки)
         await manager.notify_courier(c.id, {
             "type": "new_order", 
             "data": courier_specific_data 
         })
 
+        # 2. Push Notification (придет новая цена)
         if c.fcm_token:
              await send_push_to_couriers(
                  [c.fcm_token], 

@@ -214,16 +214,6 @@ class PendingVerification(Base):
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
-class SystemSetting(Base):
-    """
-    Таблиця для зберігання системних налаштувань (Firebase config, VAPID тощо).
-    Дозволяє змінювати конфігурацію без перезборки контейнера.
-    """
-    __tablename__ = "system_settings"
-    
-    key = Column(String(50), primary_key=True) # Наприклад: 'firebase_config', 'vapid_key'
-    value = Column(String, nullable=True)      # Тут буде лежати JSON або рядок
-
 
 # --- 3. Функції для роботи з БД ---
 

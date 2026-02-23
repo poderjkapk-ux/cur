@@ -16,8 +16,8 @@ def get_partner_auth_html(is_register=False, message=""):
     title = "Реєстрація Партнера" if is_register else "Вхід для Партнерів"
     action = "/partner/register" if is_register else "/partner/login"
     pwa_meta = '<link rel="manifest" href="/partner/manifest.json">'
-    viewport_meta = '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">'
     
+    # --- НОВОЕ: Подключаем Leaflet CSS ---
     leaflet_css = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>' if is_register else ""
     
     verify_script = ""
@@ -46,20 +46,13 @@ def get_partner_auth_html(is_register=False, message=""):
             .autocomplete-item small { color: #64748b; font-size: 0.8rem; margin-top:2px; }
             .autocomplete-item:hover { background: var(--primary); color: white; }
             
-            /* Индикатор загрузки в поле ввода */
-            .loading-input {
-                background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC%7Btransform-origin:center;animation:spinner_svv2 .75s infinite linear%7D@keyframes spinner_svv2%7B100%25%7Btransform:rotate(360deg)%7D%7D%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
-                background-repeat: no-repeat;
-                background-position: right 10px center;
-                background-size: 20px 20px;
-            }
-
             #picker-map { width: 100%; height: 250px; border-radius: 10px; margin-bottom: 15px; border: 1px solid var(--border); display:none; }
             #picker-map.visible { display: block; }
             .map-hint { font-size: 0.8rem; color: #facc15; margin-bottom: 10px; display:none; text-align: left; }
         </style>
         """
         
+        # Инпут телефона заменяем на скрытые поля
         phone_input = '<input type="hidden" name="phone" id="real_phone"><input type="hidden" name="verification_token" id="verification_token">'
         
         verify_block = """
@@ -80,23 +73,26 @@ def get_partner_auth_html(is_register=False, message=""):
         """
         submit_attr = "disabled"
 
+        # Блок карты (заменяет обычный input address)
         map_html = """
         <div class="autocomplete-wrapper">
             <input type="text" id="addr_input" name="address" placeholder="Адреса закладу (почніть вводити)" required autocomplete="off">
             <div id="addr_results" class="autocomplete-results"></div>
         </div>
-        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті (Одеса)</div>
+        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті (перетягніть маркер)</div>
         <div id="picker-map"></div>
         <input type="hidden" id="form_lat">
         <input type="hidden" id="form_lon">
         """
 
+        # JS скрипты (Telegram + Map)
         verify_script = """
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
             let verificationToken = "";
             let pollInterval = null;
             
+            // --- Telegram Verification ---
             async function initVerification() {
                 try {
                     const res = await fetch('/api/auth/init_verification', { method: 'POST' });
@@ -134,7 +130,7 @@ def get_partner_auth_html(is_register=False, message=""):
             
             window.onload = initVerification;
 
-            // --- КАРТА И ПОИСК ---
+            // --- Map & Autocomplete Logic ---
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
             const latInput = document.getElementById('form_lat');
@@ -144,23 +140,16 @@ def get_partner_auth_html(is_register=False, message=""):
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
-            let latestReqId = 0; // Для отслеживания актуальности запроса
-
-            // КООРДИНАТЫ ОДЕССЫ ПО УМОЛЧАНИЮ
-            const ODESA_LAT = 46.4825;
-            const ODESA_LON = 30.7233;
 
             function initPickerMap(lat, lon) {
                 if (pickerMap) return;
                 pickerMapDiv.classList.add('visible');
                 mapHint.style.display = 'block';
                 
-                const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
+                const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52]; // Default Kiev
                 
                 pickerMap = L.map('picker-map').setView(startPos, 13);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '&copy; OpenStreetMap contributors'
-                }).addTo(pickerMap);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(pickerMap);
                 
                 pickerMarker = L.marker(startPos, {draggable: true}).addTo(pickerMap);
                 
@@ -182,71 +171,37 @@ def get_partner_auth_html(is_register=False, message=""):
             if(addrInput) {
                 addrInput.addEventListener('input', function() {
                     clearTimeout(searchTimeout);
-                    const query = this.value.trim();
+                    const query = this.value;
                     
+                    // Show map on first interaction
                     if (!pickerMap) initPickerMap();
-                    
-                    if(query.length < 3) { 
-                        addrResults.style.display = 'none';
-                        addrInput.classList.remove('loading-input'); 
-                        return; 
-                    }
-                    
-                    addrInput.classList.add('loading-input');
-                    
-                    // Дебаунс 800мс
-                    searchTimeout = setTimeout(async () => {
-                        const reqId = ++latestReqId;
-                        
-                        try {
-                            // Добавили addressdetails=1 чтобы получить структуру (город, улица) отдельно
-                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
-                            
-                            const res = await fetch(url);
-                            
-                            if (reqId !== latestReqId) return;
 
-                            if (!res.ok) throw new Error("API Error");
+                    if(query.length < 3) { addrResults.style.display = 'none'; return; }
+                    
+                    searchTimeout = setTimeout(async () => {
+                        try {
+                            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lat=50.45&lon=30.52`);
                             const data = await res.json();
                             
                             addrResults.innerHTML = '';
-                            if(data && data.length > 0) {
-                                data.forEach(item => {
+                            if(data.features && data.features.length > 0) {
+                                data.features.forEach(feat => {
+                                    const props = feat.properties;
                                     const div = document.createElement('div');
                                     div.className = 'autocomplete-item';
                                     
-                                    // Формируем отображение в списке (красивое)
-                                    const displayName = item.display_name;
-                                    const parts = displayName.split(',');
-                                    const mainName = parts[0];
-                                    const subName = parts.slice(1).join(',').trim();
+                                    let mainName = props.name || props.street || '';
+                                    if (props.housenumber) mainName += ', ' + props.housenumber;
+                                    let subName = [props.city, props.country].filter(Boolean).join(', ');
                                     
                                     div.innerHTML = `<span>${mainName}</span><small>${subName}</small>`;
+                                    
                                     div.onclick = () => { 
-                                        // --- СБОРКА АДРЕСА БЕЗ РАЙОНА ---
-                                        const a = item.address;
-                                        const cleanParts = [];
-                                        
-                                        // 1. Улица / Название места
-                                        if (a.road) cleanParts.push(a.road);
-                                        else if (a.pedestrian) cleanParts.push(a.pedestrian);
-                                        else if (a.hamlet) cleanParts.push(a.hamlet);
-                                        else cleanParts.push(mainName); // Фолбек, если улицы нет
-                                        
-                                        // 2. Номер дома
-                                        if (a.house_number) cleanParts.push(a.house_number);
-                                        
-                                        // 3. Город (без района!)
-                                        if (a.city) cleanParts.push(a.city);
-                                        else if (a.town) cleanParts.push(a.town);
-                                        else if (a.village) cleanParts.push(a.village);
-                                        
-                                        // Результат: "Дерибасівська вулиця, 1, Одеса"
-                                        addrInput.value = cleanParts.join(', ');
+                                        addrInput.value = `${mainName}, ${props.city || ''}`;
                                         addrResults.style.display = 'none';
                                         
-                                        const lat = item.lat;
-                                        const lon = item.lon;
+                                        const lat = feat.geometry.coordinates[1];
+                                        const lon = feat.geometry.coordinates[0];
                                         
                                         if(latInput) latInput.value = lat;
                                         if(lonInput) lonInput.value = lon;
@@ -261,17 +216,9 @@ def get_partner_auth_html(is_register=False, message=""):
                                     addrResults.appendChild(div);
                                 });
                                 addrResults.style.display = 'block';
-                            } else { 
-                                addrResults.style.display = 'none'; 
-                            }
-                        } catch(e) {
-                             console.error("Search error:", e);
-                        } finally {
-                             if (reqId === latestReqId) {
-                                 addrInput.classList.remove('loading-input');
-                             }
-                        }
-                    }, 800);
+                            } else { addrResults.style.display = 'none'; }
+                        } catch(e) {}
+                    }, 400);
                 });
                 
                 document.addEventListener('click', (e) => { 
@@ -292,7 +239,7 @@ def get_partner_auth_html(is_register=False, message=""):
     toggle_link = f'<a href="/partner/login">Вже є акаунт? Увійти</a>' if is_register else f'<a href="/partner/register">Стати партнером</a>'
 
     return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>{title}</title>{GLOBAL_STYLES}{pwa_meta}{viewport_meta}{leaflet_css}{verify_style}</head>
+    <!DOCTYPE html><html lang="uk"><head><title>{title}</title>{GLOBAL_STYLES}{pwa_meta}{leaflet_css}{verify_style}</head>
     <body><div class="container">
         <h1>🚴 Delivery Partner</h1>
         <p style="margin-top:-20px; margin-bottom:20px;">Кабінет для виклику кур'єрів</p>
@@ -312,10 +259,15 @@ def get_partner_auth_html(is_register=False, message=""):
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
     """
-    Дашборд партнера. 
-    ОБНОВЛЕН: ЛОГИКА АДРЕСА БЕЗ РАЙОНА.
+    Обновленный дашборд партнера.
+    Включает:
+    - Интерактивную карту Leaflet для выбора точки.
+    - Умный поиск (Photon) с AbortController и индикацией загрузки.
+    - Рейтинг курьера (звезды).
+    - Кнопку Boost (+10 грн) для ускорения поиска.
     """
     
+    # Разделяем активные и завершенные
     active_jobs = [j for j in jobs if j.status not in ['delivered', 'cancelled']]
     history_jobs = [j for j in jobs if j.status in ['delivered', 'cancelled']]
     
@@ -328,13 +280,12 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         
         status_color = "#ccc"
         status_text = j.status
-        status_bg = "rgba(255,255,255,0.1)"
-        status_fg = "#ccc"
-        
         courier_info = "—"
         action_btn = ""
 
+        # --- ОТОБРАЖЕНИЕ КУРЬЕРА С РЕЙТИНГОМ ---
         if j.courier:
+            # Расчет бейджа рейтинга
             rating_val = j.courier.avg_rating
             rating_cnt = j.courier.rating_count
             rating_display = f"⭐ {rating_val:.1f}" if rating_cnt > 0 else "⭐ New"
@@ -350,58 +301,58 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <button class="btn-mini info" onclick="openChat({j.id}, 'Кур\\'єр {j.courier.name}')" title="Чат"><i class="fa-solid fa-comments"></i></button>
             """
         
+        # --- ЛОГИКА СТАТУСОВ ---
         if j.status == 'assigned':
-            status_bg = "rgba(254, 240, 138, 0.2)"
-            status_fg = "#fef08a"
-            status_text = "Прийнято"
+            status_color = "#fef08a" # Yellow
             track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
         
         elif j.status == 'arrived_pickup':
-            status_bg = "rgba(250, 204, 21, 0.2)"
-            status_fg = "#facc15"
-            status_text = "👋 Чекає"
+            status_color = "#facc15" # Darker Yellow
+            status_text = "👋 КУР'ЄР ЧЕКАЄ"
             
         elif j.status == 'ready':
-            status_bg = "rgba(134, 239, 172, 0.2)"
-            status_fg = "#86efac"
-            status_text = "Готово"
+            status_color = "#86efac" # Green
             
         elif j.status == 'picked_up':
-            status_bg = "rgba(191, 219, 254, 0.2)"
-            status_fg = "#bfdbfe"
-            status_text = "В дорозі"
+            status_color = "#bfdbfe" # Blue
             track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
             
         elif j.status == 'returning':
-            status_bg = "rgba(251, 146, 60, 0.2)"
-            status_fg = "#fb923c"
-            status_text = "↩️ Повернення"
+            status_color = "#fb923c" # Orange
+            status_text = "↩️ ПОВЕРНЕННЯ"
             track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
 
         # --- КНОПКА ДЕЙСТВИЯ (ACTION BTN) ---
+        
+        # 1. BOOST ЦЕНЫ (Только для PENDING)
         if j.status == 'pending':
-            action_btn = f"""
-            <button class="btn-mini warn" onclick="boostOrder({j.id})" title="Підняти ціну (+10 грн)">
+            action_btn = f'''
+            <button class="btn-mini warn" onclick="boostOrder({j.id})" title="Підняти ціну (+10 грн)" style="width:auto; padding:0 8px; font-weight:bold; font-size:0.8rem;">
                 <i class="fa-solid fa-fire"></i> +10
             </button>
-            """
+            '''
+        # 2. ВОЗВРАТ ДЕНЕГ
         elif j.status == 'returning':
-            action_btn = f"""
-            <button class="btn-mini success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей">
-                <i class="fa-solid fa-sack-dollar"></i> Гроші
+            action_btn = f'''
+            <button class="btn-mini success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей" style="width:auto; padding:0 10px;">
+                <i class="fa-solid fa-sack-dollar"></i> Отримав гроші
             </button>
-            """
+            '''
+        # 3. ОБЫЧНЫЙ ПРОЦЕСС (Готовность)
         elif j.status in ['assigned', 'arrived_pickup']:
+            # Проверяем ready_at
             is_ready = (j.ready_at is not None) or (j.status == 'ready')
+            
             if not is_ready:
-                action_btn = f"""
+                action_btn = f'''
                 <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
                     <i class="fa-solid fa-utensils"></i> Готово
                 </button>
-                """
+                '''
             else:
                 action_btn = '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
         
+        # Отображение оплаты
         payment_badges = {
             "prepaid": "<span style='color:#4ade80'>✅ Оплачено</span>",
             "cash": "<span style='color:#facc15'>💵 Готівка</span>",
@@ -411,26 +362,18 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         if getattr(j, 'is_return_required', False):
             pay_info += "<br><span style='color:#f97316; font-size:0.7rem;'>↺ Повернення</span>"
 
-        t_created = j.created_at.strftime('%H:%M') 
-
         active_rows += f"""
         <tr id="row-{j.id}">
-            <td data-label="ID">#{j.id}</td>
-            <td data-label="Створено">
-                <div style="font-size:0.85rem"><i class="fa-regular fa-clock"></i> {t_created}</div>
-            </td>
-            <td data-label="Адреса">{j.dropoff_address}</td>
-            <td data-label="Клієнт (Чек)">
-                <div style="font-weight:bold;">{j.order_price} грн</div>
+            <td>#{j.id}</td>
+            <td>{j.dropoff_address}</td>
+            <td>
+                <div>{j.order_price} грн</div>
                 <div style="font-size:0.75rem;">{pay_info}</div>
             </td>
-            <td data-label="Кур'єру (Fee)">
-                <div style="font-weight:bold; color: #facc15;">{j.delivery_fee} грн</div>
-            </td>
-            <td data-label="Статус"><span class="status-badge" style="background:{status_bg}; color:{status_fg};">{status_text}</span></td>
-            <td class="courier-cell" data-label="Кур'єр">{courier_info}</td>
-            <td class="actions-cell">
-                <div style="display:flex; gap:8px; align-items:center; justify-content: flex-end;">
+            <td><span class="status-badge" style="background:{status_color}; padding:3px 8px; border-radius:4px; font-size:0.8rem;">{status_text}</span></td>
+            <td class="courier-cell">{courier_info}</td>
+            <td>
+                <div style="display:flex; gap:5px; align-items:center;">
                     {comm_btns}
                     {action_btn}
                     {track_btn}
@@ -457,158 +400,82 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
         history_rows += f"""
         <tr>
-            <td data-label="ID">#{j.id}</td>
-            <td data-label="Таймінг">
-                <div style="font-size:0.85rem"><i class="fa-regular fa-clock"></i> {t_deliver}</div>
+            <td>#{j.id}</td>
+            <td>
+                <div style="font-size:0.8rem">Довіз: <b style="color:var(--status-active)">{t_deliver}</b></div>
             </td>
-            <td data-label="Клієнт">
-                <div style="font-weight:600;">{j.dropoff_address}</div>
+            <td>
+                <div>{j.dropoff_address}</div>
                 <div style="font-size:0.8rem; color:#888;">{j.customer_name or 'Гість'}</div>
             </td>
-            <td data-label="Сума">{j.order_price} грн</td>
-            <td data-label="Оцінка">{rating_html}</td>
+            <td>{j.order_price} грн</td>
+            <td>{rating_html}</td>
         </tr>
         """
 
     pwa_meta = '<link rel="manifest" href="/partner/manifest.json">'
-    viewport_meta = '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">'
 
     return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Кабінет Партнера</title>{GLOBAL_STYLES}{pwa_meta}{viewport_meta}
+    <!DOCTYPE html><html lang="uk"><head><title>Кабінет Партнера</title>{GLOBAL_STYLES}{pwa_meta}
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <style>
-        body {{ background-color: #0f172a; padding: 20px; }}
-        
-        /* Layout */
-        .dashboard-grid {{ display: grid; grid-template-columns: 1fr 2fr; gap: 30px; max-width: 1400px; margin: 0 auto; width: 100%; }}
-        @media (max-width: 1000px) {{ .dashboard-grid {{ grid-template-columns: 1fr; }} }}
-        
-        .panel {{ 
-            background: #1e293b; 
-            border: 1px solid rgba(255,255,255,0.05); 
-            border-radius: 20px; 
-            padding: 25px; 
-            margin-bottom: 20px; 
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }}
-        
-        .header-bar {{ 
-            display: flex; justify-content: space-between; align-items: center; 
-            max-width: 1400px; margin: 0 auto 30px; width: 100%;
-        }}
-        .header-bar h2 {{ color: white; margin: 0; font-size: 1.5rem; }}
-        
-        /* Tables Default (Desktop) */
+        .dashboard-grid {{ display: grid; grid-template-columns: 1fr 2fr; gap: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }}
+        @media (max-width: 900px) {{ .dashboard-grid {{ grid-template-columns: 1fr; }} }}
+        .panel {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 25px; margin-bottom: 20px; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }}
-        th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); color: #e2e8f0; vertical-align: middle; }}
-        th {{ color: #94a3b8; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }}
+        th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid var(--border); color: var(--text-main); vertical-align: middle; }}
+        th {{ color: var(--text-muted); font-weight: 600; }}
+        .header-bar {{ display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto 30px; width: 90%; }}
         
-        /* Status Badge */
-        .status-badge {{ padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }}
+        .btn-mini {{ border: 1px solid transparent; border-radius: 6px; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; background: rgba(255,255,255,0.05); color: var(--text-muted); text-decoration: none; }}
+        .btn-mini:hover {{ transform: translateY(-2px); }}
+        .btn-mini.info:hover {{ background: #6366f1; color: white; }}
+        .btn-mini.danger:hover {{ background: #e11d48; color: white; }}
+        .btn-mini.success:hover {{ background: #4ade80; color: #064e3b; }}
+        .btn-mini.warn:hover {{ background: #f59e0b; color: #78350f; }}
 
-        /* Buttons */
-        .btn-mini {{ 
-            border: none; border-radius: 8px; width: 36px; height: 36px; cursor: pointer; 
-            display: flex; align-items: center; justify-content: center; transition: 0.2s; 
-            background: rgba(255,255,255,0.05); color: #94a3b8; text-decoration: none; font-size: 1rem;
-        }}
-        .btn-mini:hover {{ transform: translateY(-2px); color: white; }}
-        .btn-mini.info:hover {{ background: #6366f1; }}
-        .btn-mini.danger:hover {{ background: #e11d48; }}
-        .btn-mini.success:hover {{ background: #22c55e; }}
-        .btn-mini.warn:hover {{ background: #f59e0b; }}
-
-        /* Forms */
-        label {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 5px; display: block; }}
-        input, select, textarea {{
-            background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white;
-            padding: 12px 15px; border-radius: 10px; width: 100%; box-sizing: border-box;
-            font-size: 1rem; margin-bottom: 15px; transition: 0.3s;
-        }}
-        input:focus, select:focus, textarea:focus {{
-            outline: none; border-color: var(--primary); background: rgba(99, 102, 241, 0.05);
-        }}
-
-        /* --- MOBILE ADAPTATION (RESPONSIVE) --- */
-        @media (max-width: 768px) {{
-            body {{ padding: 10px; }}
-            .header-bar {{ margin-bottom: 20px; }}
-            .header-bar h2 {{ font-size: 1.2rem; }}
-            .panel {{ padding: 15px; border-radius: 16px; }}
-            thead {{ display: none; }}
-            tr {{
-                display: block;
-                background: rgba(255,255,255,0.02);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 12px;
-                padding: 15px;
-                margin-bottom: 15px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            }}
-            td {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 8px 0;
-                border-bottom: 1px solid rgba(255,255,255,0.05);
-                text-align: right;
-            }}
-            td:last-child {{ border-bottom: none; padding-bottom: 0; }}
-            td::before {{
-                content: attr(data-label);
-                font-weight: 600;
-                color: #64748b;
-                font-size: 0.85rem;
-                text-align: left;
-                margin-right: 15px;
-            }}
-            .actions-cell {{
-                display: block;
-                margin-top: 10px;
-                padding-top: 15px;
-                border-top: 1px solid rgba(255,255,255,0.1);
-            }}
-            .actions-cell::before {{ display: none; }}
-            .actions-cell > div {{ justify-content: space-between; width: 100%; }}
-            .btn-mini {{ width: 42px; height: 42px; font-size: 1.1rem; }}
-            .payment-options {{ grid-template-columns: 1fr; gap: 8px; }}
-        }}
-
-        /* Modals */
+        /* Модальні вікна */
         .modal-overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 2000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(5px); }}
-        .modal-card {{ background: #1e293b; width: 95%; max-width: 500px; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; position: relative; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); max-height: 90vh; overflow-y: auto; }}
+        .modal-card {{ background: #1e293b; width: 90%; max-width: 500px; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; position: relative; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }}
         .track-card {{ max-width: 800px; height: 60vh; padding: 0; }}
-        #track-map {{ flex: 1; width: 100%; min-height: 300px; }}
+        #track-map {{ flex: 1; width: 100%; }}
+        .track-header {{ padding: 15px; background: #0f172a; display: flex; justify-content: space-between; align-items: center; }}
+        .close-btn {{ position: absolute; top: 15px; right: 15px; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }}
         
-        .chat-modal {{ height: 80vh; }}
-        .chat-messages {{ flex: 1; overflow-y: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }}
-        .msg {{ max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; position: relative; line-height: 1.4; }}
-        .msg.me {{ align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 4px; }}
-        .msg.other {{ align-self: flex-start; background: #334155; color: white; border-bottom-left-radius: 4px; }}
+        /* Стилі чату */
+        .chat-modal {{ height: 80vh; display: flex; flex-direction: column; }}
+        .chat-messages {{ flex: 1; overflow-y: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }}
+        .msg {{ max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.9rem; position: relative; }}
+        .msg.me {{ align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px; }}
+        .msg.other {{ align-self: flex-start; background: var(--bg-card-hover); color: var(--text-main); border-bottom-left-radius: 2px; }}
         .msg-time {{ font-size: 0.7rem; opacity: 0.7; text-align: right; margin-top: 4px; }}
+        .chat-input-area {{ display: flex; gap: 10px; }}
+        .chat-input-area input {{ margin-bottom: 0; }}
 
+        /* Payment Options */
         .payment-options {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }}
         .payment-option input {{ display: none; }}
-        .payment-option label {{ display: block; background: rgba(255,255,255,0.05); padding: 12px; text-align: center; border-radius: 10px; cursor: pointer; border: 1px solid transparent; font-size: 0.9rem; transition: 0.2s; }}
+        .payment-option label {{ display: block; background: rgba(255,255,255,0.05); padding: 10px; text-align: center; border-radius: 8px; cursor: pointer; border: 1px solid transparent; font-size: 0.85rem; }}
         .payment-option input:checked + label {{ background: rgba(99, 102, 241, 0.2); border-color: var(--primary); color: white; font-weight: bold; }}
         
         .star-rating {{ display: flex; flex-direction: row-reverse; justify-content: center; gap: 5px; margin: 20px 0; }}
         .star-rating input {{ display: none; }}
-        .star-rating label {{ cursor: pointer; font-size: 2.5rem; color: #444; transition: 0.2s; }}
+        .star-rating label {{ cursor: pointer; font-size: 2rem; color: #444; transition: 0.2s; }}
         .star-rating input:checked ~ label, .star-rating label:hover, .star-rating label:hover ~ label {{ color: #fbbf24; }}
 
-        #toast-container {{ position: fixed; top: 20px; right: 20px; z-index: 3000; pointer-events: none; }}
-        .toast {{ pointer-events: auto; background: #1e293b; color: white; padding: 15px 20px; border-left: 5px solid var(--primary); border-radius: 8px; margin-bottom: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 15px; animation: slideIn 0.3s ease-out; min-width: 300px; }}
+        #toast-container {{ position: fixed; top: 20px; right: 20px; z-index: 3000; }}
+        .toast {{ background: #1e293b; color: white; padding: 15px 20px; border-left: 5px solid var(--primary); border-radius: 8px; margin-bottom: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 15px; animation: slideIn 0.3s ease-out; min-width: 300px; }}
         @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
         
-        /* Autocomplete & Loading */
+        /* --- НОВЫЕ СТИЛИ ДЛЯ ПОИСКА И КАРТЫ --- */
         .autocomplete-wrapper {{ position: relative; z-index: 1001; }}
-        .autocomplete-results {{ position: absolute; top: 100%; left: 0; right: 0; background: #1e293b; border: 1px solid rgba(255,255,255,0.1); border-top: none; border-radius: 0 0 10px 10px; max-height: 250px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
-        .autocomplete-item {{ padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.95rem; color: #cbd5e1; display:flex; flex-direction:column; }}
+        .autocomplete-results {{ position: absolute; top: 100%; left: 0; right: 0; background: #1e293b; border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px; max-height: 200px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
+        .autocomplete-item {{ padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: #cbd5e1; display:flex; flex-direction:column; }}
         .autocomplete-item small {{ color: #64748b; font-size: 0.8rem; margin-top:2px; }}
         .autocomplete-item:hover {{ background: var(--primary); color: white; }}
+        .autocomplete-item:hover small {{ color: rgba(255,255,255,0.7); }}
         
-        /* Spinner */
+        /* Индикатор загрузки с вашим SVG */
         .loading-input {{
             background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC%7Btransform-origin:center;animation:spinner_svv2 .75s infinite linear%7D@keyframes spinner_svv2%7B100%25%7Btransform:rotate(360deg)%7D%7D%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
@@ -616,26 +483,26 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             background-size: 20px 20px;
         }}
 
-        #picker-map {{ width: 100%; height: 250px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); z-index: 1; display:none; }}
+        #picker-map {{ width: 100%; height: 200px; border-radius: 10px; margin-bottom: 15px; border: 1px solid var(--border); z-index: 1; display:none; }}
         #picker-map.visible {{ display: block; }}
-        .map-hint {{ font-size: 0.85rem; color: #facc15; margin-bottom: 10px; display:none; background: rgba(250, 204, 21, 0.1); padding: 8px; border-radius: 6px; }}
+        .map-hint {{ font-size: 0.8rem; color: #facc15; margin-bottom: 10px; display:none; }}
     </style>
     </head>
     <body>
         <div id="toast-container"></div>
         
-        <div style="width: 100%;">
+        <div style="width: 100%; padding: 20px;">
             <div class="header-bar">
-                <div><h2>{partner.name}</h2><span style="color: #94a3b8; font-size:0.9rem;"><i class="fa-solid fa-location-dot"></i> {partner.address}</span></div>
-                <a href="/partner/logout" class="btn" style="width:auto; padding: 8px 20px; background: #334155; font-size: 0.9rem;">Вийти</a>
+                <div><h2 style="margin:0;">{partner.name}</h2><span style="color: var(--text-muted); font-size:0.9rem;">📍 {partner.address}</span></div>
+                <a href="/partner/logout" class="btn" style="width:auto; padding: 8px 20px; background: #334155;">Вийти</a>
             </div>
 
             <div class="dashboard-grid">
                 <div class="panel">
-                    <h3 style="margin-top:0; color:white;"><i class="fa-solid fa-rocket" style="color:var(--primary)"></i> Викликати кур'єра</h3>
+                    <h3>📦 Викликати кур'єра</h3>
                     <form action="/api/partner/create_order" method="post" autocomplete="off" id="orderForm">
                         
-                        <label>Оплата та розрахунок</label>
+                        <label>Тип оплати та розрахунку</label>
                         <div class="payment-options">
                             <div class="payment-option">
                                 <input type="radio" name="payment_type" id="pay_prepaid" value="prepaid" checked onchange="updateFormLogic()">
@@ -651,26 +518,26 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             </div>
                         </div>
 
-                        <div id="cash-options" style="display:none; background:rgba(255,255,255,0.05); padding:12px; border-radius:10px; margin-bottom:15px; border:1px solid rgba(255,255,255,0.1);">
+                        <div id="cash-options" style="display:none; background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border);">
                             <div style="display:flex; align-items:center; gap:10px;">
-                                <input type="checkbox" id="return_check" name="is_return_required" value="true" style="width:20px; height:20px; margin:0;" onchange="toggleReturnFee()">
-                                <label for="return_check" style="margin:0; cursor:pointer; color:white;">
+                                <input type="checkbox" id="return_check" name="is_return_required" value="true" style="width:auto; margin:0;" onchange="toggleReturnFee()">
+                                <label for="return_check" style="margin:0; cursor:pointer;">
                                     Кур'єр має повернути гроші в заклад? (+40 грн)
                                 </label>
                             </div>
                         </div>
 
-                        <div id="buyout-hint" style="display:none; margin-bottom:15px; color:#f472b6; font-size:0.9rem; border:1px dashed #f472b6; padding:12px; border-radius:10px; background: rgba(244, 114, 182, 0.1);">
+                        <div id="buyout-hint" style="display:none; margin-bottom:15px; color:#f472b6; font-size:0.9rem; border:1px dashed #f472b6; padding:10px; border-radius:8px;">
                             <i class="fa-solid fa-circle-info"></i> <b>Порада:</b> При викупі кур'єр витрачає свої кошти. Рекомендуємо збільшити вартість доставки на 20-30 грн.
                         </div>
 
                         <div class="autocomplete-wrapper">
-                            <label>Куди везти (Почніть вводити адресу)</label>
-                            <input type="text" id="addr_input" name="dropoff_address" placeholder="Вулиця, номер будинку..." required autocomplete="off">
+                            <label>Куди везти (Введіть вулицю або перетягніть пін)</label>
+                            <input type="text" id="addr_input" name="dropoff_address" placeholder="Почніть вводити вулицю..." required autocomplete="off">
                             <div id="addr_results" class="autocomplete-results"></div>
                         </div>
                         
-                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Ви можете уточнити точку на карті (Одеса)</div>
+                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Ви можете уточнити точку на карті перетягуванням!</div>
                         <div id="picker-map"></div>
                         
                         <input type="hidden" name="lat" id="form_lat">
@@ -679,7 +546,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         <label>Телефон клієнта</label>
                         <input type="tel" name="customer_phone" placeholder="0XX XXX XX XX" required>
                         
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                             <div>
                                 <label>Чек (грн)</label>
                                 <input type="number" step="0.01" name="order_price" id="order_price" value="0">
@@ -699,18 +566,17 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
                 <div>
                     <div class="panel">
-                        <h3 style="margin-top:0; color:white;"><i class="fa-solid fa-list-ul" style="color:#facc15"></i> Активні доставки</h3>
+                        <h3>📋 Активні доставки</h3>
                         <div style="overflow-x:auto;">
                             <table>
-                                <thead><tr><th>ID</th><th>Створено</th><th>Адреса</th><th>Клієнт (Чек)</th><th>Кур'єру (Fee)</th><th>Статус</th><th>Кур'єр</th><th>Дія</th></tr></thead>
+                                <thead><tr><th>ID</th><th>Адреса</th><th>Інфо</th><th>Статус</th><th>Кур'єр</th><th>Дія</th></tr></thead>
                                 <tbody>{active_rows}</tbody>
                             </table>
                         </div>
-                        {f'<div style="text-align:center; color:#64748b; padding:20px;">Немає активних замовлень</div>' if not active_rows else ''}
                     </div>
 
                     <div class="panel" style="opacity: 0.9;">
-                        <h3 style="margin-top:0; color:white;"><i class="fa-solid fa-clock-rotate-left" style="color:#94a3b8"></i> Історія</h3>
+                        <h3>🕰️ Історія</h3>
                         <div style="overflow-x:auto; max-height: 500px;">
                             <table>
                                 <thead><tr><th>ID</th><th>Таймінг</th><th>Деталі</th><th>Сума</th><th>Оцінка</th></tr></thead>
@@ -724,9 +590,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         
         <div id="trackModal" class="modal-overlay">
             <div class="modal-card track-card">
-                <div style="padding: 15px; background: #0f172a; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                    <div id="track-info" style="font-weight:bold;">Пошук кур'єра...</div>
-                    <button style="background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;" onclick="closeTrackModal()">×</button>
+                <div class="track-header">
+                    <div id="track-info">Пошук кур'єра...</div>
+                    <button class="close-btn" style="position:static" onclick="closeTrackModal()">×</button>
                 </div>
                 <div id="track-map"></div>
             </div>
@@ -734,8 +600,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
         <div id="rateModal" class="modal-overlay">
             <div class="modal-card">
-                <button style="position:absolute; top:15px; right:15px; background:none; border:none; color:white; font-size:1.5rem;" onclick="document.getElementById('rateModal').style.display='none'">×</button>
-                <h2 style="text-align:center; margin-top:0; color:white;">Оцінити кур'єра</h2>
+                <button class="close-btn" onclick="document.getElementById('rateModal').style.display='none'">×</button>
+                <h2 style="text-align:center; margin-top:0;">Оцінити кур'єра</h2>
                 <form id="rateForm" onsubmit="submitRating(event)">
                     <input type="hidden" id="rate_job_id" name="job_id">
                     <div class="star-rating">
@@ -753,15 +619,15 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
         <div id="chatModal" class="modal-overlay">
             <div class="modal-card chat-modal">
-                <div style="padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
-                    <div id="chat-title" style="font-weight:bold; font-size:1.1rem;">Чат</div>
-                    <button style="background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;" onclick="document.getElementById('chatModal').style.display='none'">×</button>
+                <div class="track-header">
+                    <div id="chat-title">Чат</div>
+                    <button class="close-btn" style="position:static" onclick="document.getElementById('chatModal').style.display='none'">×</button>
                 </div>
                 <div id="chat-messages" class="chat-messages"></div>
-                <form class="chat-input-area" onsubmit="sendChatMessage(event)" style="display:flex; gap:10px;">
+                <form class="chat-input-area" onsubmit="sendChatMessage(event)">
                     <input type="hidden" id="chat_job_id">
-                    <input type="text" id="chat_input" placeholder="Написати повідомлення..." autocomplete="off" required style="margin-bottom:0;">
-                    <button type="submit" class="btn" style="width:auto; padding:0 20px;"><i class="fa-solid fa-paper-plane"></i></button>
+                    <input type="text" id="chat_input" placeholder="Написати повідомлення..." autocomplete="off" required>
+                    <button type="submit" class="btn" style="width:auto;"><i class="fa-solid fa-paper-plane"></i></button>
                 </form>
             </div>
         </div>
@@ -802,21 +668,32 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 setTimeout(() => {{ toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }}, 5000);
             }}
 
-            // --- BOOST ---
+            // --- НОВЫЙ МЕТОД: ПОВЫШЕНИЕ ЦЕНЫ (BOOST) ---
             async function boostOrder(id) {{
                 if(!confirm("Підняти ціну доставки на 10 грн, щоб пришвидшити пошук?")) return;
-                const fd = new FormData(); fd.append('job_id', id); fd.append('amount', 10);
+                
+                const fd = new FormData(); 
+                fd.append('job_id', id); 
+                fd.append('amount', 10);
+                
                 try {{
                     const res = await fetch('/api/partner/boost_order', {{method:'POST', body:fd}});
                     const data = await res.json();
-                    if(res.ok) {{ showToast(`💸 Ціну піднято! Нова сума: ${{data.new_fee}} грн`); setTimeout(() => location.reload(), 1500); }}
-                    else {{ alert(data.message || "Помилка"); }}
+                    
+                    if(res.ok) {{ 
+                        showToast(`💸 Ціну піднято! Нова сума: ${{data.new_fee}} грн`); 
+                        setTimeout(() => location.reload(), 1500); 
+                    }}
+                    else {{
+                        alert(data.message || "Помилка");
+                    }}
                 }} catch(e) {{ alert("Помилка з'єднання"); }}
             }}
 
             // ==========================================
-            // ПОИСК АДРЕСА: ОБНОВЛЕН (Одесса + Nominatim + БЕЗ РАЙОНА)
+            // ПОИСК АДРЕСА (PHOTON + LEAFLET MAP)
             // ==========================================
+            
             const addrInput = document.getElementById('addr_input');
             const addrResults = document.getElementById('addr_results');
             const latInput = document.getElementById('form_lat');
@@ -826,134 +703,132 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             
             let pickerMap, pickerMarker;
             let searchTimeout = null;
-            let latestReqId = 0; // Счетчик запросов
-
-            // КООРДИНАТЫ ОДЕССЫ ПО УМОЛЧАНИЮ
-            const ODESA_LAT = 46.4825;
-            const ODESA_LON = 30.7233;
+            let currentRequestController = null; // Для отмены старых запросов
 
             function initPickerMap(lat, lon) {{
                 if (pickerMap) return;
                 try {{
                     pickerMapDiv.classList.add('visible');
                     mapHint.style.display = 'block';
-                    const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
+                    
+                    const startPos = (lat && lon) ? [lat, lon] : [50.45, 30.52];
                     
                     pickerMap = L.map('picker-map').setView(startPos, 13);
-                    // Используем OpenStreetMap (Open Map)
-                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }}).addTo(pickerMap);
-
+                    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(pickerMap);
+                    
                     pickerMarker = L.marker(startPos, {{draggable: true}}).addTo(pickerMap);
                     
                     pickerMarker.on('dragend', function(e) {{
                         const pos = e.target.getLatLng();
-                        latInput.value = pos.lat; lonInput.value = pos.lng;
+                        latInput.value = pos.lat;
+                        lonInput.value = pos.lng;
                     }});
+                    
                     pickerMap.on('click', function(e) {{
                         pickerMarker.setLatLng(e.latlng);
-                        latInput.value = e.latlng.lat; lonInput.value = e.latlng.lng;
+                        latInput.value = e.latlng.lat;
+                        lonInput.value = e.latlng.lng;
                     }});
+                    
                     setTimeout(() => pickerMap.invalidateSize(), 200);
-                }} catch(e) {{ console.error("Leaflet init error:", e); }}
+                }} catch(e) {{
+                    console.error("Leaflet init error:", e);
+                }}
             }}
 
             if(addrInput) {{
                 addrInput.addEventListener('input', function() {{
                     clearTimeout(searchTimeout);
-                    const query = this.value.trim();
+                    const query = this.value;
                     
                     if (!pickerMap) initPickerMap();
-                    
+
                     if(query.length < 3) {{ 
-                        addrResults.style.display = 'none'; 
-                        addrInput.classList.remove('loading-input');
+                        addrResults.style.display = 'none';
+                        addrInput.classList.remove('loading-input'); 
                         return; 
                     }}
                     
+                    // Показываем лоадер
                     addrInput.classList.add('loading-input');
-                    
-                    // Дебаунс 800мс
-                    searchTimeout = setTimeout(async () => {{
-                        const reqId = ++latestReqId;
-                        
-                        try {{
-                            // Добавили addressdetails=1 чтобы разбить адрес на части
-                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
-                            
-                            const res = await fetch(url);
-                            
-                            if (reqId !== latestReqId) return; // Игнорируем устаревший ответ
 
-                            if (!res.ok) throw new Error("API Error");
+                    searchTimeout = setTimeout(async () => {{
+                        try {{
+                            // Отмена предыдущего запроса
+                            if (currentRequestController) {{
+                                currentRequestController.abort();
+                            }}
+                            currentRequestController = new AbortController();
+                            const signal = currentRequestController.signal;
+
+                            // Используем координаты центра карты для приоритета
+                            let centerLat = 50.45, centerLon = 30.52;
+                            if (pickerMap) {{
+                                const c = pickerMap.getCenter();
+                                centerLat = c.lat; centerLon = c.lng;
+                            }}
+
+                            const res = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lat=${{centerLat}}&lon=${{centerLon}}`, {{ signal }});
                             const data = await res.json();
                             
                             addrResults.innerHTML = '';
-                            if(data && data.length > 0) {{
-                                data.forEach(item => {{
+                            if(data.features && data.features.length > 0) {{
+                                data.features.forEach(feat => {{
+                                    const props = feat.properties;
+                                    const coords = feat.geometry.coordinates; // [lon, lat]
+                                    
                                     const div = document.createElement('div');
                                     div.className = 'autocomplete-item';
                                     
-                                    const displayName = item.display_name;
-                                    const parts = displayName.split(',');
-                                    const mainName = parts[0];
-                                    const subName = parts.slice(1).join(',').trim();
+                                    let mainName = props.name || props.street || '';
+                                    if (props.housenumber) mainName += ', ' + props.housenumber;
+                                    
+                                    // Формируем подпись более аккуратно
+                                    let details = [];
+                                    if(props.district) details.push(props.district);
+                                    if(props.city) details.push(props.city);
+                                    
+                                    let subName = details.join(', ');
                                     
                                     div.innerHTML = `<span>${{mainName}}</span><small>${{subName}}</small>`;
+                                    
                                     div.onclick = () => {{ 
-                                        // --- СБОРКА КОРОТКОГО АДРЕСА ---
-                                        const a = item.address;
-                                        const cleanParts = [];
-                                        
-                                        // 1. Улица / Место
-                                        if (a.road) cleanParts.push(a.road);
-                                        else if (a.pedestrian) cleanParts.push(a.pedestrian);
-                                        else if (a.hamlet) cleanParts.push(a.hamlet);
-                                        else cleanParts.push(mainName);
-                                        
-                                        // 2. Дом
-                                        if (a.house_number) cleanParts.push(a.house_number);
-                                        
-                                        // 3. Город (без района)
-                                        if (a.city) cleanParts.push(a.city);
-                                        else if (a.town) cleanParts.push(a.town);
-                                        else if (a.village) cleanParts.push(a.village);
-                                        
-                                        // Результат: "Улица, Номер, Город"
-                                        addrInput.value = cleanParts.join(', ');
+                                        addrInput.value = `${{mainName}}, ${{props.city || ''}}`;
                                         addrResults.style.display = 'none';
                                         
-                                        const lat = parseFloat(item.lat);
-                                        const lon = parseFloat(item.lon);
+                                        const lat = coords[1];
+                                        const lon = coords[0];
+                                        latInput.value = lat;
+                                        lonInput.value = lon;
                                         
-                                        latInput.value = lat; lonInput.value = lon;
-                                        if(pickerMap) {{ 
-                                            pickerMarker.setLatLng([lat, lon]); 
-                                            pickerMap.setView([lat, lon], 16); 
-                                        }} else {{ 
-                                            initPickerMap(lat, lon); 
+                                        if(pickerMap) {{
+                                            pickerMarker.setLatLng([lat, lon]);
+                                            pickerMap.setView([lat, lon], 16);
+                                        }} else {{
+                                            initPickerMap(lat, lon);
                                         }}
                                     }};
                                     addrResults.appendChild(div);
                                 }});
                                 addrResults.style.display = 'block';
                             }} else {{ addrResults.style.display = 'none'; }}
-                        }} catch(e) {{ 
-                            console.error("Search error:", e); 
-                        }} finally {{ 
-                            if (reqId === latestReqId) {{
-                                addrInput.classList.remove('loading-input'); 
-                            }}
+                        }} catch(e) {{
+                            if (e.name !== 'AbortError') console.error(e);
+                        }} finally {{
+                             addrInput.classList.remove('loading-input');
                         }}
-                    }}, 800);
+                    }}, 300); 
                 }});
-                document.addEventListener('click', (e) => {{ if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; }});
+                
+                document.addEventListener('click', (e) => {{ 
+                    if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; 
+                }});
             }}
             
             // --- WEBSOCKET ---
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/partner`);
+            
             socket.onmessage = (event) => {{
                 const data = JSON.parse(event.data);
                 if (data.type === 'order_update') {{
@@ -971,7 +846,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         div.innerHTML = `${{data.text}} <div class="msg-time">${{data.time}}</div>`;
                         container.appendChild(div);
                         container.scrollTop = container.scrollHeight;
-                    }} else {{ showToast(`💬 Нове повідомлення: ${{data.text}}`); }}
+                    }} else {{
+                         showToast(`💬 Нове повідомлення: ${{data.text}}`);
+                    }}
                 }}
             }};
 
@@ -1018,22 +895,36 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             }}
 
             // --- ACTIONS ---
-            async function cancelOrder(jobId) {{ if(!confirm("Скасувати це замовлення?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/cancel_order', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
-            async function markReady(jobId) {{ if(!confirm("Підтвердити готовність?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/order_ready', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
-            async function confirmReturn(jobId) {{ if(!confirm("Гроші отримано?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/confirm_return', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
+            async function cancelOrder(jobId) {{
+                if(!confirm("Скасувати це замовлення?")) return;
+                const fd = new FormData(); fd.append('job_id', jobId);
+                try {{ await fetch('/api/partner/cancel_order', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}}
+            }}
+            async function markReady(jobId) {{
+                if(!confirm("Підтвердити готовність?")) return;
+                const fd = new FormData(); fd.append('job_id', jobId);
+                try {{ await fetch('/api/partner/order_ready', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}}
+            }}
+            async function confirmReturn(jobId) {{
+                if(!confirm("Гроші отримано?")) return;
+                const fd = new FormData(); fd.append('job_id', jobId);
+                try {{ await fetch('/api/partner/confirm_return', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}}
+            }}
 
-            // --- RATING & TRACKING ---
+            // --- RATING ---
             function openRateModal(jobId) {{ document.getElementById('rate_job_id').value = jobId; document.getElementById('rateModal').style.display = 'flex'; }}
-            async function submitRating(e) {{ e.preventDefault(); const form = new FormData(e.target); try {{ await fetch('/api/partner/rate_courier', {{method:'POST', body:form}}); location.reload(); }} catch(e) {{}} }}
+            async function submitRating(e) {{
+                e.preventDefault(); const form = new FormData(e.target);
+                try {{ await fetch('/api/partner/rate_courier', {{method:'POST', body:form}}); location.reload(); }} catch(e) {{}}
+            }}
 
+            // --- TRACKING ---
             let map, courierMarker, trackInterval;
             function openTrackModal(jobId) {{
                 document.getElementById('trackModal').style.display = 'flex';
                 if(!map) {{
-                    map = L.map('track-map').setView([46.4825, 30.7233], 13);
-                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }}).addTo(map);
+                    map = L.map('track-map').setView([50.45, 30.52], 13);
+                    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
                 }}
                 fetchLocation(jobId);
                 trackInterval = setInterval(() => fetchLocation(jobId), 5000);
