@@ -1,17 +1,16 @@
 import json
 import os
 import logging
+import httpx
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-
-# FIREBASE ADMIN IMPORTS
-import firebase_admin
-from firebase_admin import credentials, get_app, delete_app
+from sqlalchemy.orm import joinedload
 
 # Импортируем auth вместо app, чтобы избежать циклического импорта
-from models import get_db, Courier, DeliveryPartner, SystemSetting
+from models import get_db, Courier, DeliveryPartner, DeliveryJob
 from auth import check_admin_auth 
 
 # Импортируем GLOBAL_STYLES
@@ -52,7 +51,32 @@ def save_pwa_config(config):
     with open(PWA_CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
 
-# --- НОВИЙ HTML ШАБЛОН: Карта Операцій ---
+# --- ГЕОКОДИНГ ДЛЯ КАРТЫ (КЕШИРОВАННЫЙ) ---
+GEOCODE_CACHE = {}
+
+async def get_coords(address: str):
+    """Шукає координати для адреси закладу, якщо їх немає в БД."""
+    if not address: return None, None
+    if address in GEOCODE_CACHE: return GEOCODE_CACHE[address]
+    
+    url = f"https://nominatim.openstreetmap.org/search?q={quote(address)}&format=json&limit=1"
+    headers = {"User-Agent": "RestifyAdminMap/1.0"}
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, headers=headers, timeout=3.0)
+            data = resp.json()
+            if data and len(data) > 0:
+                res = (float(data[0]["lat"]), float(data[0]["lon"]))
+                GEOCODE_CACHE[address] = res
+                return res
+        except Exception as e:
+            logging.error(f"Map Geocoding Error for {address}: {e}")
+            
+    return None, None
+
+
+# --- HTML ШАБЛОН: Карта Операцій ---
 def get_ops_map_html(message=""):
     """HTML для сторінки Real-time Ops Map."""
     
@@ -61,7 +85,7 @@ def get_ops_map_html(message=""):
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body {{ padding: 0; margin: 0; height: 100vh; overflow: hidden; display: block; }}
+        body {{ padding: 0; margin: 0; height: 100vh; overflow: hidden; display: block; background: #0f172a; }}
         #map {{ height: 100vh; width: 100%; z-index: 1; }}
         .map-header {{ 
             position: absolute; top: 0; left: 0; right: 0; 
@@ -69,7 +93,7 @@ def get_ops_map_html(message=""):
             backdrop-filter: blur(10px); z-index: 1000; color: white;
             display: flex; justify-content: space-between; align-items: center;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            height: 60px; /* Фіксована висота */
+            height: 60px;
         }}
         .map-header h1 {{ margin: 0; font-size: 1.5rem; }}
         .map-info {{ font-size: 0.9rem; color: #94a3b8; }}
@@ -154,6 +178,7 @@ def get_ops_map_html(message=""):
             }};
             
             function timeSince(dateString) {{
+                if (!dateString) return '-';
                 const seconds = Math.floor((new Date() - new Date(dateString)) / 1000);
                 if (seconds < 60) return `щойно`;
                 const minutes = Math.floor(seconds / 60);
@@ -168,8 +193,8 @@ def get_ops_map_html(message=""):
                     const res = await fetch('/api/admin/delivery/map_data');
                     const data = await res.json();
                     
-                    document.getElementById('courier-count').innerText = `Кур'єрів: ${{data.couriers.length}}`;
-                    document.getElementById('job-count').innerText = `Замовлень: ${{data.jobs.length}}`;
+                    document.getElementById('courier-count').innerText = `Кур'єрів онлайн: ${{data.couriers.length}}`;
+                    document.getElementById('job-count').innerText = `Активних замовлень: ${{data.jobs.length}}`;
 
                     updateMapMarkers(data.couriers, data.jobs);
                     
@@ -234,7 +259,7 @@ def get_ops_map_html(message=""):
                         jobLayer.addLayer(restMarker);
                         bounds.extend([j.partner.lat, j.partner.lon]);
 
-                        // B. Dropoff Marker (if coordinates are available)
+                        // B. Dropoff Marker
                         if (j.dropoff.lat && j.dropoff.lon) {{
                             let dropoffColor = statusColors[j.status] || '#94a3b8';
                             let dropoffIconHtml = `<div class="job-dropoff-icon" style="background:${{dropoffColor}}; box-shadow: 0 0 0 3px ${{dropoffColor}};"></div>`;
@@ -259,18 +284,17 @@ def get_ops_map_html(message=""):
                             ], {{ color: dropoffColor, weight: 3, dashArray: '8, 8' }});
                             jobLinesLayer.addLayer(line);
                             
-                            // D. Draw line from Courier to Pickup/Dropoff (if assigned and courier is located)
+                            // D. Draw line from Courier to Pickup/Dropoff
                             const courier = couriers.find(c => c.id === j.courier.id);
                             if (courier && courier.lat && courier.lon) {{
                                 let target_lat = j.partner.lat;
                                 let target_lon = j.partner.lon;
-                                let line_color = '#94a3b8'; // Grey line for courier path to pickup
+                                let line_color = '#94a3b8';
 
                                 if (['picked_up', 'returning'].includes(j.status)) {{
-                                    // Courier is heading to dropoff
                                     target_lat = j.dropoff.lat;
                                     target_lon = j.dropoff.lon;
-                                    line_color = '#6366f1'; // Blue line for courier path to client
+                                    line_color = '#6366f1'; 
                                 }}
 
                                 const courierLine = L.polyline([
@@ -283,23 +307,22 @@ def get_ops_map_html(message=""):
                     }}
                 }});
 
-                // 3. Auto-fit map to all markers
+                // 3. Auto-fit map
                 if (bounds.isValid()) {{
-                    map.fitBounds(bounds, {{ padding: [100, 100] }});
+                    map.fitBounds(bounds, {{ padding: [50, 50] }});
                 }} else {{
                      map.setView([50.45, 30.52], 12);
                 }}
             }}
 
             fetchMapData();
-            setInterval(fetchMapData, 10000); // Update every 10 seconds
+            setInterval(fetchMapData, 10000); // Оновлення кожні 10 секунд
         </script>
     </body></html>
     """
-# --- КОНЕЦ НОВОГО HTML ШАБЛОНУ ---
 
-# --- HTML TEMPLATE ---
-def get_delivery_admin_html(couriers, partners, pwa_config, fb_config_str, vapid_key, service_account_str, message=""):
+# --- HTML TEMPLATE: Управління ---
+def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
     courier_rows = ""
     for c in couriers:
         status_color = "#4ade80" if c.is_active else "#f87171"
@@ -372,11 +395,6 @@ def get_delivery_admin_html(couriers, partners, pwa_config, fb_config_str, vapid
         
         .pwa-settings input {{ background: rgba(0,0,0,0.2); padding: 8px; border: 1px solid #475569; border-radius: 6px; color: white; width: 100%; margin-bottom: 10px; }}
         .pwa-settings label {{ font-size: 0.8rem; color: #94a3b8; margin-bottom: 2px; display: block; }}
-
-        /* --- STYLES FOR FIREBASE PANEL --- */
-        .settings-box {{ background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 1px solid var(--border); }}
-        textarea {{ width: 100%; background: rgba(0,0,0,0.3); color: #fff; font-family: monospace; font-size: 0.85rem; min-height: 100px; border: 1px solid #475569; border-radius: 6px; padding: 8px; box-sizing: border-box; resize: vertical; }}
-        .section-label {{ color: var(--primary); font-weight: bold; margin-bottom: 5px; display: block; margin-top: 15px; }}
     </style>
     </head>
     <body>
@@ -413,63 +431,43 @@ def get_delivery_admin_html(couriers, partners, pwa_config, fb_config_str, vapid
                 </div>
             </div>
 
-            <div class="grid" style="margin-top: 20px;">
-                <div class="panel">
-                    <h2>📱 Налаштування PWA (для встановлення)</h2>
-                    <form method="post" action="/admin/delivery/pwa_save" class="pwa-settings">
-                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
-                            <h3 style="margin-top:0">Courier App</h3>
-                            <label>Назва додатка</label>
-                            <input type="text" name="c_name" value="{pwa_config['courier']['name']}">
-                            <label>Коротка назва (під іконкою)</label>
-                            <input type="text" name="c_short_name" value="{pwa_config['courier']['short_name']}">
-                            <label>URL іконки (PNG, 512x512)</label>
-                            <input type="text" name="c_icon" value="{pwa_config['courier']['icon_url']}">
-                            <label>Колір теми (HEX)</label>
-                            <input type="color" name="c_color" value="{pwa_config['courier']['theme_color']}" style="height:40px;">
-                        </div>
+            <div class="panel" style="margin-top: 20px;">
+                <h2>📱 Налаштування PWA (для встановлення додатків)</h2>
+                <form method="post" action="/admin/delivery/pwa_save" class="pwa-settings grid">
+                    <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
+                        <h3 style="margin-top:0">Courier App</h3>
+                        <label>Назва додатка</label>
+                        <input type="text" name="c_name" value="{pwa_config['courier']['name']}">
+                        <label>Коротка назва (під іконкою)</label>
+                        <input type="text" name="c_short_name" value="{pwa_config['courier']['short_name']}">
+                        <label>URL іконки (PNG, 512x512)</label>
+                        <input type="text" name="c_icon" value="{pwa_config['courier']['icon_url']}">
+                        <label>Колір теми (HEX)</label>
+                        <input type="color" name="c_color" value="{pwa_config['courier']['theme_color']}" style="height:40px;">
+                    </div>
 
-                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; margin-top: 10px;">
-                            <h3 style="margin-top:0">Partner App</h3>
-                            <label>Назва додатка</label>
-                            <input type="text" name="p_name" value="{pwa_config['partner']['name']}">
-                            <label>Коротка назва</label>
-                            <input type="text" name="p_short_name" value="{pwa_config['partner']['short_name']}">
-                            <label>URL іконки</label>
-                            <input type="text" name="p_icon" value="{pwa_config['partner']['icon_url']}">
-                            <label>Колір теми</йlabel>
-                            <input type="color" name="p_color" value="{pwa_config['partner']['theme_color']}" style="height:40px;">
-                        </div>
-                        
-                        <button type="submit" class="btn" style="margin-top: 15px; width: 100%;">💾 Зберегти налаштування PWA</button>
-                    </form>
-                </div>
-
-                <div class="panel">
-                    <h2>🔥 Firebase Cloud Messaging</h2>
-                    <form method="post" action="/admin/delivery/firebase_save">
-                        <div class="settings-box">
-                            <span class="section-label">1. Client Config (для браузера)</span>
-                            <p style="font-size:0.8rem; color:#888; margin-bottom:5px;">Project Settings -> General -> Your apps</p>
-                            <textarea name="firebase_config_json" placeholder='{{ "apiKey": "...", ... }}' required>{fb_config_str}</textarea>
-                            
-                            <span class="section-label">2. VAPID Key (для прав доступу)</span>
-                            <p style="font-size:0.8rem; color:#888; margin-bottom:5px;">Cloud Messaging -> Web configuration (Key Pair)</p>
-                            <input type="text" name="vapid_key" value="{vapid_key}" required>
-
-                            <span class="section-label">3. Service Account JSON (для сервера)</span>
-                            <p style="font-size:0.8rem; color:#888; margin-bottom:5px;">Project Settings -> Service accounts -> Generate new private key. Відкрийте файл і скопіюйте сюди ВЕСЬ вміст.</p>
-                            <textarea name="service_account_json" placeholder='{{ "type": "service_account", ... }}' style="min-height:150px;">{service_account_str}</textarea>
-                        </div>
-                        <button type="submit" class="btn" style="margin-top:15px; width: 100%;">💾 Зберегти і Перезапустити Firebase</button>
-                    </form>
-                </div>
+                    <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
+                        <h3 style="margin-top:0">Partner App</h3>
+                        <label>Назва додатка</label>
+                        <input type="text" name="p_name" value="{pwa_config['partner']['name']}">
+                        <label>Коротка назва</label>
+                        <input type="text" name="p_short_name" value="{pwa_config['partner']['short_name']}">
+                        <label>URL іконки</label>
+                        <input type="text" name="p_icon" value="{pwa_config['partner']['icon_url']}">
+                        <label>Колір теми</label>
+                        <input type="color" name="p_color" value="{pwa_config['partner']['theme_color']}" style="height:40px;">
+                    </div>
+                    
+                    <button type="submit" class="btn" style="grid-column: 1 / -1; margin-top: 15px;">💾 Зберегти налаштування PWA</button>
+                </form>
             </div>
+            
         </div>
     </body></html>
     """
 
-# ОБНОВЛЕНО: Получение настроек из БД и передача в шаблон
+# --- РОУТИ ПАНЕЛІ ---
+
 @router.get("/admin/delivery", response_class=HTMLResponse)
 async def admin_delivery_page(
     message: str = "",
@@ -480,27 +478,85 @@ async def admin_delivery_page(
     partners = (await db.execute(select(DeliveryPartner).order_by(DeliveryPartner.id.desc()))).scalars().all()
     pwa_config = load_pwa_config()
     
-    # Загружаем настройки Firebase из базы
-    fb_conf = await db.get(SystemSetting, "firebase_config")
-    vapid = await db.get(SystemSetting, "vapid_key")
-    sa_conf = await db.get(SystemSetting, "firebase_service_account")
-    
-    fb_val = fb_conf.value if fb_conf else ""
-    vapid_val = vapid.value if vapid else ""
-    sa_val = sa_conf.value if sa_conf else ""
-    
-    # sa_val передается в get_delivery_admin_html как service_account_str
-    return get_delivery_admin_html(couriers, partners, pwa_config, fb_val, vapid_val, sa_val, message)
+    return get_delivery_admin_html(couriers, partners, pwa_config, message)
 
-# --- НОВИЙ РОУТ ДЛЯ КАРТИ ---
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
 async def admin_delivery_map_page(
     user: str = Depends(check_admin_auth)
 ):
-    # Используем новую функцию-шаблон
     return get_ops_map_html() 
-# --- КОНЕЦ НОВОГО РОУТА ДЛЯ КАРТИ ---
 
+# --- НОВИЙ АПІ ЕНДПОІНТ ДЛЯ ОТРИМАННЯ ДАНИХ ДЛЯ КАРТИ ---
+@router.get("/api/admin/delivery/map_data")
+async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)):
+    
+    # 1. Отримуємо онлайн кур'єрів
+    couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
+    courier_list = []
+    
+    for c in couriers:
+        # Перевіряємо чи є у кур'єра активне замовлення
+        active_job = (await db.execute(
+            select(DeliveryJob.id)
+            .where(DeliveryJob.courier_id == c.id)
+            .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        )).scalar()
+        
+        courier_list.append({
+            "id": c.id, 
+            "name": c.name, 
+            "phone": c.phone,
+            "lat": c.lat, 
+            "lon": c.lon,
+            "avg_rating": getattr(c, 'avg_rating', 5.0),
+            "last_seen": c.last_seen.isoformat() if c.last_seen else None,
+            "job_id": active_job
+        })
+        
+    # 2. Отримуємо активні замовлення та їхні координати
+    jobs_query = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner))
+        .options(joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+    )
+    jobs = jobs_query.scalars().all()
+    
+    jobs_list = []
+    for j in jobs:
+        p_lat, p_lon = None, None
+        if j.partner:
+            # Кешований геокодинг адреси закладу
+            p_lat, p_lon = await get_coords(j.partner.address)
+            
+        jobs_list.append({
+            "id": j.id,
+            "status": j.status,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "order_price": j.order_price,
+            "delivery_fee": j.delivery_fee,
+            "partner": {
+                "id": j.partner.id if j.partner else None,
+                "name": j.partner.name if j.partner else "Невідомо",
+                "address": j.partner.address if j.partner else "",
+                "lat": p_lat,
+                "lon": p_lon
+            },
+            "dropoff": {
+                "address": j.dropoff_address,
+                "lat": j.dropoff_lat,
+                "lon": j.dropoff_lon,
+                "customer_phone": j.customer_phone
+            },
+            "courier": {
+                "id": j.courier.id if j.courier else None,
+                "name": j.courier.name if j.courier else None
+            }
+        })
+        
+    return JSONResponse({"couriers": courier_list, "jobs": jobs_list})
+
+# --- УПРАВЛІННЯ КУР'ЄРАМИ ТА ПАРТНЕРАМИ ---
 @router.post("/admin/delivery/courier/control")
 async def courier_control(
     id: int = Form(...),
@@ -552,6 +608,7 @@ async def partner_control(
     await db.commit()
     return RedirectResponse(f"/admin/delivery?message={msg}", status_code=302)
 
+# --- НАЛАШТУВАННЯ PWA ТА МАНІФЕСТИ ---
 @router.post("/admin/delivery/pwa_save")
 async def pwa_save_settings(
     c_name: str = Form(...), c_short_name: str = Form(...), c_icon: str = Form(...), c_color: str = Form(...),
@@ -571,59 +628,6 @@ async def pwa_save_settings(
     save_pwa_config(config)
     return RedirectResponse("/admin/delivery?message=Налаштування PWA збережено", status_code=302)
 
-# НОВЫЙ РОУТ: Сохранение настроек Firebase
-@router.post("/admin/delivery/firebase_save")
-async def save_firebase_settings(
-    firebase_config_json: str = Form(...),
-    vapid_key: str = Form(...),
-    service_account_json: str = Form(""),
-    user: str = Depends(check_admin_auth),
-    db: AsyncSession = Depends(get_db)
-):
-    # 1. Сохраняем Client Config
-    conf_setting = await db.get(SystemSetting, "firebase_config")
-    if not conf_setting:
-        conf_setting = SystemSetting(key="firebase_config")
-        db.add(conf_setting)
-    conf_setting.value = firebase_config_json.strip()
-
-    # 2. Сохраняем VAPID
-    vapid_setting = await db.get(SystemSetting, "vapid_key")
-    if not vapid_setting:
-        vapid_setting = SystemSetting(key="vapid_key")
-        db.add(vapid_setting)
-    vapid_setting.value = vapid_key.strip()
-
-    # 3. Сохраняем Service Account (Server) и перезагружаем
-    msg_extra = ""
-    if service_account_json.strip():
-        sa_setting = await db.get(SystemSetting, "firebase_service_account")
-        if not sa_setting:
-            sa_setting = SystemSetting(key="firebase_service_account")
-            db.add(sa_setting)
-        sa_setting.value = service_account_json.strip()
-        
-        # --- МГНОВЕННАЯ ПЕРЕЗАГРУЗКА FIREBASE ADMIN ---
-        try:
-            cred_dict = json.loads(service_account_json)
-            cred = credentials.Certificate(cred_dict)
-            
-            # Удаляем старое приложение, если есть
-            try:
-                app = get_app()
-                delete_app(app)
-            except ValueError:
-                pass # Не было инициализировано
-            
-            firebase_admin.initialize_app(cred)
-            msg_extra = " (Server Creds Reloaded!)"
-            logging.info("Firebase Admin re-initialized via Admin Panel")
-        except Exception as e:
-            msg_extra = f" (ERROR Reloading: {e})"
-            logging.error(f"Error reloading Firebase: {e}")
-
-    await db.commit()
-    return RedirectResponse(f"/admin/delivery?message=Налаштування Firebase оновлено!{msg_extra}", status_code=302)
 
 @router.get("/courier/manifest.json")
 async def get_courier_manifest():
