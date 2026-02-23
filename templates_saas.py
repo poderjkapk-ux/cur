@@ -826,38 +826,70 @@ def get_admin_dashboard_html(clients: list, message: str = "", msg_type: str = "
     """
 
 def get_settings_page_html(config, message=""):
-    """HTML для настройки витрины (/settings)"""
-    custom_btn_text = config.get('custom_btn_text', '').replace('"', '"')
-    custom_btn_content = config.get('custom_btn_content', '').replace('<', '<').replace('>', '>')
+    """HTML для страницы настроек витрины (/settings)"""
+    import os
+    
+    custom_btn_text = config.get('custom_btn_text', '').replace('"', '&quot;')
+    custom_btn_content = config.get('custom_btn_content', '').replace('<', '&lt;').replace('>', '&gt;')
+    
+    # Пытаемся прочитать существующий JSON, если он есть
+    fb_json_content = ""
+    if os.path.exists("firebase_credentials.json"):
+        try:
+            with open("firebase_credentials.json", "r", encoding="utf-8") as f:
+                fb_json_content = f.read()
+        except: pass
     
     return f"""
     <!DOCTYPE html><html><head><title>Restify Admin</title>{GLOBAL_STYLES}</head>
     <style>
-        .container {{ max-width: 500px; text-align: left; }}
-        label {{ color: var(--text-muted); display: block; margin-bottom: 5px; font-size: 0.9rem; }}
+        .container {{ max-width: 600px; text-align: left; margin: 40px auto; }}
+        label {{ color: var(--text-muted); display: block; margin-bottom: 5px; font-size: 0.9rem; margin-top: 15px; font-weight: bold; }}
+        h2 {{ border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-top: 30px; }}
     </style>
     <body>
         <div class="container">
             <h1 style="text-align:center;">Налаштування Вітрини</h1>
             {f'<div class="message success" style="text-align:center">{message}</div>' if message else ''}
             <form method="post" action="/settings">
+                <h2>Базові налаштування</h2>
                 <label>Символ валюти</label><input type="text" name="currency" value="{config.get('currency', '$')}">
                 
                 <input type="hidden" name="price_light" value="{config.get('price_light', '300')}">
                 <label>Ціна (Pro) / місяць</label><input type="number" name="price_full" value="{config.get('price_full', '600')}">
                 
-                <hr>
                 <label>Admin Telegram ID (для заявок)</label><input type="text" name="admin_id" value="{config.get('admin_id', '')}">
                 <label>Bot Token (для заявок)</label><input type="text" name="bot_token" value="{config.get('bot_token', '')}">
                 
-                <hr>
-                <label>Текст кнопки (в меню)</label>
+                <h2>Push-сповіщення (Firebase)</h2>
+                <label>Firebase API Key</label>
+                <input type="text" name="firebase_api_key" value="{config.get('firebase_api_key', '')}" placeholder="AIzaSy...">
+                
+                <label>Firebase Project ID</label>
+                <input type="text" name="firebase_project_id" value="{config.get('firebase_project_id', '')}" placeholder="restifysite">
+                
+                <label>Firebase Sender ID (messagingSenderId)</label>
+                <input type="text" name="firebase_sender_id" value="{config.get('firebase_sender_id', '')}" placeholder="1234567890">
+                
+                <label>Firebase App ID</label>
+                <input type="text" name="firebase_app_id" value="{config.get('firebase_app_id', '')}" placeholder="1:1234567890:web:abcd...">
+                
+                <label>VAPID Key (Web Push certificate)</label>
+                <input type="text" name="firebase_vapid_key" value="{config.get('firebase_vapid_key', '')}" placeholder="BP5-1Obs3...">
+                
+                <label>Вміст файлу firebase_credentials.json (Серверний ключ)</label>
+                <p class="form-hint" style="margin-top: 5px;">Вставте сюди весь текст із завантаженого JSON файлу Service Account.</p>
+                <textarea name="firebase_credentials_json" style="font-family: monospace; font-size: 0.8rem; height: 200px;" placeholder='{{ "type": "service_account", ... }}'>{fb_json_content}</textarea>
+
+                <h2>Додаткова кнопка в меню</h2>
+                <label>Текст кнопки</label>
                 <input type="text" name="custom_btn_text" value="{custom_btn_text}" placeholder="Напр: Політика">
-                <p class="form-hint" style="margin-top: 5px; margin-bottom: 15px;">Залиште порожнім, щоб приховати кнопку.</p>
+                <p class="form-hint" style="margin-top: 5px;">Залиште порожнім, щоб приховати кнопку.</p>
                 
                 <label>Вміст вікна (HTML)</label>
                 <textarea name="custom_btn_content" placeholder="<p>Ваш текст...</p>">{custom_btn_content}</textarea>
-                <button type="submit" class="btn">Зберегти</button>
+                
+                <button type="submit" class="btn" style="margin-top: 20px;">Зберегти налаштування</button>
             </form>
             <a href="/admin" style="text-align:center;">← Назад до Клієнтів</a>
         </div>

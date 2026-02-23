@@ -417,9 +417,29 @@ async def settings_page(_ = Depends(check_admin_auth)):
 @app.post("/settings", response_class=HTMLResponse)
 async def settings_save(request: Request, _ = Depends(check_admin_auth)):
     form = await request.form()
-    config = {k: v for k, v in form.items()}
+    config = load_config()
+    
+    # Обрабатываем все поля из формы
+    for k, v in form.items():
+        if k == "firebase_credentials_json":
+            if v.strip():
+                try:
+                    import json
+                    parsed = json.loads(v)
+                    with open("firebase_credentials.json", "w", encoding="utf-8") as f:
+                        json.dump(parsed, f, indent=4)
+                    
+                    # Пытаемся инициализировать на лету, если еще не было
+                    if not firebase_admin._apps:
+                        cred = credentials.Certificate("firebase_credentials.json")
+                        firebase_admin.initialize_app(cred)
+                except Exception as e:
+                    logging.error(f"Ошибка сохранения Firebase JSON: {e}")
+        else:
+            config[k] = v
+            
     save_config(config)
-    return templates_saas.get_settings_page_html(config, "Налаштування збережено")
+    return templates_saas.get_settings_page_html(config, "Налаштування збережено. Щоб ключі Firebase запрацювали на бекенді, виконайте 'docker restart saas_lander_app'.")
 
 # ==============================================================================
 # 3. DELIVERY LOGIC (COURIER & PARTNER)
@@ -479,7 +499,8 @@ async def api_courier_login(
 
 @app.get("/courier/app", response_class=HTMLResponse)
 async def courier_pwa_main(courier: Courier = Depends(auth.get_current_courier)):
-    return templates_courier.get_courier_pwa_html(courier)
+    config = load_config()
+    return templates_courier.get_courier_pwa_html(courier, config)
 
 @app.get("/courier/logout")
 async def courier_logout():
@@ -553,100 +574,89 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
 # Использует IndexedDB для проверки, видел ли курьер этот заказ с такой ценой
 @app.get("/firebase-messaging-sw.js")
 async def get_firebase_sw():
-    content = """
+    config = load_config()
+    api_key = config.get("firebase_api_key", "")
+    project_id = config.get("firebase_project_id", "")
+    sender_id = config.get("firebase_sender_id", "")
+    app_id = config.get("firebase_app_id", "")
+    
+    content = f"""
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
     importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
     
-    // ВАШ КОНФИГ FIREBASE
-    firebase.initializeApp({
-        apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
-        authDomain: "restifysite.firebaseapp.com",
-        projectId: "restifysite",
-        storageBucket: "restifysite.firebasestorage.app",
-        messagingSenderId: "679234031594",
-        appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
-    });
+    firebase.initializeApp({{
+        apiKey: "{api_key}",
+        authDomain: "{project_id}.firebaseapp.com",
+        projectId: "{project_id}",
+        storageBucket: "{project_id}.firebasestorage.app",
+        messagingSenderId: "{sender_id}",
+        appId: "{app_id}"
+    }});
 
     const messaging = firebase.messaging();
 
     // --- ФИЛЬТР СПАМА (IndexedDB) ---
-    // Если курьер уже видел этот заказ с такой же (или меньшей) ценой - не показываем.
-    // Если цена выросла - показываем и обновляем запись.
-    function checkAndSaveOrder(jobId, fee) {
-        return new Promise((resolve) => {
-            if(!jobId || !fee) { resolve(true); return; } 
+    function checkAndSaveOrder(jobId, fee) {{
+        return new Promise((resolve) => {{
+            if(!jobId || !fee) {{ resolve(true); return; }} 
 
             var req = indexedDB.open('RestifyPushDB', 1);
-            req.onupgradeneeded = function(e) { 
+            req.onupgradeneeded = function(e) {{ 
                 e.target.result.createObjectStore('jobs'); 
-            };
-            req.onsuccess = function(e) {
+            }};
+            req.onsuccess = function(e) {{
                 var db = e.target.result;
                 var tx = db.transaction('jobs', 'readwrite');
                 var store = tx.objectStore('jobs');
                 var getReq = store.get(jobId);
                 
-                getReq.onsuccess = function() {
+                getReq.onsuccess = function() {{
                     var lastFee = getReq.result;
-                    // Если старая цена есть и она больше или равна новой -> СПАМ
-                    if (lastFee && parseFloat(lastFee) >= parseFloat(fee)) {
+                    if (lastFee && parseFloat(lastFee) >= parseFloat(fee)) {{
                         resolve(false); 
-                    } else {
-                        store.put(fee, jobId); // Сохраняем новую (высокую) цену
+                    }} else {{
+                        store.put(fee, jobId);
                         resolve(true); 
-                    }
-                };
-                getReq.onerror = function() { resolve(true); };
-            };
-            req.onerror = function() { resolve(true); };
-        });
-    }
+                    }}
+                }};
+                getReq.onerror = function() {{ resolve(true); }};
+            }};
+            req.onerror = function() {{ resolve(true); }};
+        }});
+    }}
 
-    // Обработка сообщений в фоне
-    messaging.onBackgroundMessage(function(payload) {
+    messaging.onBackgroundMessage(function(payload) {{
       console.log('[firebase-messaging-sw.js] Received background message ', payload);
-      
-      const data = payload.data || {};
+      const data = payload.data || {{}};
       const notificationTitle = data.title || "Restify Courier";
       
-      // Проверяем на спам перед показом
-      return checkAndSaveOrder(data.job_id, data.fee).then(function(shouldShow) {
-          if (shouldShow) {
-              const notificationOptions = {
+      return checkAndSaveOrder(data.job_id, data.fee).then(function(shouldShow) {{
+          if (shouldShow) {{
+              const notificationOptions = {{
                 body: data.body || "Нове повідомлення",
                 icon: 'https://cdn-icons-png.flaticon.com/512/7542/7542190.png',
-                tag: 'job-' + data.job_id, // Группировка по ID заказа
+                tag: 'job-' + data.job_id,
                 requireInteraction: true,
-                data: { url: data.url || '/courier/app' }
-              };
+                data: {{ url: data.url || '/courier/app' }}
+              }};
               return self.registration.showNotification(notificationTitle, notificationOptions);
-          } else {
-              console.log('[SW] Notification suppressed (Duplicate/Spam) for Job ' + data.job_id);
-          }
-      });
-    });
+          }}
+      }});
+    }});
 
-    // Клик по уведомлению открывает приложение
-    self.addEventListener('notificationclick', function(event) {
+    self.addEventListener('notificationclick', function(event) {{
         event.notification.close();
-        
-        // Получаем URL из данных уведомления
         const urlToOpen = event.notification.data.url || '/courier/app';
-
         event.waitUntil(
-            clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
-                for (var i = 0; i < windowClients.length; i++) {
+            clients.matchAll({{type: 'window', includeUncontrolled: true}}).then(windowClients => {{
+                for (var i = 0; i < windowClients.length; i++) {{
                     var client = windowClients[i];
-                    if (client.url.indexOf(urlToOpen) !== -1 && 'focus' in client) {
-                        return client.focus();
-                    }
-                }
-                if (clients.openWindow) {
-                    return clients.openWindow(urlToOpen);
-                }
-            })
+                    if (client.url.indexOf(urlToOpen) !== -1 && 'focus' in client) return client.focus();
+                }}
+                if (clients.openWindow) return clients.openWindow(urlToOpen);
+            }})
         );
-    });
+    }});
     """
     return Response(content=content, media_type="application/javascript")
 

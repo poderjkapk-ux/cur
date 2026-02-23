@@ -317,27 +317,28 @@ def get_courier_register_page():
     </body></html>
     """
 
-def get_courier_pwa_html(courier: Courier):
+def get_courier_pwa_html(courier: Courier, config: dict = None):
     """
     Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK.
     """
+    if config is None:
+        config = {}
+        
     status_class = "online" if courier.is_online else "offline"
     status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
     pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
 
-    # --- ВАЖЛИВО: ВСТАВТЕ СЮДИ ВАШІ ДАНІ З FIREBASE CONSOLE ---
-    FIREBASE_CONFIG = """
-    {
-        apiKey: "AIzaSyC_amFOh032cBcaeo3f1woLmlwhe6Fyr_k",
-        authDomain: "restifysite.firebaseapp.com",
-        projectId: "restifysite",
-        storageBucket: "restifysite.firebasestorage.app",
-        messagingSenderId: "679234031594",
-        appId: "1:679234031594:web:cc77807a88c5a03b72ec93"
-    }
+    FIREBASE_CONFIG = f"""
+    {{
+        apiKey: "{config.get('firebase_api_key', '')}",
+        authDomain: "{config.get('firebase_project_id', '')}.firebaseapp.com",
+        projectId: "{config.get('firebase_project_id', '')}",
+        storageBucket: "{config.get('firebase_project_id', '')}.firebasestorage.app",
+        messagingSenderId: "{config.get('firebase_sender_id', '')}",
+        appId: "{config.get('firebase_app_id', '')}"
+    }}
     """
-    # Знайдіть цей ключ тут: Firebase Console -> Project Settings -> Cloud Messaging -> Web Configuration -> Web Push certificates
-    VAPID_KEY = "BP5-1Obs3DLFOEXn_H-Vopc2JTmVol72wJ8JmcA0dAYFy3YCozBxSn5hbYPkckt5F0T56kiKQYi01cw0hGMOvIU" 
+    VAPID_KEY = config.get('firebase_vapid_key', '')
 
     return f"""
     <!DOCTYPE html>
