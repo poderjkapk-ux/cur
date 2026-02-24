@@ -225,7 +225,8 @@ def get_courier_login_page(message="", msg_type="error"):
             <button type="submit" class="btn">Почати зміну</button>
         </form>
         {f"<div class='message {msg_type}'>{message}</div>" if message else ""}
-        <a href="/courier/register">Стати кур'єром</a>
+        <br>
+        <a href="/courier/register" style="color: var(--primary); text-decoration: none;">Стати кур'єром</a>
     </div></body></html>
     """
 
@@ -319,7 +320,7 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier, config: dict = None):
     """
-    Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK.
+    Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK + Onboarding.
     """
     if config is None:
         config = {}
@@ -458,12 +459,38 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
              </div>
         </div>
 
+        <div id="install-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:3000; align-items:center; justify-content:center; flex-direction:column; padding:20px; text-align:center; backdrop-filter:blur(5px);">
+            <i class="fa-solid fa-download" style="font-size:4rem; color:var(--primary); margin-bottom:20px;"></i>
+            <h2 style="color:white; margin-bottom:10px;">Встановіть додаток</h2>
+            <p style="color:var(--text-muted); margin-bottom:20px;">Для стабільної роботи, геолокації та швидкого прийому замовлень встановіть додаток на телефон.</p>
+            <button onclick="installPWA()" class="btn" style="width:100%; margin-bottom:10px; background:var(--primary); font-size:1.1rem; padding:15px;">Встановити</button>
+            <button onclick="skipInstall()" style="background:none; border:none; color:#94a3b8; font-size:1rem; padding:10px;">Пізніше</button>
+        </div>
+
+        <div id="notify-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:3000; align-items:center; justify-content:center; flex-direction:column; padding:20px; text-align:center; backdrop-filter:blur(5px);">
+            <i class="fa-solid fa-bell" style="font-size:4rem; color:#facc15; margin-bottom:20px;"></i>
+            <h2 style="color:white; margin-bottom:10px;">Увімкніть сповіщення</h2>
+            <p style="color:var(--text-muted); margin-bottom:20px;">Без цього ви не почуєте сигнал про нові замовлення та повідомлення від закладів.</p>
+            <button onclick="enableNotifications()" class="btn" style="width:100%; margin-bottom:10px; background:#facc15; color:#0f172a; font-size:1.1rem; padding:15px; font-weight:bold;">Дозволити сповіщення</button>
+            <button onclick="skipNotifications()" style="background:none; border:none; color:#94a3b8; font-size:1rem; padding:10px;">Закрити</button>
+        </div>
+
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
         <script>
+            // --- ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК 401 (РЕДИРЕКТ НА LOGIN ПРИ ИСТЕЧЕНИИ СЕССИИ) ---
+            const originalFetch = window.fetch;
+            window.fetch = async function() {{
+                const response = await originalFetch.apply(this, arguments);
+                if (response.status === 401) {{
+                    window.location.href = '/courier/login?message=Сесія закінчилась. Увійдіть знову.';
+                }}
+                return response;
+            }};
+
             // --- FIREBASE INIT ---
             const firebaseConfig = {FIREBASE_CONFIG};
             try {{
@@ -479,10 +506,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     const permission = await Notification.requestPermission();
                     if (permission === 'granted') {{
                         console.log('Push permission granted.');
-                        
-                        // ВАЖНО: Передаем VAPID Key!
                         const token = await messaging.getToken({{ vapidKey: VAPID_KEY }});
-                        
                         if (token) {{
                             console.log('FCM Token:', token);
                             await sendTokenToServer(token);
@@ -495,7 +519,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }}
             }}
 
-            // Слушаем обновление токена (FIX для стабильности)
+            // Слушаем обновление токена
             messaging.onTokenRefresh(() => {{
                 messaging.getToken().then((refreshedToken) => {{
                     console.log('Token refreshed.');
@@ -518,11 +542,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 console.log('Message received.', payload);
                 const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
                 audio.play().catch(e => {{}});
-                // Если данные пришли, показываем модалку или Toast
                 if (payload.data && payload.data.job_id) {{
-                    // Вместо alert лучше использовать кастомное уведомление или обновить интерфейс
-                    // alert("🔔 Нове замовлення!"); 
-                    // Можно вызвать функцию обновления списка заказов
                     if(activeTab === 'orders') fetchOrders();
                 }}
             }});
@@ -543,11 +563,66 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }}
             }}
 
-            // Инициализация по клику (требование браузеров)
-            document.addEventListener('click', () => {{
+            // --- ONBOARDING FLOW (Install PWA -> Notifications) ---
+            let deferredPrompt;
+
+            window.addEventListener('beforeinstallprompt', (e) => {{
+                e.preventDefault();
+                deferredPrompt = e;
+                document.getElementById('install-modal').style.display = 'flex';
+            }});
+
+            function installPWA() {{
+                if (deferredPrompt) {{
+                    deferredPrompt.prompt();
+                    deferredPrompt.userChoice.then((choiceResult) => {{
+                        if (choiceResult.outcome === 'accepted') {{
+                            console.log('Користувач встановив PWA');
+                        }}
+                        deferredPrompt = null;
+                        document.getElementById('install-modal').style.display = 'none';
+                        checkAndAskNotifications();
+                    }});
+                }}
+            }}
+
+            function skipInstall() {{
+                document.getElementById('install-modal').style.display = 'none';
+                checkAndAskNotifications();
+            }}
+
+            function checkAndAskNotifications() {{
+                if (Notification.permission === 'default') {{
+                    document.getElementById('notify-modal').style.display = 'flex';
+                }} else if (Notification.permission === 'granted') {{
+                    initPushNotifications();
+                    requestWakeLock();
+                }}
+            }}
+
+            function enableNotifications() {{
+                document.getElementById('notify-modal').style.display = 'none';
                 initPushNotifications();
                 requestWakeLock();
-            }}, {{ once: true }});
+            }}
+            
+            function skipNotifications() {{
+                document.getElementById('notify-modal').style.display = 'none';
+            }}
+
+            window.addEventListener('load', () => {{
+                const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+                
+                if (isStandalone) {{
+                    setTimeout(checkAndAskNotifications, 1000);
+                }} else {{
+                    setTimeout(() => {{
+                        if (!deferredPrompt && document.getElementById('install-modal').style.display !== 'flex') {{
+                            checkAndAskNotifications();
+                        }}
+                    }}, 2000);
+                }}
+            }});
 
             // --- APP LOGIC ---
             let currentLat = null, currentLon = null;
@@ -556,7 +631,6 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
             let activeTab = 'map';
             let socket = null, pingInterval = null;
 
-            // ... (Далі йде стандартна логіка карти та сокетів, як була раніше) ...
             const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
             let marker = null, targetMarker = null, routeLine = null;
@@ -671,8 +745,13 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                         else alert(`💬 Повідомлення: ${{msg.text}}`);
                     }}
                 }};
-                socket.onclose = () => {{
+                socket.onclose = (event) => {{
                     document.getElementById('connection-dot').style.background = 'red';
+                    // Если сервер разорвал соединение из-за протухшего токена (политика безопасности)
+                    if (event.code === 1008) {{
+                        window.location.href = '/courier/login?message=Сесія закінчилась. Увійдіть знову.';
+                        return;
+                    }}
                     if (isOnline) setTimeout(connectWS, 3000);
                 }};
             }}
