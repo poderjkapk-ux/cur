@@ -321,6 +321,79 @@ def get_ops_map_html(message=""):
     </body></html>
     """
 
+# --- HTML TEMPLATE: Історія замовлень ---
+def get_history_admin_html(entity_name, entity_type, jobs):
+    rows = ""
+    status_colors = {
+        "pending": "#facc15", "assigned": "#facc15", "arrived_pickup": "#facc15",
+        "ready": "#4ade80", "picked_up": "#60a5fa", "delivered": "#4ade80",
+        "returning": "#fb923c", "cancelled": "#f87171"
+    }
+    
+    for j in jobs:
+        color = status_colors.get(j.status, "#ffffff")
+        date_str = j.created_at.strftime('%d.%m.%Y %H:%M') if j.created_at else "-"
+        
+        rating = f"⭐ {j.courier_rating}" if j.courier_rating else "-"
+        review = j.courier_review or "-"
+        
+        partner_name = j.partner.name if j.partner else "Видалений заклад"
+        courier_name = j.courier.name if j.courier else "Не призначено"
+
+        rows += f"""
+        <tr>
+            <td>#{j.id}</td>
+            <td>{date_str}</td>
+            <td><b>{partner_name}</b></td>
+            <td>{courier_name}</td>
+            <td>{j.dropoff_address}</td>
+            <td>{j.order_price} ₴ / {j.delivery_fee} ₴</td>
+            <td><span style="color:{color}; font-weight:bold;">{j.status}</span></td>
+            <td style="color:#facc15; font-weight:bold;">{rating}</td>
+            <td><small>{review}</small></td>
+        </tr>
+        """
+
+    return f"""
+    <!DOCTYPE html><html><head><title>Історія - {entity_name}</title>{GLOBAL_STYLES}
+    <style>
+        .panel {{ background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
+        td, th {{ padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: left; vertical-align: top; }}
+        th {{ color: #94a3b8; font-weight: 600; }}
+        tr:hover {{ background: rgba(255,255,255,0.02); }}
+    </style>
+    </head>
+    <body>
+        <div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h1><i class="fa-solid fa-clock-rotate-left"></i> Історія: {entity_name} ({entity_type})</h1>
+                <a href="/admin/delivery" class="btn" style="width:auto; padding: 10px 20px;">← Назад в Delivery Control</a>
+            </div>
+            
+            <div class="panel" style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Створено</th>
+                            <th>Заклад</th>
+                            <th>Кур'єр</th>
+                            <th>Адреса доставки</th>
+                            <th>Чек / Доставка</th>
+                            <th>Статус</th>
+                            <th>Оцінка</th>
+                            <th>Відгук</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows}</tbody>
+                </table>
+                {f'<p style="text-align:center; color:#94a3b8; margin-top:20px;">Замовлень ще немає</p>' if not rows else ''}
+            </div>
+        </div>
+    </body></html>
+    """
+
 # --- HTML TEMPLATE: Управління ---
 def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
     courier_rows = ""
@@ -337,6 +410,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
             <td><span class="dot" style="background:{status_color}"></span> {'Активний' if c.is_active else 'Заблокований'}</td>
             <td>{c.last_seen.strftime('%d.%m %H:%M') if c.last_seen else '-'}</td>
             <td style="display:flex; gap:5px;">
+                <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
                 <form action="/admin/delivery/courier/control" method="post" style="margin:0;">
                     <input type="hidden" name="id" value="{c.id}">
                     <input type="hidden" name="action" value="{btn_action}">
@@ -365,6 +439,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
             <td>{p.email}<br><small>{p.phone}</small></td>
             <td><span class="dot" style="background:{status_color}"></span></td>
             <td style="display:flex; gap:5px;">
+                <a href="/admin/delivery/partner/{p.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
                 <form action="/admin/delivery/partner/control" method="post" style="margin:0;">
                     <input type="hidden" name="id" value="{p.id}">
                     <input type="hidden" name="action" value="{btn_action}">
@@ -386,10 +461,11 @@ def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
         .panel {{ background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); }}
         table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
         td, th {{ padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: left; vertical-align: middle; }}
-        .btn-mini {{ padding: 5px 10px; border-radius: 6px; border: none; cursor: pointer; color: white; }}
+        .btn-mini {{ padding: 5px 10px; border-radius: 6px; border: none; cursor: pointer; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }}
         .btn-mini.danger {{ background: #e11d48; }}
         .btn-mini.warn {{ background: #f59e0b; }}
         .btn-mini.success {{ background: #4ade80; color: #064e3b; }}
+        .btn-mini.info {{ background: #3b82f6; color: white; }}
         .dot {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }}
         h2 {{ margin-top: 0; display: flex; align-items: center; gap: 10px; }}
         
@@ -614,6 +690,47 @@ async def partner_control(
     
     await db.commit()
     return RedirectResponse(f"/admin/delivery?message={msg}", status_code=302)
+
+# --- ІСТОРІЯ ЗАМОВЛЕНЬ (НОВІ ЕНДПОІНТИ) ---
+
+@router.get("/admin/delivery/courier/{courier_id}/history", response_class=HTMLResponse)
+async def admin_courier_history(
+    courier_id: int,
+    user: str = Depends(check_admin_auth),
+    db: AsyncSession = Depends(get_db)
+):
+    courier = await db.get(Courier, courier_id)
+    if not courier:
+        return RedirectResponse("/admin/delivery?message=Кур'єра не знайдено", status_code=302)
+        
+    jobs = (await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.courier_id == courier_id)
+        .order_by(DeliveryJob.id.desc())
+    )).scalars().all()
+    
+    return get_history_admin_html(courier.name, "Кур'єр", jobs)
+
+@router.get("/admin/delivery/partner/{partner_id}/history", response_class=HTMLResponse)
+async def admin_partner_history(
+    partner_id: int,
+    user: str = Depends(check_admin_auth),
+    db: AsyncSession = Depends(get_db)
+):
+    partner = await db.get(DeliveryPartner, partner_id)
+    if not partner:
+        return RedirectResponse("/admin/delivery?message=Партнера не знайдено", status_code=302)
+        
+    jobs = (await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.partner_id == partner_id)
+        .order_by(DeliveryJob.id.desc())
+    )).scalars().all()
+    
+    return get_history_admin_html(partner.name, "Заклад", jobs)
+
 
 # --- НАЛАШТУВАННЯ PWA ТА МАНІФЕСТИ ---
 @router.post("/admin/delivery/pwa_save")
