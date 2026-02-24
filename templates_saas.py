@@ -1,14 +1,14 @@
 import os
 from typing import List, Dict
 
-# Импорт моделей для типизации (с заглушкой на случай циклических импортов)
+# Імпорт моделей для типізації (з заглушкою на випадок циклічних імпортів)
 try:
     from models import User, Instance
 except ImportError:
     class User: pass
     class Instance: pass
 
-# --- 1. Глобальные стили ---
+# --- 1. Глобальні стилі ---
 GLOBAL_STYLES = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -153,15 +153,15 @@ GLOBAL_STYLES = """
 </style>
 """
 
-# --- 2. Шаблоны страниц Авторизации (ДЛЯ ВЛАДЕЛЬЦЕВ SaaS) ---
+# --- 2. Сторінки Авторизації ---
 
 def get_login_page(message: str = "", msg_type: str = "error"):
-    """HTML для страницы входа /login"""
+    """HTML для сторінки входу /login"""
     return f"""
     <!DOCTYPE html><html lang="uk"><head><title>Вхід</title>{GLOBAL_STYLES}</head>
     <body><div class="container">
         <img src="/static/logo.png" alt="Restify Logo" class="logo-img">
-        <h1>Вхід у Restify</h1>
+        <h1>Вхід у систему</h1>
         <form method="post" action="/token">
             <input type="email" name="username" placeholder="Ваш Email" required>
             <input type="password" name="password" placeholder="Ваш пароль" required>
@@ -254,7 +254,6 @@ def get_register_page():
         let verificationToken = "";
         let pollInterval = null;
 
-        // 1. Ініціалізація: Отримуємо токен і посилання на бота
         async function initVerification() {{
             try {{
                 const res = await fetch('/api/auth/init_verification', {{ method: 'POST' }});
@@ -266,7 +265,6 @@ def get_register_page():
                 const linkBtn = document.getElementById('tg-link');
                 linkBtn.href = data.link;
                 
-                // Коли юзер клікає на посилання -> починаємо опитування
                 linkBtn.addEventListener('click', () => {{
                     document.getElementById('tg-initial').classList.add('hidden');
                     document.getElementById('tg-waiting').classList.remove('hidden');
@@ -276,7 +274,6 @@ def get_register_page():
             }} catch(e) {{ console.error("Error init verification", e); }}
         }}
 
-        // 2. Опитування статусу (Polling)
         function startPolling() {{
             pollInterval = setInterval(async () => {{
                 try {{
@@ -288,10 +285,9 @@ def get_register_page():
                         showSuccess(data.phone);
                     }}
                 }} catch(e) {{ console.error("Polling error", e); }}
-            }}, 2000); // Перевіряємо кожні 2 секунди
+            }}, 2000);
         }}
 
-        // 3. Успіх
         function showSuccess(phone) {{
             document.getElementById('tg-waiting').classList.add('hidden');
             document.getElementById('tg-success').classList.remove('hidden');
@@ -300,13 +296,11 @@ def get_register_page():
             box.classList.add('verified');
             
             document.getElementById('user-phone').innerText = phone;
-            document.getElementById('submitBtn').disabled = false; // Розблокуємо кнопку
+            document.getElementById('submitBtn').disabled = false;
         }}
 
-        // Запускаємо при завантаженні
         initVerification();
 
-        // 4. Стандартна відправка форми
         document.getElementById('registerForm').addEventListener('submit', async (e) => {{
             e.preventDefault();
             const form = e.target;
@@ -342,20 +336,18 @@ def get_register_page():
     </body></html>
     """
 
-# --- 3. Шаблон Дашборда (ДЛЯ ВЛАДЕЛЬЦЕВ SaaS) ---
+# --- 3. Шаблон Дашборда ---
 
 def get_dashboard_html(user: User, instances: List[Instance]):
-    """HTML для Личного Кабинета Клиента SaaS (/dashboard)"""
+    """HTML для Особистого Кабінету (/dashboard)"""
     
     project_cards_html = ""
     if not instances:
         project_cards_html = "<p style='text-align: center; color: var(--text-muted);'>У вас поки немає проектів. Створіть свій перший проект, використовуючи форму вище.</p>"
     else:
-        # Сортируем: сначала новые
         for instance in sorted(instances, key=lambda x: x.created_at, reverse=True):
             status_color = "var(--status-active)" if instance.status == "active" else "var(--status-suspended)"
             
-            # Кнопки управления
             stop_disabled = "disabled" if instance.status != "active" else ""
             start_disabled = "disabled" if instance.status == "active" else ""
 
@@ -396,7 +388,6 @@ def get_dashboard_html(user: User, instances: List[Instance]):
         <title>Особистий кабінет</title>
         {GLOBAL_STYLES}
         <style>
-            /* Перевизначення стилів для дашборда */
             body {{ display: block; padding: 20px; }}
             .dashboard-container {{
                 margin: 0 auto;
@@ -412,7 +403,6 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             .dashboard-header h1 {{ margin: 0; font-size: 1.8rem; }}
             .dashboard-header a {{ margin: 0; font-size: 0.9rem; color: #f87171; }}
             
-            /* Стилі для картки створення */
             .create-card {{
                 background: var(--bg-card); 
                 border: 1px solid var(--border);
@@ -423,7 +413,6 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             .create-card h2 {{ margin-top: 0; }}
             .create-card form {{ text-align: left; }}
             .create-card .btn {{ margin-top: 15px; }}
-            /* Поділ полів токенів */
             .token-fields {{
                 display: grid;
                 grid-template-columns: 1fr;
@@ -433,7 +422,6 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                 .token-fields {{ grid-template-columns: 1fr 1fr; }}
             }}
 
-            /* Стилі для списку проектів */
             .projects-grid {{
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
@@ -584,7 +572,6 @@ def get_dashboard_html(user: User, instances: List[Instance]):
         </div>
 
         <script>
-        // --- JS для форми створення ---
         const form = document.getElementById('createInstanceForm');
         if (form) {{
             form.addEventListener('submit', async (e) => {{
@@ -605,7 +592,6 @@ def get_dashboard_html(user: User, instances: List[Instance]):
                         msgEl.style.display = 'block';
                         msgEl.className = 'message success';
                         msgEl.innerHTML = `✅ <strong>УСПІХ! Ваш сайт створено.</strong><br>Адреса: <strong>${{result.url}}</strong><br>Пароль: <strong>${{result.password}}</strong><br><br>Перезавантажуємо сторінку...`;
-                        // Перезавантажуємо сторінку, щоб показати нову картку
                         setTimeout(() => {{ window.location.reload(); }}, 3000);
                     }} else {{
                         msgEl.style.display = 'block';
@@ -622,7 +608,6 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             }});
         }}
 
-        // --- JS для управління (Stop/Start) ---
         async function controlInstance(instanceId, action) {{
             const stopBtn = document.getElementById(`btn-stop-${{instanceId}}`);
             const startBtn = document.getElementById(`btn-start-${{instanceId}}`);
@@ -682,12 +667,9 @@ def get_dashboard_html(user: User, instances: List[Instance]):
             }}
         }}
 
-        // --- JS: Управління Видаленням ---
         async function deleteInstance(instanceId, subdomain) {{
             const message = `Ви впевнені, що хочете ПОВНІСТЮ видалити проект '${{subdomain}}'?\\n\\nЦя дія незворотна. Контейнер та база даних будуть видалені.`
-            if (!confirm(message)) {{
-                return;
-            }}
+            if (!confirm(message)) return;
 
             const card = document.getElementById(`instance-card-${{instanceId}}`);
             const deleteBtn = card.querySelector('.btn-delete');
@@ -731,10 +713,10 @@ def get_dashboard_html(user: User, instances: List[Instance]):
     </body></html>
     """
 
-# --- 4. Шаблоны Админ-панели (ДЛЯ SUPER ADMIN) ---
+# --- 4. Шаблони Адмін-панелі (ДЛЯ SUPER ADMIN) ---
 
 def get_admin_dashboard_html(clients: list, message: str = "", msg_type: str = "success"):
-    """HTML для Админки (/admin)"""
+    """HTML для Адмінки (/admin)"""
     rows = ""
     for user, instance in clients:
         if instance:
@@ -826,13 +808,12 @@ def get_admin_dashboard_html(clients: list, message: str = "", msg_type: str = "
     """
 
 def get_settings_page_html(config, message=""):
-    """HTML для страницы настроек витрины (/settings)"""
+    """HTML для сторінки налаштувань (/settings)"""
     import os
     
     custom_btn_text = config.get('custom_btn_text', '').replace('"', '&quot;')
     custom_btn_content = config.get('custom_btn_content', '').replace('<', '&lt;').replace('>', '&gt;')
     
-    # Пытаемся прочитать существующий JSON, если он есть
     fb_json_content = ""
     if os.path.exists("firebase_credentials.json"):
         try:
@@ -896,18 +877,17 @@ def get_settings_page_html(config, message=""):
     </body></html>
     """
 
-# --- 5. Landing Page (SaaS + Partner) ---
+# --- 5. ПРОФЕСІЙНА ГОЛОВНА СТОРІНКА (Тільки Кур'єри та Ресторани) ---
 
 def get_landing_page_html(config: Dict[str, str]):
     """
-    ОБНОВЛЕННАЯ Главная страница (Lander).
-    Содержит две основные опции: Создать SaaS проект или Стать Партнером.
+    ПРОФЕСІЙНА ГОЛОВНА СТОРІНКА
     """
     
     custom_button_html = ""
     if config.get("custom_btn_text"):
-        button_text = config["custom_btn_text"].replace('<', '<').replace('>', '>')
-        custom_button_html = f'<a href="#" id="custom-modal-btn">{button_text}</a>'
+        button_text = config["custom_btn_text"].replace('<', '&lt;').replace('>', '&gt;')
+        custom_button_html = f'<a href="#" id="custom-modal-btn" class="nav-link">{button_text}</a>'
         
     modal_content_html = config.get("custom_btn_content", "")
 
@@ -917,116 +897,298 @@ def get_landing_page_html(config: Dict[str, str]):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Restify | Платформа для ресторанів</title>
+    <title>Restify Delivery | Надійна кур'єрська доставка</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root {{ --bg: #0f172a; --text: #f8fafc; --primary: #6366f1; --accent: #ec4899; }}
-        body {{ font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.6; }}
-        .container {{ max-width: 1200px; margin: 0 auto; padding: 0 20px; }}
-        a {{ text-decoration: none; color: inherit; transition: 0.3s; }}
-        
-        /* Nav */
-        .navbar {{ padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.1); position: sticky; top: 0; background: rgba(15,23,42,0.9); backdrop-filter: blur(10px); z-index: 100; }}
-        .nav-inner {{ display: flex; justify-content: space-between; align-items: center; }}
-        .logo {{ font-weight: 800; font-size: 1.5rem; display: flex; align-items: center; gap: 10px; }}
-        .auth-btns {{ display: flex; gap: 15px; }}
-        .btn-sm {{ padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; }}
-        .btn-outline {{ border: 1px solid rgba(255,255,255,0.3); }}
-        .btn-outline:hover {{ border-color: var(--primary); color: var(--primary); }}
-        
-        /* Hero */
-        .hero {{ text-align: center; padding: 100px 0 60px; }}
-        h1 {{ font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 800; margin-bottom: 20px; line-height: 1.1; }}
-        .gradient-text {{ background: linear-gradient(135deg, var(--primary), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
-        .subtitle {{ font-size: 1.2rem; color: #94a3b8; max-width: 600px; margin: 0 auto 50px; }}
-        
-        /* Split Section */
-        .split-container {{ display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; }}
-        @media(max-width: 768px) {{ .split-container {{ grid-template-columns: 1fr; }} }}
-        
-        .choice-card {{ 
-            background: #1e293b; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 40px; 
-            text-align: left; transition: 0.4s; position: relative; overflow: hidden;
+        :root {{ 
+            --bg: #0b0f19; 
+            --bg-card: #161f33;
+            --text: #f8fafc; 
+            --text-muted: #94a3b8;
+            --primary: #6366f1; 
+            --primary-hover: #4f46e5;
+            --accent: #facc15; 
+            --success: #4ade80;
         }}
-        .choice-card:hover {{ transform: translateY(-10px); border-color: var(--primary); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }}
-        .card-icon {{ width: 60px; height: 60px; background: rgba(99, 102, 241, 0.1); color: var(--primary); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; margin-bottom: 25px; }}
-        .choice-card h3 {{ font-size: 1.8rem; margin: 0 0 15px; }}
-        .choice-card p {{ color: #94a3b8; margin-bottom: 30px; min-height: 80px; }}
         
-        .btn-block {{ display: block; width: 100%; text-align: center; padding: 15px; border-radius: 12px; font-weight: 700; background: var(--primary); color: white; border: none; cursor: pointer; }}
-        .btn-block:hover {{ background: #4f46e5; }}
-        .btn-secondary {{ background: #334155; }}
-        .btn-secondary:hover {{ background: #475569; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        html {{ scroll-behavior: smooth; }}
+        body {{ font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; }}
+        a {{ text-decoration: none; color: inherit; transition: 0.3s; }}
+        ul {{ list-style: none; }}
         
-        /* Features List */
-        .features li {{ display: flex; align-items: center; gap: 10px; margin-bottom: 10px; color: #cbd5e1; }}
-        .features i {{ color: var(--accent); }}
+        .container {{ max-width: 1200px; margin: 0 auto; padding: 0 20px; }}
         
-        /* Modal */
-        .modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }}
+        /* --- NAVBAR --- */
+        .navbar {{ position: fixed; top: 0; left: 0; width: 100%; padding: 20px 0; background: rgba(11, 15, 25, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.05); z-index: 1000; transition: 0.3s; }}
+        .nav-inner {{ display: flex; justify-content: space-between; align-items: center; }}
+        .logo {{ font-weight: 800; font-size: 1.5rem; display: flex; align-items: center; gap: 10px; color: white; }}
+        .logo i {{ color: var(--accent); font-size: 1.8rem; }}
+        
+        .nav-links {{ display: flex; gap: 30px; align-items: center; }}
+        .nav-link {{ font-weight: 500; color: var(--text-muted); font-size: 0.95rem; }}
+        .nav-link:hover {{ color: white; }}
+        
+        .auth-btns {{ display: flex; gap: 15px; align-items: center; }}
+        .btn {{ padding: 10px 24px; border-radius: 12px; font-weight: 600; font-size: 0.95rem; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; border: none; }}
+        .btn-outline {{ border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; }}
+        .btn-outline:hover {{ border-color: var(--primary); background: rgba(99, 102, 241, 0.1); }}
+        .btn-primary {{ background: var(--primary); color: white; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4); }}
+        .btn-primary:hover {{ background: var(--primary-hover); transform: translateY(-2px); }}
+        .btn-accent {{ background: var(--accent); color: #0f172a; box-shadow: 0 4px 15px rgba(250, 204, 21, 0.3); }}
+        .btn-accent:hover {{ background: #eab308; transform: translateY(-2px); }}
+
+        /* --- HERO SECTION --- */
+        .hero {{ padding: 160px 0 100px; position: relative; overflow: hidden; }}
+        .hero::before {{ content: ''; position: absolute; top: -20%; left: -10%; width: 500px; height: 500px; background: var(--primary); filter: blur(150px); opacity: 0.2; border-radius: 50%; z-index: -1; }}
+        .hero::after {{ content: ''; position: absolute; bottom: -20%; right: -10%; width: 500px; height: 500px; background: var(--accent); filter: blur(150px); opacity: 0.1; border-radius: 50%; z-index: -1; }}
+        
+        .hero-content {{ text-align: center; max-width: 800px; margin: 0 auto; }}
+        .hero-badge {{ display: inline-block; background: rgba(250, 204, 21, 0.1); border: 1px solid rgba(250, 204, 21, 0.2); color: var(--accent); padding: 6px 16px; border-radius: 30px; font-size: 0.85rem; font-weight: 600; margin-bottom: 20px; letter-spacing: 0.5px; }}
+        .hero h1 {{ font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 800; line-height: 1.1; margin-bottom: 24px; color: white; }}
+        .hero p {{ font-size: 1.2rem; color: var(--text-muted); margin-bottom: 40px; }}
+        
+        .hero-actions {{ display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }}
+        
+        /* --- STATS BAR --- */
+        .stats-bar {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); padding: 40px; border-radius: 24px; margin-top: -40px; position: relative; z-index: 10; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }}
+        .stat-item {{ text-align: center; border-right: 1px solid rgba(255,255,255,0.05); }}
+        .stat-item:last-child {{ border-right: none; }}
+        .stat-val {{ font-size: 2.5rem; font-weight: 800; color: white; margin-bottom: 5px; }}
+        .stat-val span {{ color: var(--primary); }}
+        .stat-label {{ color: var(--text-muted); font-size: 0.95rem; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }}
+
+        /* --- SPLIT SECTION (RESTAURANTS & COURIERS) --- */
+        .section {{ padding: 120px 0; }}
+        .section-header {{ text-align: center; margin-bottom: 60px; }}
+        .section-header h2 {{ font-size: 2.5rem; color: white; margin-bottom: 15px; }}
+        
+        .split-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }}
+        
+        .service-card {{ background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); border-radius: 30px; padding: 50px; position: relative; overflow: hidden; transition: 0.4s; }}
+        .service-card:hover {{ transform: translateY(-10px); border-color: rgba(255,255,255,0.1); }}
+        
+        .sc-icon {{ width: 80px; height: 80px; border-radius: 24px; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; margin-bottom: 30px; }}
+        .sc-partner .sc-icon {{ background: rgba(99, 102, 241, 0.1); color: var(--primary); }}
+        .sc-courier .sc-icon {{ background: rgba(250, 204, 21, 0.1); color: var(--accent); }}
+        
+        .service-card h3 {{ font-size: 2rem; color: white; margin-bottom: 20px; }}
+        .service-card p {{ color: var(--text-muted); font-size: 1.1rem; margin-bottom: 30px; }}
+        
+        .feature-list li {{ display: flex; align-items: center; gap: 15px; margin-bottom: 15px; font-size: 1.05rem; color: #cbd5e1; }}
+        .feature-list i {{ font-size: 1.2rem; }}
+        .sc-partner .feature-list i {{ color: var(--primary); }}
+        .sc-courier .feature-list i {{ color: var(--accent); }}
+        
+        .service-actions {{ margin-top: 40px; display: flex; gap: 15px; }}
+
+        /* --- HOW IT WORKS --- */
+        .process-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; position: relative; }}
+        .process-step {{ text-align: center; position: relative; z-index: 2; }}
+        .step-icon {{ width: 80px; height: 80px; background: var(--bg-card); border: 2px solid rgba(255,255,255,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2rem; color: white; margin: 0 auto 20px; transition: 0.3s; }}
+        .process-step:hover .step-icon {{ background: var(--primary); border-color: var(--primary); transform: scale(1.1); }}
+        .process-step h4 {{ font-size: 1.2rem; color: white; margin-bottom: 10px; }}
+        .process-step p {{ color: var(--text-muted); font-size: 0.9rem; }}
+        
+        .process-grid::before {{ content: ''; position: absolute; top: 40px; left: 10%; right: 10%; height: 2px; background: rgba(255,255,255,0.1); z-index: 1; }}
+
+        /* --- FOOTER --- */
+        footer {{ background: var(--bg-card); padding: 60px 0 30px; border-top: 1px solid rgba(255,255,255,0.05); text-align: center; }}
+        .footer-logo {{ font-size: 1.8rem; font-weight: 800; color: white; display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }}
+        .footer-logo i {{ color: var(--accent); }}
+
+        /* --- MODAL --- */
+        .modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }}
         .modal-overlay.visible {{ display: flex; }}
-        .modal-content {{ background: #1e293b; padding: 40px; border-radius: 20px; max-width: 600px; width: 90%; color: #fff; position: relative; }}
-        .close-btn {{ position: absolute; top: 20px; right: 20px; cursor: pointer; font-size: 1.5rem; color: #94a3b8; }}
+        .modal-content {{ background: var(--bg-card); padding: 40px; border-radius: 20px; max-width: 600px; width: 90%; color: #fff; position: relative; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 25px 50px rgba(0,0,0,0.5); }}
+        .close-btn {{ position: absolute; top: 20px; right: 20px; cursor: pointer; font-size: 1.5rem; color: var(--text-muted); transition: 0.2s; }}
+        .close-btn:hover {{ color: white; transform: rotate(90deg); }}
+
+        /* --- RESPONSIVE --- */
+        @media (max-width: 992px) {{
+            .split-grid {{ grid-template-columns: 1fr; }}
+            .stats-bar {{ grid-template-columns: 1fr; gap: 40px; padding: 30px; margin-top: 40px; }}
+            .stat-item {{ border-right: none; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 20px; }}
+            .stat-item:last-child {{ border-bottom: none; padding-bottom: 0; }}
+            .process-grid {{ grid-template-columns: repeat(2, 1fr); gap: 40px; }}
+            .process-grid::before {{ display: none; }}
+        }}
+        @media (max-width: 768px) {{
+            .nav-links {{ display: none; }}
+            .auth-btns {{ display: none; }}
+            .mobile-menu-btn {{ display: block; color: white; font-size: 1.5rem; background: none; border: none; }}
+            .hero {{ padding: 120px 0 60px; }}
+            .service-actions {{ flex-direction: column; }}
+            .btn {{ width: 100%; justify-content: center; }}
+        }}
+        @media (min-width: 769px) {{
+            .mobile-menu-btn {{ display: none; }}
+        }}
     </style>
 </head>
 <body>
 
     <nav class="navbar">
         <div class="container nav-inner">
-            <div class="logo"><img src="/static/logo.png" height="40" style="filter:invert(1)"> Restify</div>
-            <div class="auth-btns">
-                <a href="/login" class="btn-sm btn-outline">Вхід (SaaS)</a>
-                <a href="/partner/login" class="btn-sm btn-outline" style="border-color: var(--accent); color: var(--accent);">Вхід (Партнер)</a>
+            <a href="/" class="logo"><i class="fa-solid fa-motorcycle"></i> Restify</a>
+            
+            <div class="nav-links">
+                <a href="#restaurants" class="nav-link">Для закладів</a>
+                <a href="#couriers" class="nav-link">Для кур'єрів</a>
+                <a href="#how-it-works" class="nav-link">Як це працює</a>
+                {custom_button_html}
             </div>
+
+            <div class="auth-btns">
+                <a href="/partner/login" class="btn btn-outline"><i class="fa-solid fa-store"></i> Вхід для закладів</a>
+                <a href="/courier/login" class="btn btn-primary"><i class="fa-solid fa-helmet-safety"></i> Вхід кур'єра</a>
+            </div>
+            
+            <button class="mobile-menu-btn"><i class="fa-solid fa-bars"></i></button>
         </div>
     </nav>
 
-    <div class="container hero">
-        <h1>Оберіть свій формат <br><span class="gradient-text">роботи з доставкою</span></h1>
-        <p class="subtitle">Ми пропонуємо два рішення: повна автоматизація закладу "під ключ" або просто швидкий виклик наших кур'єрів.</p>
-        
-        <div class="split-container">
-            <div class="choice-card">
-                <div class="card-icon"><i class="fa-solid fa-rocket"></i></div>
-                <h3>Власний Сайт + Бот</h3>
-                <p>Повне рішення: свій сайт доставки, Telegram-бот, QR-меню в залі, CRM система та адмін-панель. Ідеально для побудови бренду.</p>
-                <ul class="features">
-                    <li><i class="fa-solid fa-check"></i> Персональний домен та сайт</li>
-                    <li><i class="fa-solid fa-check"></i> Власна база клієнтів</li>
-                    <li><i class="fa-solid fa-check"></i> QR-меню та виклик офіціанта</li>
-                </ul>
-                <a href="/register" class="btn-block">Створити проект (SaaS)</a>
+    <section class="hero">
+        <div class="container hero-content">
+            <div class="hero-badge">B2B Доставка для HoReCa</div>
+            <h1>Швидка доставка <br>для вашого ресторану</h1>
+            <p>Викликайте надійних кур'єрів в 1 клік. Ніякої абонплати за софт — ви платите лише за успішно виконані замовлення. Трекінг на карті та зручні розрахунки.</p>
+            
+            <div class="hero-actions">
+                <a href="/partner/register" class="btn btn-primary" style="padding: 15px 30px; font-size: 1.1rem;">Підключити заклад</a>
+                <a href="/courier/register" class="btn btn-outline" style="padding: 15px 30px; font-size: 1.1rem; border-color: rgba(255,255,255,0.4);">Стати кур'єром</a>
             </div>
+        </div>
+    </section>
 
-            <div class="choice-card" style="border-color: rgba(236, 72, 153, 0.3);">
-                <div class="card-icon" style="background: rgba(236, 72, 153, 0.1); color: var(--accent);"><i class="fa-solid fa-motorcycle"></i></div>
-                <h3>Тільки Кур'єри</h3>
-                <p>Вам не потрібен сайт? Просто викликайте наших кур'єрів, коли у вас з'являється замовлення. Швидка реєстрація та прозорі тарифи.</p>
-                <ul class="features">
-                    <li><i class="fa-solid fa-check"></i> Виклик кур'єра в 1 клік</li>
-                    <li><i class="fa-solid fa-check"></i> Без абонплати за софт</li>
-                    <li><i class="fa-solid fa-check"></i> Трекінг доставки</li>
-                </ul>
-                <a href="/partner/register" class="btn-block btn-secondary">Стати Партнером</a>
+    <div class="container">
+        <div class="stats-bar">
+            <div class="stat-item">
+                <div class="stat-val">0<span>₴</span></div>
+                <div class="stat-label">Абонплата за систему</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-val">>98<span>%</span></div>
+                <div class="stat-label">Вчасних доставок</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-val">Live<span>📍</span></div>
+                <div class="stat-label">Трекінг кур'єра на карті</div>
             </div>
         </div>
     </div>
 
-    <footer style="text-align:center; padding: 40px; color: #64748b; font-size: 0.9rem;">
-        © 2025 Restify. {custom_button_html}
+    <section class="section" id="restaurants">
+        <div class="container">
+            <div class="split-grid">
+                
+                <div class="service-card sc-partner">
+                    <div class="sc-icon"><i class="fa-solid fa-store"></i></div>
+                    <h3>Для Ресторанів та Кафе</h3>
+                    <p>Передайте логістику професіоналам. Зручний веб-кабінет для менеджерів та миттєвий пошук вільних кур'єрів поблизу.</p>
+                    
+                    <ul class="feature-list">
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Швидкий виклик:</b> Створення заявки за 15 секунд.</li>
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Готівка та Викуп:</b> Кур'єр може викупити замовлення за свої кошти.</li>
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Контроль якості:</b> Відгуки та рейтинги кур'єрів.</li>
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Чат та Дзвінки:</b> Прямий зв'язок з кур'єром у системі.</li>
+                    </ul>
+                    
+                    <div class="service-actions">
+                        <a href="/partner/register" class="btn btn-primary">Почати роботу</a>
+                        <a href="/partner/login" class="btn btn-outline">Увійти в кабінет</a>
+                    </div>
+                </div>
+
+                <div class="service-card sc-courier" id="couriers">
+                    <div class="sc-icon"><i class="fa-solid fa-helmet-safety"></i></div>
+                    <h3>Для Кур'єрів</h3>
+                    <p>Доставляйте замовлення з кращих закладів міста. Заробляйте реальні гроші з гнучким графіком та зручним PWA додатком.</p>
+                    
+                    <ul class="feature-list">
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Вільний графік:</b> Працюйте, коли вам зручно.</li>
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Високий дохід:</b> 100% оплати за доставку — ваша.</li>
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Зручний додаток:</b> Вбудований навігатор та чат.</li>
+                        <li><i class="fa-solid fa-circle-check"></i> <b>Бонуси за викуп:</b> Отримуйте більше за замовлення з викупом.</li>
+                    </ul>
+                    
+                    <div class="service-actions">
+                        <a href="/courier/register" class="btn btn-accent">Стати кур'єром</a>
+                        <a href="/courier/login" class="btn btn-outline">Увійти в додаток</a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <section class="section" id="how-it-works" style="background: rgba(255,255,255,0.02); border-top: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <div class="container">
+            <div class="section-header">
+                <h2>Як це працює?</h2>
+                <p style="color: var(--text-muted); font-size: 1.1rem;">Прозорий процес від кухні до дверей клієнта</p>
+            </div>
+            
+            <div class="process-grid">
+                <div class="process-step">
+                    <div class="step-icon"><i class="fa-solid fa-file-invoice"></i></div>
+                    <h4>1. Заявка</h4>
+                    <p>Менеджер закладу вводить адресу та суму замовлення в особистому кабінеті.</p>
+                </div>
+                <div class="process-step">
+                    <div class="step-icon"><i class="fa-solid fa-satellite-dish"></i></div>
+                    <h4>2. Пошук</h4>
+                    <p>Система миттєво відправляє Push-сповіщення найближчим вільним кур'єрам.</p>
+                </div>
+                <div class="process-step">
+                    <div class="step-icon"><i class="fa-solid fa-box-open"></i></div>
+                    <h4>3. Пікап</h4>
+                    <p>Кур'єр прибуває в заклад, розраховується (якщо це викуп) та забирає пакунок.</p>
+                </div>
+                <div class="process-step">
+                    <div class="step-icon"><i class="fa-solid fa-map-location-dot"></i></div>
+                    <h4>4. Доставка</h4>
+                    <p>Клієнт отримує їжу, а заклад бачить зміну статусу на "Доставлено" в реальному часі.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="footer-logo"><i class="fa-solid fa-motorcycle"></i> Restify Delivery</div>
+            <p style="color: var(--text-muted); margin-bottom: 20px;">Надійний логістичний партнер для вашого ресторанного бізнесу.</p>
+            <div style="display: flex; justify-content: center; gap: 20px; font-size: 0.9rem; color: #64748b;">
+                <a href="/partner/register">Ресторанам</a>
+                <a href="/courier/register">Кур'єрам</a>
+                {custom_button_html}
+            </div>
+            <p style="color: #475569; font-size: 0.8rem; margin-top: 40px;">© 2026 Restify. Всі права захищені.</p>
+        </div>
     </footer>
 
     <div id="customModal" class="modal-overlay">
         <div class="modal-content">
-            <span class="close-btn" onclick="document.getElementById('customModal').classList.remove('visible')">×</span>
-            <div class="modal-body">{modal_content_html}</div>
+            <span class="close-btn" onclick="document.getElementById('customModal').classList.remove('visible')"><i class="fa-solid fa-xmark"></i></span>
+            <div class="modal-body" style="line-height: 1.8;">
+                {modal_content_html}
+            </div>
         </div>
     </div>
 
     <script>
+        // Modal Logic
         const btn = document.getElementById('custom-modal-btn');
-        if(btn) btn.onclick = (e) => {{ e.preventDefault(); document.getElementById('customModal').classList.add('visible'); }};
+        if(btn) btn.onclick = (e) => {{ 
+            e.preventDefault(); 
+            document.getElementById('customModal').classList.add('visible'); 
+        }};
+        
+        // Mobile Menu Alert
+        document.querySelector('.mobile-menu-btn').addEventListener('click', () => {{
+            alert('Будь ласка, використовуйте кнопки "Вхід" на сторінці для доступу до системи.');
+        }});
     </script>
 </body>
 </html>
