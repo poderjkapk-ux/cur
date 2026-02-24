@@ -531,7 +531,7 @@ async def update_fcm_token(
     await db.commit()
     return JSONResponse({"status": "updated"})
 
-# --- Helper for Push ---
+# --- Helper for Push Couriers ---
 async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str, job_id: int = None, fee: float = None):
     if not courier_tokens: return
     try:
@@ -560,6 +560,29 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
             logging.info(f"Push sent to {token}")
     except Exception as e:
         logging.error(f"Push Error: {e}")
+
+# --- Helper for Push Partners ---
+async def send_push_to_partners(partner_tokens: List[str], title: str, body: str, url: str = "/partner/dashboard"):
+    if not partner_tokens: return
+    try:
+        for token in partner_tokens:
+            msg = messaging.Message(
+                token=token,
+                data={
+                    "title": title,
+                    "body": body,
+                    "url": url
+                },
+                android=messaging.AndroidConfig(priority='high', ttl=0),
+                apns=messaging.APNSConfig(
+                    headers={'apns-priority': '10'},
+                    payload=messaging.APNSPayload(aps=messaging.Aps(content_available=True))
+                )
+            )
+            messaging.send(msg)
+            logging.info(f"Push sent to partner {token}")
+    except Exception as e:
+        logging.error(f"Partner Push Error: {e}")
 
 # --- SERVICE WORKER ---
 @app.get("/firebase-messaging-sw.js")
@@ -868,9 +891,12 @@ async def courier_arrived_pickup(
     })
     
     partner = await db.get(DeliveryPartner, job.partner_id)
-    if partner and partner.telegram_chat_id:
-        tg_text = f"👋 <b>Кур'єр {courier.name} прибув!</b>\nЗамовлення #{job.id}. Видайте пакунок."
-        asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+    if partner:
+        if partner.telegram_chat_id:
+            tg_text = f"👋 <b>Кур'єр {courier.name} прибув!</b>\nЗамовлення #{job.id}. Видайте пакунок."
+            asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+        if partner.fcm_token:
+            await send_push_to_partners([partner.fcm_token], f"Кур'єр прибув!", f"Кур'єр {courier.name} чекає на замовлення #{job.id}")
     
     return JSONResponse({"status": "ok"})
 
@@ -895,33 +921,42 @@ async def update_job_status(
         })
         
         partner = await db.get(DeliveryPartner, job.partner_id)
-        if partner and partner.telegram_chat_id:
-            tg_text = f"💰 <b>Замовлення #{job.id}</b>\n{msg_text}"
-            asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+        if partner:
+            if partner.telegram_chat_id:
+                tg_text = f"💰 <b>Замовлення #{job.id}</b>\n{msg_text}"
+                asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+            if partner.fcm_token:
+                await send_push_to_partners([partner.fcm_token], "Повернення коштів", msg_text)
     else:
         job.status = status
         if status == "picked_up": 
             job.picked_up_at = datetime.utcnow()
             msg_text = f"✅ Кур'єр {courier.name} забрав замовлення."
+            status_text = "picked_up"
             color = "#bfdbfe" 
         elif status == "delivered": 
             job.delivered_at = datetime.utcnow()
             msg_text = f"🎉 Замовлення #{job.id} успішно доставлено!"
+            status_text = "delivered"
             color = "#bbf7d0"
         else:
              msg_text = f"Статус замовлення #{job.id}: {status}"
+             status_text = status
              color = "#e2e8f0"
 
         await manager.notify_partner(job.partner_id, {
             "type": "order_update", "job_id": job.id, "status": status,
-            "status_text": status, "status_color": color,
+            "status_text": status_text, "status_color": color,
             "courier_name": courier.name, "message": msg_text
         })
         
         partner = await db.get(DeliveryPartner, job.partner_id)
-        if partner and partner.telegram_chat_id and status in ["picked_up", "delivered"]:
-            tg_text = f"📦 <b>Замовлення #{job.id}</b>\n{msg_text}\nКур'єр: {courier.name}"
-            asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+        if partner:
+            if partner.telegram_chat_id and status in ["picked_up", "delivered"]:
+                tg_text = f"📦 <b>Замовлення #{job.id}</b>\n{msg_text}\nКур'єр: {courier.name}"
+                asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+            if partner.fcm_token:
+                await send_push_to_partners([partner.fcm_token], f"Статус: {status_text}", msg_text)
 
     await db.commit()
     return JSONResponse({"status": "ok", "new_status": job.status})
@@ -962,6 +997,9 @@ async def courier_accept_order(
     if partner.telegram_chat_id:
         tg_text = f"🚴 <b>Замовлення #{job.id} прийнято!</b>\nКур'єр: {courier.name}\nТелефон: {courier.phone}"
         asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+    
+    if partner.fcm_token:
+        await send_push_to_partners([partner.fcm_token], "Замовлення прийнято!", f"🚴 Кур'єр {courier.name} прямує до вас")
 
     return JSONResponse({"status": "ok", "message": "Замовлення прийнято!"})
 
@@ -1003,7 +1041,14 @@ async def send_chat_message(
     msg = ChatMessage(job_id=job_id, sender_role=role, message=message)
     db.add(msg)
     
-    job = await db.get(DeliveryJob, job_id)
+    # Завантажуємо замовлення разом із партнером та кур'єром
+    result = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+    
     if job:
         ws_msg = {
             "type": "chat_message",
@@ -1013,10 +1058,29 @@ async def send_chat_message(
             "time": datetime.utcnow().strftime("%H:%M")
         }
         
-        if role == 'partner' and job.courier_id:
+        # Якщо пише ЗАКЛАД (partner) -> сповіщаємо КУР'ЄРА
+        if role == 'partner' and job.courier_id and job.courier:
             await manager.notify_courier(job.courier_id, ws_msg)
-        elif role == 'courier':
+            
+            tg_text = f"💬 <b>Повідомлення від закладу ({job.partner.name}):</b>\n{message}"
+            if job.courier.telegram_chat_id:
+                asyncio.create_task(bot_service.send_telegram_message(job.courier.telegram_chat_id, tg_text))
+            
+            if job.courier.fcm_token:
+                await send_push_to_couriers([job.courier.fcm_token], f"Чат: {job.partner.name}", message, job_id=job_id)
+
+        # Якщо пише КУР'ЄР (courier) -> сповіщаємо ЗАКЛАД
+        elif role == 'courier' and job.partner:
             await manager.notify_partner(job.partner_id, ws_msg)
+            
+            courier_name = job.courier.name if job.courier else "Кур'єр"
+            tg_text = f"💬 <b>Повідомлення від {courier_name}:</b>\n{message}\nЗамовлення #{job_id}"
+            
+            if job.partner.telegram_chat_id:
+                asyncio.create_task(bot_service.send_telegram_message(job.partner.telegram_chat_id, tg_text))
+                
+            if job.partner.fcm_token:
+                await send_push_to_partners([job.partner.fcm_token], f"Чат від {courier_name}", message)
             
     await db.commit()
     return JSONResponse({"status": "ok"})
@@ -1036,6 +1100,14 @@ async def get_current_partner(request: Request, db: AsyncSession = Depends(get_d
         if hasattr(partner, 'is_active') and not partner.is_active: raise HTTPException(status_code=403, detail="Banned")
         return partner
     except Exception: raise HTTPException(status_code=401)
+
+@app.post("/api/partner/fcm_token")
+async def update_partner_fcm_token(
+    token: str = Form(...), partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)
+):
+    partner.fcm_token = token
+    await db.commit()
+    return JSONResponse({"status": "updated"})
 
 @app.get("/partner/login", response_class=HTMLResponse)
 async def partner_login_page(message: str = ""):
@@ -1228,7 +1300,14 @@ async def partner_order_ready(
     await db.commit()
     
     if job.courier_id:
+        courier = await db.get(Courier, job.courier_id)
         await manager.notify_courier(job.courier_id, {"type": "job_ready", "message": "🍳 Замовлення готове!"})
+        
+        if courier:
+            if courier.telegram_chat_id:
+                asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, f"🍳 <b>Замовлення #{job.id} готове!</b>\nМожете забирати."))
+            if courier.fcm_token:
+                await send_push_to_couriers([courier.fcm_token], "Замовлення готове!", "Заклад очікує на вас.", job_id=job.id)
         
     return JSONResponse({"status": "ok"})
 

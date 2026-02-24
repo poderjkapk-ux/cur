@@ -118,6 +118,10 @@ class DeliveryPartner(Base):
     # ID чату в Telegram для сповіщень
     telegram_chat_id = Column(String(50), nullable=True, unique=True)
 
+    # --- НОВЕ ПОЛЕ ДЛЯ PUSH-СПОВІЩЕНЬ (FIREBASE) ДЛЯ ПАРТНЕРА ---
+    fcm_token = Column(String(255), nullable=True)
+    # ------------------------------------------------------------
+
     is_active = Column(Boolean, default=True) 
     
     created_at = Column(DateTime, default=datetime.utcnow)
