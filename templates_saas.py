@@ -811,8 +811,8 @@ def get_settings_page_html(config, message=""):
     """HTML для сторінки налаштувань (/settings)"""
     import os
     
-    custom_btn_text = config.get('custom_btn_text', '').replace('"', '&quot;')
-    custom_btn_content = config.get('custom_btn_content', '').replace('<', '&lt;').replace('>', '&gt;')
+    custom_btn_text = str(config.get('custom_btn_text', '')).replace('"', '&quot;')
+    custom_btn_content = str(config.get('custom_btn_content', '')).replace('<', '&lt;').replace('>', '&gt;')
     
     fb_json_content = ""
     if os.path.exists("firebase_credentials.json"):
@@ -886,10 +886,10 @@ def get_landing_page_html(config: Dict[str, str]):
     
     custom_button_html = ""
     if config.get("custom_btn_text"):
-        button_text = config["custom_btn_text"].replace('<', '&lt;').replace('>', '&gt;')
+        button_text = str(config["custom_btn_text"]).replace('<', '&lt;').replace('>', '&gt;')
         custom_button_html = f'<a href="#" id="custom-modal-btn" class="nav-link">{button_text}</a>'
         
-    modal_content_html = config.get("custom_btn_content", "")
+    modal_content_html = str(config.get("custom_btn_content", ""))
 
     return f"""
 <!DOCTYPE html>

@@ -9,6 +9,9 @@ from models import async_session_maker, DeliveryJob, Courier, DeliveryPartner
 # Импортируем сервис бота для отправки сообщений
 import bot_service
 
+# ИМПОРТ FCM ДЛЯ ОТПРАВКИ ПУШЕЙ ИЗ ФОНОВОЙ ЗАДАЧИ
+from firebase_admin import messaging
+
 # Получаем ID админа для тревожных уведомлений (берем из окружения, как в app.py)
 ADMIN_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
@@ -45,22 +48,52 @@ async def monitor_stale_orders(ws_manager):
                 jobs_5 = (await db.execute(query_5)).scalars().all()
                 
                 if jobs_5:
-                    # Находим всех курьеров, которые онлайн и у которых есть Telegram
+                    # Находим всех курьеров, которые онлайн
                     online_couriers = (await db.execute(
-                        select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id.is_not(None))
+                        select(Courier).where(Courier.is_online == True)
                     )).scalars().all()
                     
                     for job in jobs_5:
-                        msg_text = (
-                            f"🔥 <b>ГАРЯЧЕ ЗАМОВЛЕННЯ!</b>\n"
+                        msg_title = "🔥 ГАРЯЧЕ ЗАМОВЛЕННЯ!"
+                        
+                        # Текст для Telegram
+                        msg_body_tg = (
                             f"Чекає вже 5 хвилин! Хто забере?\n\n"
                             f"💵 <b>{job.delivery_fee} грн</b>\n"
                             f"📍 Куди: {job.dropoff_address}\n"
                             f"🚀 <i>Поспішайте прийняти в додатку!</i>"
                         )
-                        # Рассылаем всем свободным курьерам в личку
+                        
+                        # Текст для Push-уведомления
+                        msg_body_push = f"💵 {job.delivery_fee} грн. Ніхто не забирає вже 5 хвилин!"
+
                         for courier in online_couriers:
-                            await bot_service.send_telegram_message(courier.telegram_chat_id, msg_text)
+                            # 1. Отправка в Telegram (если привязан)
+                            if courier.telegram_chat_id:
+                                await bot_service.send_telegram_message(
+                                    courier.telegram_chat_id, 
+                                    f"🔥 <b>ГАРЯЧЕ ЗАМОВЛЕННЯ!</b>\n{msg_body_tg}"
+                                )
+                            
+                            # 2. Отправка Firebase Push Notification (Android / PWA)
+                            if courier.fcm_token:
+                                try:
+                                    push_msg = messaging.Message(
+                                        token=courier.fcm_token,
+                                        notification=messaging.Notification(
+                                            title=msg_title, 
+                                            body=msg_body_push
+                                        ),
+                                        data={
+                                            "url": "/courier/app", 
+                                            "job_id": str(job.id), 
+                                            "fee": str(job.delivery_fee)
+                                        },
+                                        android=messaging.AndroidConfig(priority='high', ttl=0)
+                                    )
+                                    messaging.send(push_msg)
+                                except Exception as e:
+                                    logging.error(f"FCM Monitor Error (Courier {courier.id}): {e}")
                         
                         logging.info(f"Order #{job.id}: Sent HOT notification to {len(online_couriers)} couriers.")
 
@@ -80,17 +113,37 @@ async def monitor_stale_orders(ws_manager):
                 jobs_10 = (await db.execute(query_10)).scalars().all()
                 
                 for job in jobs_10:
-                    # 2.1. Уведомление Партнеру (Ресторану)
-                    if job.partner and job.partner.telegram_chat_id:
-                        partner_msg = (
-                            f"⚠️ <b>Кур'єра не знайдено (вже 10 хв)!</b>\n\n"
-                            f"Замовлення #{job.id} на адресу: {job.dropoff_address}.\n"
-                            f"Поточна ціна доставки: {job.delivery_fee} грн.\n\n"
-                            f"💡 <b>Рекомендуємо збільшити ціну доставки, щоб зацікавити кур'єрів!</b>"
-                        )
-                        await bot_service.send_telegram_message(job.partner.telegram_chat_id, partner_msg)
+                    if job.partner:
+                        # 2.1. Уведомление Партнеру (Ресторану) в Telegram
+                        if job.partner.telegram_chat_id:
+                            partner_msg = (
+                                f"⚠️ <b>Кур'єра не знайдено (вже 10 хв)!</b>\n\n"
+                                f"Замовлення #{job.id} на адресу: {job.dropoff_address}.\n"
+                                f"Поточна ціна доставки: {job.delivery_fee} грн.\n\n"
+                                f"💡 <b>Рекомендуємо збільшити ціну доставки, щоб зацікавити кур'єрів!</b>"
+                            )
+                            await bot_service.send_telegram_message(job.partner.telegram_chat_id, partner_msg)
+                        
+                        # 2.2. Уведомление Партнеру через Firebase Push Notification
+                        if job.partner.fcm_token:
+                            try:
+                                push_msg = messaging.Message(
+                                    token=job.partner.fcm_token,
+                                    notification=messaging.Notification(
+                                        title="⚠️ Увага: Затримка замовлення",
+                                        body=f"Замовлення #{job.id} не можуть забрати вже 10 хв. Збільште ціну доставки!"
+                                    ),
+                                    data={
+                                        "url": "/partner/dashboard", 
+                                        "job_id": str(job.id)
+                                    },
+                                    android=messaging.AndroidConfig(priority='high', ttl=0)
+                                )
+                                messaging.send(push_msg)
+                            except Exception as e:
+                                logging.error(f"FCM Monitor Error (Partner {job.partner.id}): {e}")
                     
-                    # 2.2. Уведомление Главному Админу
+                    # 2.3. Уведомление Главному Админу в Telegram
                     if ADMIN_CHAT_ID:
                         admin_msg = (
                             f"🆘 <b>УВАГА! Проблемне замовлення!</b>\n"

@@ -1101,6 +1101,133 @@ async def get_current_partner(request: Request, db: AsyncSession = Depends(get_d
         return partner
     except Exception: raise HTTPException(status_code=401)
 
+# ==========================================
+# НАТИВНЫЕ JSON API ДЛЯ ANDROID ПРИЛОЖЕНИЯ ПАРТНЕРА
+# ==========================================
+
+@app.post("/api/partner/login_native")
+async def api_partner_login_native(email: str = Form(...), password: str = Form(...), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DeliveryPartner).where(DeliveryPartner.email == email))
+    partner = result.scalar_one_or_none()
+    
+    if not partner or not auth.verify_password(password, partner.hashed_password):
+        return JSONResponse({"status": "error", "message": "Невірний логін/пароль"}, status_code=401)
+    
+    token = auth.create_access_token(data={"sub": f"partner:{partner.id}"})
+    resp = JSONResponse({"status": "ok", "partner_name": partner.name})
+    resp.set_cookie(key="partner_token", value=token, httponly=True, max_age=604800, samesite="lax")
+    return resp
+
+@app.get("/api/partner/orders_native")
+async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(DeliveryJob).options(joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.partner_id == partner.id).order_by(DeliveryJob.id.desc())
+    )
+    jobs = result.scalars().all()
+    
+    data = []
+    for j in jobs:
+        c_data = None
+        if j.courier:
+            c_data = {
+                "name": j.courier.name, "phone": j.courier.phone,
+                "rating": j.courier.avg_rating or 5.0, "rating_count": j.courier.rating_count or 0
+            }
+        data.append({
+            "id": j.id, "status": j.status, 
+            "created_at": j.created_at.strftime('%H:%M'),
+            "dropoff_address": j.dropoff_address,
+            "order_price": j.order_price, "delivery_fee": j.delivery_fee,
+            "payment_type": j.payment_type, "is_return_required": j.is_return_required,
+            "is_ready": bool(j.ready_at) or j.status == 'ready',
+            "courier": c_data
+        })
+    return JSONResponse(data)
+
+@app.post("/api/partner/create_order_native")
+async def api_create_order_native(
+    dropoff_address: str = Form(...), customer_phone: str = Form(...), 
+    order_price: float = Form(0.0), delivery_fee: float = Form(50.0), 
+    comment: str = Form(""), payment_type: str = Form("prepaid"), 
+    is_return_required: bool = Form(False),
+    db: AsyncSession = Depends(get_db), partner: DeliveryPartner = Depends(get_current_partner)
+):
+    client_lat, client_lon = await geocode_address(dropoff_address)
+    rest_lat, rest_lon = await geocode_address(partner.address)
+
+    full_comment = comment
+    if is_return_required:
+        full_comment = f"⚠️ ПОВЕРНЕННЯ КОШТІВ! {full_comment}"
+    if payment_type == 'buyout':
+        full_comment = f"💰 ВИКУП ({order_price} грн)! {full_comment}"
+
+    job = DeliveryJob(
+        partner_id=partner.id, dropoff_address=dropoff_address, 
+        dropoff_lat=client_lat, dropoff_lon=client_lon, 
+        customer_phone=customer_phone, order_price=order_price, delivery_fee=delivery_fee,
+        comment=full_comment, payment_type=payment_type,
+        is_return_required=is_return_required, status="pending"
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    busy_couriers_res = await db.execute(
+        select(DeliveryJob.courier_id)
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        .where(DeliveryJob.courier_id.is_not(None))
+    )
+    busy_ids = set(busy_couriers_res.scalars().all())
+
+    res = await db.execute(select(Courier).where(Courier.is_online == True))
+    online_couriers = res.scalars().all()
+    
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(payment_type, "Оплата")
+
+    async def notify_courier_async(courier):
+        is_location_fresh = True
+        if courier.last_seen:
+            diff = datetime.utcnow() - courier.last_seen
+            if diff.total_seconds() > 1800: 
+                is_location_fresh = False
+        
+        dist_to_rest = None
+        if is_location_fresh and courier.lat and courier.lon and rest_lat and rest_lon:
+            dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
+        
+        if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
+            return 
+            
+        display_dist = dist_to_rest if (is_location_fresh and dist_to_rest is not None) else "?"
+
+        personal_data = {
+            "id": job.id, "address": dropoff_address, 
+            "restaurant": partner.name, "restaurant_address": partner.address,
+            "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
+            "dist_to_rest": display_dist,
+            "is_return": is_return_required,
+            "payment_type": payment_type
+        }
+        
+        await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
+        
+        if courier.fcm_token:
+            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн", job_id=job.id, fee=delivery_fee)
+
+    for c in online_couriers:
+        if c.id in busy_ids: continue
+        asyncio.create_task(notify_courier_async(c))
+
+    res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
+    for c in res_tg.scalars().all():
+        if c.id in busy_ids: continue
+        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {delivery_fee} грн\n📍 {partner.name}"))
+
+    return JSONResponse({"status": "ok", "job_id": job.id})
+
+# ==========================================
+
 @app.post("/api/partner/fcm_token")
 async def update_partner_fcm_token(
     token: str = Form(...), partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)
