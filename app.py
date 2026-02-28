@@ -562,17 +562,21 @@ async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str
         logging.error(f"Push Error: {e}")
 
 # --- Helper for Push Partners ---
-async def send_push_to_partners(partner_tokens: List[str], title: str, body: str, url: str = "/partner/dashboard"):
+async def send_push_to_partners(partner_tokens: List[str], title: str, body: str, url: str = "/partner/dashboard", job_id: int = None):
     if not partner_tokens: return
     try:
         for token in partner_tokens:
+            payload_data = {
+                "title": title,
+                "body": body,
+                "url": url
+            }
+            if job_id is not None:
+                payload_data["job_id"] = str(job_id)
+
             msg = messaging.Message(
                 token=token,
-                data={
-                    "title": title,
-                    "body": body,
-                    "url": url
-                },
+                data=payload_data,
                 android=messaging.AndroidConfig(priority='high', ttl=0),
                 apns=messaging.APNSConfig(
                     headers={'apns-priority': '10'},
@@ -1080,7 +1084,7 @@ async def send_chat_message(
                 asyncio.create_task(bot_service.send_telegram_message(job.partner.telegram_chat_id, tg_text))
                 
             if job.partner.fcm_token:
-                await send_push_to_partners([job.partner.fcm_token], f"Чат від {courier_name}", message)
+                await send_push_to_partners([job.partner.fcm_token], f"Чат від {courier_name}", message, job_id=job_id)
             
     await db.commit()
     return JSONResponse({"status": "ok"})
