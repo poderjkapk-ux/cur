@@ -886,7 +886,14 @@ async def get_active_job(
             "order_price": job.order_price,
             "delivery_fee": job.delivery_fee,
             "payment_type": job.payment_type,
-            "is_return_required": job.is_return_required
+            "is_return_required": job.is_return_required,
+            
+            # --- НОВЫЕ ПОЛЯ ДЛЯ ТАЙМЕРОВ ---
+            "assigned_at": job.accepted_at.isoformat() + "Z" if job.accepted_at else None,
+            "picked_up_at": job.picked_up_at.isoformat() + "Z" if job.picked_up_at else None,
+            "delivered_at": job.delivered_at.isoformat() + "Z" if job.delivered_at else None,
+            "completed_at": None # Заказ исчезает с активного экрана после полного завершения
+            # ---------------------------------
         }
     })
 
@@ -933,6 +940,7 @@ async def update_job_status(
     
     if status == "delivered" and job.is_return_required:
         job.status = "returning"
+        job.delivered_at = datetime.utcnow() # <--- ДОБАВЛЕНО ДЛЯ ТАЙМЕРА ПОВЕРНЕННЯ КОШТІВ
         msg_text = f"💰 Кур'єр {courier.name} віддав замовлення і везе гроші назад!"
         color = "#fb923c" 
         
