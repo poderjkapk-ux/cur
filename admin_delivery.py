@@ -2,6 +2,8 @@ import json
 import os
 import logging
 import httpx
+import pytz
+from datetime import datetime
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -12,6 +14,7 @@ from sqlalchemy.orm import joinedload
 # Импортируем auth вместо app, чтобы избежать циклического импорта
 from models import get_db, Courier, DeliveryPartner, DeliveryJob
 from auth import check_admin_auth 
+from crud_settings import get_setting # Импорт для получения часового пояса
 
 # Импортируем GLOBAL_STYLES
 from templates_saas import GLOBAL_STYLES
@@ -50,6 +53,20 @@ def load_pwa_config():
 def save_pwa_config(config):
     with open(PWA_CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
+
+# --- УТИЛИТА КОНВЕРТАЦИИ ВРЕМЕНИ ---
+def format_local_time(utc_dt, tz_string='Europe/Kiev', fmt='%d.%m.%Y %H:%M'):
+    """Конвертує UTC datetime у локальний час заданого часового поясу."""
+    if not utc_dt:
+        return "-"
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=pytz.UTC)
+    try:
+        local_tz = pytz.timezone(tz_string)
+        local_dt = utc_dt.astimezone(local_tz)
+        return local_dt.strftime(fmt)
+    except pytz.UnknownTimeZoneError:
+        return utc_dt.strftime(fmt)
 
 # --- ГЕОКОДИНГ ДЛЯ КАРТЫ (КЕШИРОВАННЫЙ) ---
 GEOCODE_CACHE = {}
@@ -322,7 +339,7 @@ def get_ops_map_html(message=""):
     """
 
 # --- HTML TEMPLATE: Історія замовлень ---
-def get_history_admin_html(entity_name, entity_type, jobs):
+def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kiev"):
     rows = ""
     status_colors = {
         "pending": "#facc15", "assigned": "#facc15", "arrived_pickup": "#facc15",
@@ -332,7 +349,8 @@ def get_history_admin_html(entity_name, entity_type, jobs):
     
     for j in jobs:
         color = status_colors.get(j.status, "#ffffff")
-        date_str = j.created_at.strftime('%d.%m.%Y %H:%M') if j.created_at else "-"
+        # Применяем часовой пояс
+        date_str = format_local_time(j.created_at, tz_string, '%d.%m.%Y %H:%M') if j.created_at else "-"
         
         rating = f"⭐ {j.courier_rating}" if j.courier_rating else "-"
         review = j.courier_review or "-"
@@ -395,7 +413,7 @@ def get_history_admin_html(entity_name, entity_type, jobs):
     """
 
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
+def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message=""):
     courier_rows = ""
     for c in couriers:
         status_color = "#4ade80" if c.is_active else "#f87171"
@@ -403,12 +421,14 @@ def get_delivery_admin_html(couriers, partners, pwa_config, message=""):
         btn_icon = "fa-ban" if c.is_active else "fa-check"
         btn_class = "warn" if c.is_active else "success"
         
+        last_seen_str = format_local_time(c.last_seen, tz_string, '%d.%m %H:%M') if c.last_seen else '-'
+        
         courier_rows += f"""
         <tr>
             <td>{c.id}</td>
             <td><b>{c.name}</b><br><small>{c.phone}</small></td>
             <td><span class="dot" style="background:{status_color}"></span> {'Активний' if c.is_active else 'Заблокований'}</td>
-            <td>{c.last_seen.strftime('%d.%m %H:%M') if c.last_seen else '-'}</td>
+            <td>{last_seen_str}</td>
             <td style="display:flex; gap:5px;">
                 <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
                 <form action="/admin/delivery/courier/control" method="post" style="margin:0;">
@@ -553,8 +573,9 @@ async def admin_delivery_page(
     couriers = (await db.execute(select(Courier).order_by(Courier.id.desc()))).scalars().all()
     partners = (await db.execute(select(DeliveryPartner).order_by(DeliveryPartner.id.desc()))).scalars().all()
     pwa_config = load_pwa_config()
+    tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
     
-    return get_delivery_admin_html(couriers, partners, pwa_config, message)
+    return get_delivery_admin_html(couriers, partners, pwa_config, tz_string, message)
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
 async def admin_delivery_map_page(
@@ -578,6 +599,7 @@ async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession =
             .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
         )).scalar()
         
+        # Добавляем "Z", чтобы Javascript понимал, что это UTC время
         courier_list.append({
             "id": c.id, 
             "name": c.name, 
@@ -585,7 +607,7 @@ async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession =
             "lat": c.lat, 
             "lon": c.lon,
             "avg_rating": getattr(c, 'avg_rating', 5.0),
-            "last_seen": c.last_seen.isoformat() if c.last_seen else None,
+            "last_seen": c.last_seen.isoformat() + "Z" if c.last_seen else None,
             "job_id": active_job
         })
         
@@ -605,10 +627,11 @@ async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession =
             # Кешований геокодинг адреси закладу
             p_lat, p_lon = await get_coords(j.partner.address)
             
+        # Добавляем "Z", чтобы Javascript понимал, что это UTC время
         jobs_list.append({
             "id": j.id,
             "status": j.status,
-            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "created_at": j.created_at.isoformat() + "Z" if j.created_at else None,
             "order_price": j.order_price,
             "delivery_fee": j.delivery_fee,
             "partner": {
@@ -710,7 +733,8 @@ async def admin_courier_history(
         .order_by(DeliveryJob.id.desc())
     )).scalars().all()
     
-    return get_history_admin_html(courier.name, "Кур'єр", jobs)
+    tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
+    return get_history_admin_html(courier.name, "Кур'єр", jobs, tz_string)
 
 @router.get("/admin/delivery/partner/{partner_id}/history", response_class=HTMLResponse)
 async def admin_partner_history(
@@ -729,7 +753,8 @@ async def admin_partner_history(
         .order_by(DeliveryJob.id.desc())
     )).scalars().all()
     
-    return get_history_admin_html(partner.name, "Заклад", jobs)
+    tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
+    return get_history_admin_html(partner.name, "Заклад", jobs, tz_string)
 
 
 # --- НАЛАШТУВАННЯ PWA ТА МАНІФЕСТИ ---

@@ -207,6 +207,25 @@ PWA_STYLES = """
         margin-bottom: 10px; animation: popIn 0.3s;
     }
     @keyframes popIn { from { transform: scale(0.5); opacity:0; } to { transform: scale(1); opacity:1; } }
+
+    /* --- СТИЛИ ДЛЯ ТАЙМЕРОВ --- */
+    .current-time {
+        font-weight: 800; color: var(--primary); font-size: 1.1rem;
+        background: rgba(99, 102, 241, 0.1); padding: 5px 10px;
+        border-radius: 8px; margin-right: 15px; letter-spacing: 1px;
+    }
+    .timer-badge {
+        background: rgba(255, 255, 255, 0.1); color: var(--text-muted);
+        padding: 4px 8px; border-radius: 6px; font-size: 0.85rem;
+        font-weight: bold; display: inline-flex; align-items: center; gap: 5px;
+    }
+    .timer-badge.active {
+        background: rgba(99, 102, 241, 0.2); color: #818cf8;
+        animation: pulse-timer 2s infinite;
+    }
+    .timer-badge.done { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+    .timer-badge.warning { background: rgba(251, 146, 60, 0.2); color: #fb923c; animation: pulse-timer 2s infinite; }
+    @keyframes pulse-timer { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
 </style>
 """
 
@@ -320,7 +339,7 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier, config: dict = None):
     """
-    Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK + Onboarding.
+    Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK + Onboarding + Timers.
     """
     if config is None:
         config = {}
@@ -356,10 +375,13 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
     <body>
         <div class="app-header">
             <button class="icon-btn" onclick="toggleHistory(true)"><i class="fa-solid fa-clock-rotate-left"></i></button>
-            <div class="status-indicator" onclick="toggleShift()" style="position: relative;">
-                <div id="connection-dot" style="position: absolute; top:-2px; right:-2px; width:6px; height:6px; border-radius:50%; background:red; border:1px solid #0f172a;" title="Connection Status"></div>
-                <div id="status-dot" class="dot {status_class}"></div>
-                <span id="status-text">{status_text}</span>
+            <div style="display: flex; align-items: center;">
+                <div id="global-clock" class="current-time">00:00:00</div>
+                <div class="status-indicator" onclick="toggleShift()" style="position: relative;">
+                    <div id="connection-dot" style="position: absolute; top:-2px; right:-2px; width:6px; height:6px; border-radius:50%; background:red; border:1px solid #0f172a;" title="Connection Status"></div>
+                    <div id="status-dot" class="dot {status_class}"></div>
+                    <span id="status-text">{status_text}</span>
+                </div>
             </div>
             <a href="/courier/logout" class="icon-btn"><i class="fa-solid fa-right-from-bracket"></i></a>
         </div>
@@ -381,6 +403,8 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 </div>
                 
                 <div class="sheet-subtitle" id="job-status-desc">Статус...</div>
+                
+                <div id="steps-container" style="margin-bottom: 15px; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 12px; border: 1px solid var(--border); display: none;"></div>
                 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
                     <a href="#" id="btn-call" class="btn-nav" style="background: #334155; display:none;"><i class="fa-solid fa-phone"></i> Дзвінок</a>
@@ -481,6 +505,54 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
         <script>
+            // --- ТАЙМЕРЫ И ЧАСЫ ---
+            setInterval(() => {{
+                const now = new Date();
+                document.getElementById('global-clock').innerText = now.toLocaleTimeString('uk-UA', {{ hour12: false }});
+            }}, 1000);
+
+            let jobTimerInterval = null;
+
+            function formatDuration(ms) {{
+                if (ms < 0) ms = 0;
+                const totalSeconds = Math.floor(ms / 1000);
+                const h = Math.floor(totalSeconds / 3600);
+                const m = Math.floor((totalSeconds % 3600) / 60);
+                const s = totalSeconds % 60;
+                if (h > 0) return `${{h.toString().padStart(2, '0')}}:${{m.toString().padStart(2, '0')}}:${{s.toString().padStart(2, '0')}}`;
+                return `${{m.toString().padStart(2, '0')}}:${{s.toString().padStart(2, '0')}}`;
+            }}
+
+            function updateJobTimers() {{
+                if (!currentJob) return;
+                const now = new Date();
+                
+                // Крок 1: Заклад
+                if (currentJob.assigned_at) {{
+                    const start1 = new Date(currentJob.assigned_at);
+                    const end1 = currentJob.picked_up_at ? new Date(currentJob.picked_up_at) : now;
+                    const el1 = document.getElementById('timer-step-1');
+                    if (el1) el1.innerText = "⏱ " + formatDuration(end1 - start1);
+                }}
+
+                // Крок 2: Клієнт
+                if (currentJob.picked_up_at) {{
+                    const start2 = new Date(currentJob.picked_up_at);
+                    const end2 = currentJob.delivered_at ? new Date(currentJob.delivered_at) : now;
+                    const el2 = document.getElementById('timer-step-2');
+                    if (el2) el2.innerText = "⏱ " + formatDuration(end2 - start2);
+                }}
+
+                // Крок 3: Повернення (якщо є)
+                if (currentJob.is_return_required && currentJob.delivered_at) {{
+                    const start3 = new Date(currentJob.delivered_at);
+                    const end3 = currentJob.completed_at ? new Date(currentJob.completed_at) : now;
+                    const el3 = document.getElementById('timer-step-3');
+                    if (el3) el3.innerText = "⏱ " + formatDuration(end3 - start3);
+                }}
+            }}
+
+
             // --- ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК 401 (РЕДИРЕКТ НА LOGIN ПРИ ИСТЕЧЕНИИ СЕССИИ) ---
             const originalFetch = window.fetch;
             window.fetch = async function() {{
@@ -805,6 +877,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     }} else {{
                         document.getElementById('job-sheet').classList.remove('active');
                         currentJob = null;
+                        if (jobTimerInterval) {{ clearInterval(jobTimerInterval); jobTimerInterval = null; }}
                         document.querySelector('.bottom-nav').style.display = 'flex';
                         if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
                         if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
@@ -831,6 +904,42 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                      let label = currentJob.payment_type === 'cash' ? '💵 ВЗЯТИ ГОТІВКУ:' : '💰 ВИКУП (Свої гроші):';
                      statusDesc.innerHTML += `<div class="client-pay-box">${{label}} ${{currentJob.order_price}} ₴</div>`;
                 }}
+
+                // --- ГЕНЕРАЦИЯ ТАЙМЕРОВ ДЛЯ КРОКОВ ---
+                let stepsHtml = '';
+                
+                // Step 1
+                let s1Class = currentJob.picked_up_at ? 'done' : 'active';
+                let s1Color = currentJob.picked_up_at ? '#4ade80' : '#818cf8';
+                stepsHtml += `<div style="display:flex; justify-content:space-between; margin-bottom:8px; align-items:center;">
+                    <span style="font-size:0.8rem; font-weight:800; color: ${{s1Color}}">КРОК 1: ЗАКЛАД</span>
+                    <span id="timer-step-1" class="timer-badge ${{s1Class}}">⏱ 00:00</span>
+                </div>`;
+
+                // Step 2
+                if (currentJob.picked_up_at) {{
+                    let s2Class = currentJob.delivered_at ? 'done' : 'active';
+                    let s2Color = currentJob.delivered_at ? '#4ade80' : '#818cf8';
+                    stepsHtml += `<div style="display:flex; justify-content:space-between; margin-bottom:8px; align-items:center;">
+                        <span style="font-size:0.8rem; font-weight:800; color: ${{s2Color}}">КРОК 2: КЛІЄНТ</span>
+                        <span id="timer-step-2" class="timer-badge ${{s2Class}}">⏱ 00:00</span>
+                    </div>`;
+                }}
+
+                // Step 3 (Return)
+                if (currentJob.is_return_required && currentJob.delivered_at) {{
+                    stepsHtml += `<div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:0.8rem; font-weight:800; color: #fb923c">КРОК 3: ПОВЕРНЕННЯ</span>
+                        <span id="timer-step-3" class="timer-badge warning">⏱ 00:00</span>
+                    </div>`;
+                }}
+
+                document.getElementById('steps-container').innerHTML = stepsHtml;
+                document.getElementById('steps-container').style.display = 'block';
+
+                updateJobTimers();
+                if (!jobTimerInterval) jobTimerInterval = setInterval(updateJobTimers, 1000);
+                // --------------------------------------
 
                 document.getElementById('current-target-name').innerText = currentJob.partner_name;
                 document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
