@@ -9,3 +9,4 @@ python-jose[cryptography]
 python-multipart
 aiogram==3.10.0
 firebase-admin>=5.0.0
+pytz

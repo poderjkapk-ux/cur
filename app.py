@@ -6,6 +6,7 @@ import httpx
 import asyncio
 import json
 import uuid
+import pytz
 from math import radians, cos, sin, asin, sqrt
 from contextlib import asynccontextmanager
 from typing import List, Dict 
@@ -113,7 +114,8 @@ DEFAULT_SETTINGS = {
     "price_full": "600", "currency": "$", 
     "custom_btn_text": "", "custom_btn_content": "",
     "firebase_api_key": "", "firebase_project_id": "",
-    "firebase_sender_id": "", "firebase_app_id": ""
+    "firebase_sender_id": "", "firebase_app_id": "",
+    "timezone": "Europe/Kiev" # Добавлен часовой пояс по умолчанию
 }
 
 # --- LIFESPAN (Запуск/Остановка) ---
@@ -155,6 +157,19 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ==============================================================================
 # UTILS & HELPERS
 # ==============================================================================
+
+def format_local_time(utc_dt, tz_string='Europe/Kiev', fmt='%H:%M'):
+    """Конвертує UTC datetime у локальний час заданого часового поясу."""
+    if not utc_dt:
+        return "-"
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=pytz.UTC)
+    try:
+        local_tz = pytz.timezone(tz_string)
+        local_dt = utc_dt.astimezone(local_tz)
+        return local_dt.strftime(fmt)
+    except pytz.UnknownTimeZoneError:
+        return utc_dt.strftime(fmt)
 
 # --- Геокодинг ---
 GEOCODE_CACHE = {}
@@ -806,6 +821,9 @@ async def get_open_orders(
 async def get_courier_history(
     courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)
 ):
+    config = await get_all_settings(db)
+    tz = config.get("timezone", "Europe/Kiev")
+    
     result = await db.execute(
         select(DeliveryJob)
         .where(DeliveryJob.courier_id == courier.id)
@@ -819,7 +837,7 @@ async def get_courier_history(
     for j in jobs:
         data.append({
             "id": j.id,
-            "date": j.created_at.strftime("%d.%m %H:%M"),
+            "date": format_local_time(j.created_at, tz, "%d.%m %H:%M"),
             "address": j.dropoff_address,
             "price": j.delivery_fee,
             "status": j.status
@@ -1022,6 +1040,9 @@ async def get_chat_history(
     
     if not partner_token and not courier_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    config = await get_all_settings(db)
+    tz = config.get("timezone", "Europe/Kiev")
 
     messages = await db.execute(
         select(ChatMessage)
@@ -1031,7 +1052,7 @@ async def get_chat_history(
     return JSONResponse([{
         "role": m.sender_role,
         "text": m.message,
-        "time": m.created_at.strftime("%H:%M")
+        "time": format_local_time(m.created_at, tz, "%H:%M")
     } for m in messages.scalars().all()])
 
 @app.post("/api/chat/send")
@@ -1044,6 +1065,9 @@ async def send_chat_message(
 ):
     msg = ChatMessage(job_id=job_id, sender_role=role, message=message)
     db.add(msg)
+    
+    config = await get_all_settings(db)
+    tz = config.get("timezone", "Europe/Kiev")
     
     # Завантажуємо замовлення разом із партнером та кур'єром
     result = await db.execute(
@@ -1059,7 +1083,7 @@ async def send_chat_message(
             "job_id": job_id,
             "role": role,
             "text": message,
-            "time": datetime.utcnow().strftime("%H:%M")
+            "time": format_local_time(datetime.utcnow(), tz, "%H:%M")
         }
         
         # Якщо пише ЗАКЛАД (partner) -> сповіщаємо КУР'ЄРА
@@ -1124,6 +1148,9 @@ async def api_partner_login_native(email: str = Form(...), password: str = Form(
 
 @app.get("/api/partner/orders_native")
 async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)):
+    config = await get_all_settings(db)
+    tz = config.get("timezone", "Europe/Kiev")
+    
     result = await db.execute(
         select(DeliveryJob).options(joinedload(DeliveryJob.courier))
         .where(DeliveryJob.partner_id == partner.id).order_by(DeliveryJob.id.desc())
@@ -1140,7 +1167,7 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
             }
         data.append({
             "id": j.id, "status": j.status, 
-            "created_at": j.created_at.strftime('%H:%M'),
+            "created_at": format_local_time(j.created_at, tz, '%H:%M'),
             "dropoff_address": j.dropoff_address,
             "order_price": j.order_price, "delivery_fee": j.delivery_fee,
             "payment_type": j.payment_type, "is_return_required": j.is_return_required,
@@ -1295,13 +1322,18 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
     try: partner = await get_current_partner(request, db)
     except HTTPException: return RedirectResponse("/partner/login")
     
+    # Загружаем настройки, чтобы достать нужный часовой пояс
+    config = await get_all_settings(db)
+    tz = config.get("timezone", "Europe/Kiev")
+    
     result = await db.execute(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.courier))
         .where(DeliveryJob.partner_id == partner.id)
         .order_by(DeliveryJob.id.desc())
     )
-    return templates_partner.get_partner_dashboard_html(partner, result.scalars().all())
+    # Передаем таймзону (tz) последним аргументом в шаблон
+    return templates_partner.get_partner_dashboard_html(partner, result.scalars().all(), tz)
 
 @app.post("/api/partner/confirm_return")
 async def partner_confirm_return(

@@ -1,3 +1,5 @@
+import pytz
+from datetime import datetime
 from typing import List, Dict
 from templates_saas import GLOBAL_STYLES
 
@@ -8,6 +10,19 @@ except ImportError:
     class DeliveryPartner: pass
     class DeliveryJob: pass
     class Courier: pass
+
+def format_local_time(utc_dt, tz_string='Europe/Kiev', fmt='%H:%M'):
+    """Конвертує UTC datetime у локальний час заданого часового поясу."""
+    if not utc_dt:
+        return "-"
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=pytz.UTC)
+    try:
+        local_tz = pytz.timezone(tz_string)
+        local_dt = utc_dt.astimezone(local_tz)
+        return local_dt.strftime(fmt)
+    except pytz.UnknownTimeZoneError:
+        return utc_dt.strftime(fmt)
 
 # --- Шаблоны для ПАРТНЕРОВ (Рестораны без сайта) ---
 
@@ -310,10 +325,9 @@ def get_partner_auth_html(is_register=False, message=""):
     </body></html>
     """
 
-def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]):
+def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob], tz_string: str = "Europe/Kiev"):
     """
-    Дашборд партнера. 
-    ОБНОВЛЕН: ЛОГИКА АДРЕСА БЕЗ РАЙОНА.
+    Дашборд партнера з підтримкою часових поясів.
     """
     
     active_jobs = [j for j in jobs if j.status not in ['delivered', 'cancelled']]
@@ -411,7 +425,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         if getattr(j, 'is_return_required', False):
             pay_info += "<br><span style='color:#f97316; font-size:0.7rem;'>↺ Повернення</span>"
 
-        t_created = j.created_at.strftime('%H:%M') 
+        # ЗАСТОСОВУЄМО ТАЙМЗОНУ ДО ЧАСУ СТВОРЕННЯ
+        t_created = format_local_time(j.created_at, tz_string, '%H:%M') 
 
         active_rows += f"""
         <tr id="row-{j.id}">
@@ -443,7 +458,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     # --- ТАБЛИЦА ИСТОРИИ ---
     history_rows = ""
     for j in history_jobs:
-        t_deliver = j.delivered_at.strftime('%H:%M') if j.delivered_at else "-"
+        # ЗАСТОСОВУЄМО ТАЙМЗОНУ ДО ЧАСУ ДОСТАВКИ
+        t_deliver = format_local_time(j.delivered_at, tz_string, '%H:%M') if j.delivered_at else "-"
         
         rating_html = ""
         if j.status == 'delivered':
@@ -1008,6 +1024,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 const container = document.getElementById('chat-messages');
                 const div = document.createElement('div');
                 div.className = 'msg me';
+                // Локальное время бразуера (пользователя) - здесь конвертация не нужна
                 const time = new Date().toLocaleTimeString([], {{hour: '2-digit', minute:'2-digit'}});
                 div.innerHTML = `${{text}} <div class="msg-time">${{time}}</div>`;
                 container.appendChild(div);

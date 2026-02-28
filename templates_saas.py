@@ -62,7 +62,7 @@ GLOBAL_STYLES = """
         font-weight: 700;
         margin-bottom: 30px;
     }
-    input, textarea { 
+    input, textarea, select { 
         width: 100%; 
         padding: 14px; 
         margin-bottom: 15px; 
@@ -74,11 +74,22 @@ GLOBAL_STYLES = """
         font-family: var(--font);
         transition: 0.3s;
     }
+    select {
+        appearance: none;
+        background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2394a3b8%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+        background-repeat: no-repeat;
+        background-position: right 14px top 50%;
+        background-size: 12px auto;
+    }
+    select option {
+        background: var(--bg-card);
+        color: var(--text-main);
+    }
     textarea {
         min-height: 150px;
         line-height: 1.6;
     }
-    input:focus, textarea:focus {
+    input:focus, textarea:focus, select:focus {
         outline: none; 
         border-color: var(--primary); 
         background: rgba(99, 102, 241, 0.05); 
@@ -820,6 +831,13 @@ def get_settings_page_html(config, message=""):
             with open("firebase_credentials.json", "r", encoding="utf-8") as f:
                 fb_json_content = f.read()
         except: pass
+        
+    current_tz = config.get('timezone', 'Europe/Kiev')
+    timezones = [
+        "Europe/Kiev", "Europe/Warsaw", "Europe/London", "Europe/Berlin", 
+        "Europe/Paris", "America/New_York", "UTC"
+    ]
+    tz_options = "".join([f'<option value="{tz}" {"selected" if tz == current_tz else ""}>{tz}</option>' for tz in timezones])
     
     return f"""
     <!DOCTYPE html><html><head><title>Restify Admin</title>{GLOBAL_STYLES}</head>
@@ -841,6 +859,12 @@ def get_settings_page_html(config, message=""):
                 
                 <label>Admin Telegram ID (для заявок)</label><input type="text" name="admin_id" value="{config.get('admin_id', '')}">
                 <label>Bot Token (для заявок)</label><input type="text" name="bot_token" value="{config.get('bot_token', '')}">
+                
+                <label>Часовий пояс (Timezone)</label>
+                <select name="timezone">
+                    {tz_options}
+                </select>
+                <p class="form-hint" style="margin-top: 5px;">Впливає на відображення часу в панелях партнерів та кур'єрів.</p>
                 
                 <h2>Push-сповіщення (Firebase)</h2>
                 <label>Firebase API Key</label>
