@@ -327,9 +327,14 @@ def get_partner_auth_html(is_register=False, message=""):
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob], tz_string: str = "Europe/Kiev"):
     """
-    Дашборд партнера з підтримкою часових поясів.
+    Дашборд партнера з підтримкою часових поясів та візуальним таймлайном.
     """
     
+    def calc_mins(start, end):
+        if not start or not end: return None
+        mins = int((end - start).total_seconds() / 60)
+        return f"+{mins} хв" if mins > 0 else "< 1 хв"
+
     active_jobs = [j for j in jobs if j.status not in ['delivered', 'cancelled']]
     history_jobs = [j for j in jobs if j.status in ['delivered', 'cancelled']]
     
@@ -346,7 +351,76 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         status_fg = "#ccc"
         
         courier_info = "—"
+        timeline_html = ""
         action_btn = ""
+
+        # === ЗБІРКА ТАЙМЛАЙНУ ДЛЯ ЗАКАЗУ ===
+        t_created = format_local_time(j.created_at, tz_string, '%H:%M')
+        t_accepted = format_local_time(j.accepted_at, tz_string, '%H:%M') if j.accepted_at else None
+        t_arrived = format_local_time(j.arrived_at_pickup_at, tz_string, '%H:%M') if j.arrived_at_pickup_at else None
+        t_picked = format_local_time(j.picked_up_at, tz_string, '%H:%M') if j.picked_up_at else None
+
+        timeline_html += f"""<div class="timeline"><div class="tl-title">Хронологія виконання</div>"""
+        
+        # Крок 1: Створено
+        timeline_html += f"""
+        <div class="tl-step">
+            <div class="tl-icon-wrap"><div class="tl-icon done"></div><div class="tl-line"></div></div>
+            <div class="tl-content"><div class="tl-text done">Створено</div><div class="tl-time">{t_created}</div></div>
+        </div>
+        """
+        
+        # Крок 2: Прийнято
+        if j.accepted_at or j.status != 'pending':
+            dur = calc_mins(j.created_at, j.accepted_at)
+            is_done = j.accepted_at is not None
+            is_last = j.arrived_at_pickup_at is None
+            badge = f'<span class="tl-badge">{dur}</span>' if dur else ''
+            icon_cls = "done" if is_done else ""
+            txt_cls = "done" if is_done else ""
+            line = '<div class="tl-line"></div>' if not is_last else ''
+            
+            timeline_html += f"""
+            <div class="tl-step">
+                <div class="tl-icon-wrap"><div class="tl-icon {icon_cls}"></div>{line}</div>
+                <div class="tl-content"><div class="tl-text {txt_cls}">Кур'єр прийняв {badge}</div><div class="tl-time">{t_accepted or ''}</div></div>
+            </div>
+            """
+            
+        # Крок 3: Прибув у заклад
+        if j.arrived_at_pickup_at or j.status in ['arrived_pickup', 'ready', 'picked_up', 'delivered']:
+            dur = calc_mins(j.accepted_at, j.arrived_at_pickup_at)
+            is_done = j.arrived_at_pickup_at is not None
+            is_last = j.picked_up_at is None
+            badge = f'<span class="tl-badge">{dur}</span>' if dur else ''
+            icon_cls = "done" if is_done else ""
+            txt_cls = "done" if is_done else ""
+            line = '<div class="tl-line"></div>' if not is_last else ''
+            
+            timeline_html += f"""
+            <div class="tl-step">
+                <div class="tl-icon-wrap"><div class="tl-icon {icon_cls}"></div>{line}</div>
+                <div class="tl-content"><div class="tl-text {txt_cls}">Прибув у заклад {badge}</div><div class="tl-time">{t_arrived or ''}</div></div>
+            </div>
+            """
+            
+        # Крок 4: Забрав замовлення
+        if j.picked_up_at or j.status in ['picked_up', 'delivered', 'returning']:
+            dur = calc_mins(j.arrived_at_pickup_at, j.picked_up_at)
+            is_done = j.picked_up_at is not None
+            badge = f'<span class="tl-badge">{dur}</span>' if dur else ''
+            icon_cls = "done" if is_done else ""
+            txt_cls = "done" if is_done else ""
+            
+            timeline_html += f"""
+            <div class="tl-step">
+                <div class="tl-icon-wrap"><div class="tl-icon {icon_cls}"></div></div>
+                <div class="tl-content"><div class="tl-text {txt_cls}">Забрав замовлення {badge}</div><div class="tl-time">{t_picked or ''}</div></div>
+            </div>
+            """
+            
+        timeline_html += "</div>"
+        # === КІНЕЦЬ ЗБІРКИ ТАЙМЛАЙНУ ===
 
         if j.courier:
             rating_val = j.courier.avg_rating
@@ -363,6 +437,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <a href="{phone_link}" class="btn-mini success" title="Зателефонувати"><i class="fa-solid fa-phone"></i></a>
             <button class="btn-mini info" onclick="openChat({j.id}, 'Кур\\'єр {j.courier.name}')" title="Чат"><i class="fa-solid fa-comments"></i></button>
             """
+        else:
+            # Якщо кур'єра ще немає, показуємо тільки таймлайн "Створено"
+            courier_info = "—"
         
         if j.status == 'assigned':
             status_bg = "rgba(254, 240, 138, 0.2)"
@@ -425,9 +502,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         if getattr(j, 'is_return_required', False):
             pay_info += "<br><span style='color:#f97316; font-size:0.7rem;'>↺ Повернення</span>"
 
-        # ЗАСТОСОВУЄМО ТАЙМЗОНУ ДО ЧАСУ СТВОРЕННЯ
-        t_created = format_local_time(j.created_at, tz_string, '%H:%M') 
-
         active_rows += f"""
         <tr id="row-{j.id}">
             <td data-label="ID">#{j.id}</td>
@@ -443,7 +517,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 <div style="font-weight:bold; color: #facc15;">{j.delivery_fee} грн</div>
             </td>
             <td data-label="Статус"><span class="status-badge" style="background:{status_bg}; color:{status_fg};">{status_text}</span></td>
-            <td class="courier-cell" data-label="Кур'єр">{courier_info}</td>
+            <td class="courier-cell" data-label="Кур'єр">
+                {courier_info}
+                {timeline_html} </td>
             <td class="actions-cell">
                 <div style="display:flex; gap:8px; align-items:center; justify-content: flex-end;">
                     {comm_btns}
@@ -519,6 +595,21 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); color: #e2e8f0; vertical-align: middle; }}
         th {{ color: #94a3b8; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }}
         
+        /* СТИЛІ ТАЙМЛАЙНУ (ХРОНОЛОГІЇ) */
+        .timeline {{ display: flex; flex-direction: column; gap: 8px; margin-top: 15px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 12px; }}
+        .tl-title {{ font-size: 0.75rem; color: #6366f1; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 0.05em; }}
+        .tl-step {{ display: flex; align-items: flex-start; gap: 10px; }}
+        .tl-icon-wrap {{ display: flex; flex-direction: column; align-items: center; width: 12px; }}
+        .tl-icon {{ width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.2); z-index: 2; margin-top: 3px; }}
+        .tl-icon.done {{ background: #6366f1; }}
+        .tl-line {{ width: 2px; background: rgba(255,255,255,0.1); flex-grow: 1; min-height: 15px; margin-top: 2px; }}
+        .tl-icon.done + .tl-line {{ background: rgba(99, 102, 241, 0.5); }}
+        .tl-content {{ flex: 1; display: flex; justify-content: space-between; align-items: flex-start; line-height: 1.2; }}
+        .tl-text {{ font-size: 0.85rem; color: #94a3b8; }}
+        .tl-text.done {{ color: #f8fafc; font-weight: 600; }}
+        .tl-time {{ font-size: 0.75rem; color: #64748b; margin-left: 10px; white-space: nowrap; }}
+        .tl-badge {{ background: rgba(239, 68, 68, 0.2); color: #fca5a5; padding: 2px 5px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-left: 5px; }}
+
         /* Status Badge */
         .status-badge {{ padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }}
 
@@ -588,6 +679,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             .actions-cell > div {{ justify-content: space-between; width: 100%; }}
             .btn-mini {{ width: 42px; height: 42px; font-size: 1.1rem; }}
             .payment-options {{ grid-template-columns: 1fr; gap: 8px; }}
+            .courier-cell {{ flex-direction: column; align-items: flex-end; text-align: right; }}
+            .courier-cell::before {{ align-self: flex-start; }}
+            .timeline {{ width: 100%; text-align: left; box-sizing: border-box; }}
         }}
 
         /* Modals */

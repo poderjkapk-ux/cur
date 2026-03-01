@@ -1166,6 +1166,8 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
     jobs = result.scalars().all()
     
     data = []
+    time_format = '%Y-%m-%d %H:%M:%S'
+    
     for j in jobs:
         c_data = None
         if j.courier:
@@ -1174,8 +1176,13 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
                 "rating": j.courier.avg_rating or 5.0, "rating_count": j.courier.rating_count or 0
             }
         data.append({
-            "id": j.id, "status": j.status, 
-            "created_at": format_local_time(j.created_at, tz, '%H:%M'),
+            "id": j.id, 
+            "status": j.status, 
+            "created_at": format_local_time(j.created_at, tz, time_format) if j.created_at else None,
+            "accepted_at": format_local_time(j.accepted_at, tz, time_format) if j.accepted_at else None,
+            "arrived_at": format_local_time(j.arrived_at_pickup_at, tz, time_format) if j.arrived_at_pickup_at else None,
+            "picked_up_at": format_local_time(j.picked_up_at, tz, time_format) if j.picked_up_at else None,
+            "delivered_at": format_local_time(j.delivered_at, tz, time_format) if j.delivered_at else None,
             "dropoff_address": j.dropoff_address,
             "order_price": j.order_price, "delivery_fee": j.delivery_fee,
             "payment_type": j.payment_type, "is_return_required": j.is_return_required,
