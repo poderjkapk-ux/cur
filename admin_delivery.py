@@ -9,14 +9,14 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, update, func
 from sqlalchemy.orm import joinedload
 
 # Імпортуємо bot_service для відправки повідомлень при верифікації
 import bot_service
 
 # Імпортуємо auth замість app, щоб уникнути циклічного імпорту
-from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction
+from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction
 from auth import check_admin_auth 
 from crud_settings import get_setting # Імпорт для отримання часового поясу
 
@@ -417,20 +417,20 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
     """
 
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message=""):
+def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None):
+    if cash_transactions is None:
+        cash_transactions = []
+        
     courier_rows = ""
     for c in couriers:
-        status_color = "#4ade80" if c.is_active else "#facc15" # Жовтий для очікуючих
+        status_color = "#4ade80" if c.is_active else "#facc15" 
         btn_action = "ban" if c.is_active else "unban"
         btn_icon = "fa-ban" if c.is_active else "fa-check"
         btn_class = "warn" if c.is_active else "success"
         
         last_seen_str = format_local_time(c.last_seen, tz_string, '%d.%m %H:%M') if c.last_seen else '-'
-        
-        # --- ПОСИЛАННЯ НА ДОКУМЕНТ ---
         doc_link = f"<br><a href='{c.document_photo}' target='_blank' style='color:#3b82f6; font-size:0.8rem; text-decoration:none; margin-top:5px; display:inline-block;'><i class='fa-solid fa-id-card'></i> Документ</a>" if getattr(c, 'document_photo', None) else "<br><span style='color:#94a3b8; font-size:0.8rem;'>Немає фото</span>"
         
-        # --- ФІНАНСИ ---
         balance_val = getattr(c, 'balance', 0.0)
         balance_color = "#ef4444" if balance_val < 0 else "#4ade80"
         commission_val = getattr(c, 'commission_rate', 10.0)
@@ -440,36 +440,45 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
             <td>{c.id}</td>
             <td><b>{c.name}</b><br><small>{c.phone}</small>{doc_link}</td>
             <td>
-                <span style="color:{balance_color}; font-weight:bold;">{balance_val:.2f} ₴</span><br>
+                <span style="color:{balance_color}; font-weight:bold; font-size: 1.1rem;">{balance_val:.2f} ₴</span><br>
                 <small style="color:#94a3b8">Комісія: {commission_val}%</small>
             </td>
-            <td><span class="dot" style="background:{status_color}"></span> {'Активний' if c.is_active else 'Очікує / Бан'}</td>
+            <td><span class="dot" style="background:{status_color}"></span> {'Активний' if c.is_active else 'Бан'}</td>
             <td>{last_seen_str}</td>
-            <td style="display:flex; gap:5px; flex-wrap: wrap; align-items: center;">
-                <form action="/admin/delivery/courier/finance" method="post" style="margin:0; display:flex; gap:5px;">
+            
+            <td style="display:flex; flex-direction: column; gap:8px; min-width: 250px;">
+                <form action="/admin/delivery/courier/finance" method="post" style="margin:0; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
                     <input type="hidden" name="id" value="{c.id}">
-                    <input type="number" step="0.01" name="amount" placeholder="+ Сума" style="width:70px; padding:4px; border-radius:4px; background:#334155; border:none; color:white; font-size:0.8rem;" required>
-                    <button class="btn-mini success" title="Поповнити баланс"><i class="fa-solid fa-plus"></i></button>
-                </form>
-                <form action="/admin/delivery/courier/commission" method="post" style="margin:0; display:flex; gap:5px;">
-                    <input type="hidden" name="id" value="{c.id}">
-                    <input type="number" step="0.1" name="rate" placeholder="%" value="{commission_val}" style="width:50px; padding:4px; border-radius:4px; background:#334155; border:none; color:white; font-size:0.8rem;" required>
-                    <button class="btn-mini info" title="Змінити % комісії"><i class="fa-solid fa-percent"></i></button>
+                    <div style="display:flex; gap:5px; margin-bottom: 5px;">
+                        <input type="number" step="0.01" name="amount" placeholder="+ Сума" style="width:100%; padding:6px; border-radius:4px; background:#334155; border:none; color:white; font-size:0.85rem;" required>
+                        <button class="btn-mini success" title="Поповнити баланс"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                    <label style="font-size: 0.8rem; color: #94a3b8; display:flex; align-items:center; gap:5px; margin-bottom: 5px; cursor: pointer;">
+                        <input type="checkbox" name="cash_received" value="true" checked onchange="document.getElementById('desc_{c.id}').required = !this.checked;"> Отримані гроші в касу
+                    </label>
+                    <input type="text" name="description" id="desc_{c.id}" placeholder="Коментар на що (обов'язково якщо без галочки)" style="width:100%; padding:6px; border-radius:4px; background:#334155; border:none; color:white; font-size:0.8rem; box-sizing: border-box;">
                 </form>
                 
-                <div style="width:100%; height:1px; background:rgba(255,255,255,0.05); margin: 5px 0;"></div>
-                
-                <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
-                <form action="/admin/delivery/courier/control" method="post" style="margin:0;">
-                    <input type="hidden" name="id" value="{c.id}">
-                    <input type="hidden" name="action" value="{btn_action}">
-                    <button class="btn-mini {btn_class}"><i class="fa-solid {btn_icon}"></i></button>
-                </form>
-                <form action="/admin/delivery/courier/control" method="post" style="margin:0;" onsubmit="return confirm('Видалити кур\\'єра назавжди?');">
-                    <input type="hidden" name="id" value="{c.id}">
-                    <input type="hidden" name="action" value="delete">
-                    <button class="btn-mini danger"><i class="fa-solid fa-trash"></i></button>
-                </form>
+                <div style="display:flex; gap:5px; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+                    <form action="/admin/delivery/courier/commission" method="post" style="margin:0; display:flex; gap:5px;">
+                        <input type="hidden" name="id" value="{c.id}">
+                        <input type="number" step="0.1" name="rate" title="%" value="{commission_val}" style="width:50px; padding:4px; border-radius:4px; background:#334155; border:none; color:white; font-size:0.8rem;" required>
+                        <button class="btn-mini info" title="Змінити % комісії"><i class="fa-solid fa-percent"></i></button>
+                    </form>
+                    <div style="display:flex; gap:5px;">
+                        <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
+                        <form action="/admin/delivery/courier/control" method="post" style="margin:0;">
+                            <input type="hidden" name="id" value="{c.id}">
+                            <input type="hidden" name="action" value="{btn_action}">
+                            <button class="btn-mini {btn_class}"><i class="fa-solid {btn_icon}"></i></button>
+                        </form>
+                        <form action="/admin/delivery/courier/control" method="post" style="margin:0;" onsubmit="return confirm('Видалити кур\\'єра назавжди?');">
+                            <input type="hidden" name="id" value="{c.id}">
+                            <input type="hidden" name="action" value="delete">
+                            <button class="btn-mini danger"><i class="fa-solid fa-trash"></i></button>
+                        </form>
+                    </div>
+                </div>
             </td>
         </tr>"""
 
@@ -502,11 +511,23 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
             </td>
         </tr>"""
 
+    # ГЕНЕРАЦИЯ СТРОК ДЛЯ ОТЧЕТА КАССЫ
+    cash_rows_html = ""
+    for ct in cash_transactions:
+        date_str = format_local_time(ct.created_at, tz_string, '%d.%m %H:%M')
+        color = "#4ade80" if ct.amount >= 0 else "#f87171"
+        sign = "+" if ct.amount > 0 else ""
+        type_badge = "📥 Прихід" if ct.amount >= 0 else "📤 Вилучення"
+        cash_rows_html += f"<tr><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{date_str}</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{type_badge}</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05); color:{color}; font-weight:bold; white-space:nowrap;'>{sign}{ct.amount:.2f} ₴</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{ct.description}</td></tr>"
+    if not cash_rows_html:
+        cash_rows_html = "<tr><td colspan='4' style='text-align:center; padding: 20px; color:#94a3b8;'>Транзакцій у касі ще немає</td></tr>"
+
     return f"""
     <!DOCTYPE html><html><head><title>Delivery Admin</title>{GLOBAL_STYLES}
     <style>
-        .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
-        @media(max-width:900px){{ .grid {{ grid-template-columns: 1fr; }} }}
+        /* ЗМІНИЛИ ПРОПОРЦІЮ СІТКИ ЩОБ КУР'ЄРАМ БУЛО БІЛЬШЕ МІСЦЯ (1.6fr проти 1fr) */
+        .grid {{ display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px; }}
+        @media(max-width:1100px){{ .grid {{ grid-template-columns: 1fr; }} }}
         .panel {{ background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); }}
         table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
         td, th {{ padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: left; vertical-align: middle; }}
@@ -523,7 +544,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
     </style>
     </head>
     <body>
-        <div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+        <div style="max-width: 1400px; margin: 0 auto; padding: 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <h1>🚴 Delivery Control</h1>
                 <div>
@@ -537,7 +558,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
             <div class="grid">
                 <div class="panel">
                     <h2>🚴 Кур'єри ({len(couriers)})</h2>
-                    <div style="max-height: 400px; overflow-y: auto;">
+                    <div style="max-height: 600px; overflow-y: auto;">
                         <table>
                             <thead><tr><th>ID</th><th>Інфо</th><th>Фінанси</th><th>Статус</th><th>Online</th><th>Дії</th></tr></thead>
                             <tbody>{courier_rows}</tbody>
@@ -547,7 +568,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
 
                 <div class="panel">
                     <h2>🏪 Партнери / Заклади ({len(partners)})</h2>
-                    <div style="max-height: 400px; overflow-y: auto;">
+                    <div style="max-height: 600px; overflow-y: auto;">
                         <table>
                             <thead><tr><th>ID</th><th>Заклад</th><th>Контакти</th><th>Статус</th><th>Дії</th></tr></thead>
                             <tbody>{partner_rows}</tbody>
@@ -557,8 +578,52 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
             </div>
 
             <div class="panel" style="margin-top: 20px;">
+                <h2>💰 Бухгалтерія (Каса)</h2>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    
+                    <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; flex: 1; min-width: 300px;">
+                        <h3 style="margin-top:0; color:#94a3b8; font-size: 1rem;">Поточний баланс каси</h3>
+                        <div style="font-size: 2.5rem; font-weight: bold; color: {'#4ade80' if cash_balance >= 0 else '#f87171'}; margin-bottom: 20px;">
+                            {cash_balance:.2f} ₴
+                        </div>
+                        
+                        <form action="/admin/delivery/cash_register/action" method="post" style="display:flex; flex-direction:column; gap:10px;">
+                            <div style="display:flex; gap:10px;">
+                                <select name="action_type" style="padding:10px; border-radius:6px; background:#334155; border:1px solid #475569; color:white; flex:1;" required>
+                                    <option value="withdraw">Вилучення грошей (-)</option>
+                                    <option value="deposit">Внесення грошей (+)</option>
+                                </select>
+                                <input type="number" step="0.01" name="amount" placeholder="Сума" style="padding:10px; border-radius:6px; background:#334155; border:1px solid #475569; color:white; width:120px;" required min="0.01">
+                            </div>
+                            <input type="text" name="description" placeholder="На що вилучення / Звідки прихід (Обов'язково)" style="padding:10px; border-radius:6px; background:#334155; border:1px solid #475569; color:white; width:100%; box-sizing: border-box;" required>
+                            <button type="submit" class="btn" style="background:#3b82f6; width: 100%;">Зберегти транзакцію</button>
+                        </form>
+                    </div>
+
+                    <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; flex: 2; min-width: 300px;">
+                        <h3 style="margin-top:0; color:#94a3b8; font-size: 1rem;">Звіт: Останні рухи по касі</h3>
+                        <div style="max-height: 250px; overflow-y: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Дата</th>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Тип</th>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Сума</th>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Коментар</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {cash_rows_html}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top: 20px;">
                 <h2>📱 Налаштування PWA (для встановлення додатків)</h2>
-                <form method="post" action="/admin/delivery/pwa_save" class="pwa-settings grid">
+                <form method="post" action="/admin/delivery/pwa_save" class="pwa-settings grid" style="grid-template-columns: 1fr 1fr;">
                     <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
                         <h3 style="margin-top:0">Courier App</h3>
                         <label>Назва додатка</label>
@@ -604,7 +669,15 @@ async def admin_delivery_page(
     pwa_config = load_pwa_config()
     tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
     
-    return get_delivery_admin_html(couriers, partners, pwa_config, tz_string, message)
+    # --- БУХГАЛТЕРИЯ: Расчет баланса и получение истории ---
+    cash_balance_result = await db.execute(select(func.sum(CashRegisterTransaction.amount)))
+    cash_balance = cash_balance_result.scalar() or 0.0
+    
+    cash_transactions = (await db.execute(
+        select(CashRegisterTransaction).order_by(CashRegisterTransaction.id.desc()).limit(50)
+    )).scalars().all()
+    
+    return get_delivery_admin_html(couriers, partners, pwa_config, tz_string, message, cash_balance, cash_transactions)
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
 async def admin_delivery_map_page(
@@ -685,24 +758,70 @@ async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession =
 
 # --- УПРАВЛІННЯ КУР'ЄРАМИ ТА ПАРТНЕРАМИ ---
 
-# --- НОВІ ЕНДПОІНТИ ДЛЯ ФІНАНСІВ ---
 @router.post("/admin/delivery/courier/finance")
 async def courier_add_balance(
+    request: Request,
     id: int = Form(...), amount: float = Form(...),
     user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)
 ):
-    """Поповнення балансу кур'єра адміністратором"""
+    """Поповнення балансу кур'єра адміністратором (з урахуванням каси)"""
+    # Получаем данные из формы напрямую (чтобы считать необязательные поля)
+    form_data = await request.form()
+    cash_received = form_data.get("cash_received") == "true"
+    description = form_data.get("description", "").strip()
+
     courier = await db.get(Courier, id)
     if courier:
         if not hasattr(courier, 'balance'): courier.balance = 0.0
         courier.balance += amount
         
+        # Логика комментариев
+        desc = description if description else f"Поповнення адміністратором"
+        if not cash_received and not description:
+            desc = "Поповнення (без фактичної готівки)"
+            
+        # Транзакция для Курьера
         db.add(CourierTransaction(
             courier_id=courier.id, amount=amount, type="deposit", 
-            description=f"Ручне поповнення адміністратором"
+            description=desc, cash_received=cash_received
         ))
+        
+        # Если галочка "Получены деньги" СТОИТ - пополняем Бухгалтерию (Кассу)
+        if cash_received:
+            db.add(CashRegisterTransaction(
+                amount=amount,
+                type="deposit_courier",
+                description=f"Внесення від кур'єра {courier.name}: {desc}"
+            ))
+            
         await db.commit()
     return RedirectResponse(f"/admin/delivery?message=Баланс кур'єра {courier.name} поповнено на {amount}₴", status_code=302)
+
+
+@router.post("/admin/delivery/cash_register/action")
+async def cash_register_action(
+    action_type: str = Form(...),
+    amount: float = Form(...),
+    description: str = Form(...),
+    user: str = Depends(check_admin_auth),
+    db: AsyncSession = Depends(get_db)
+):
+    """Внесення або вилучення грошей з каси (Бухгалтерія)"""
+    if amount <= 0:
+        return RedirectResponse("/admin/delivery?message=Помилка: Сума має бути більшою за 0", status_code=302)
+        
+    final_amount = amount if action_type == "deposit" else -amount
+    
+    db.add(CashRegisterTransaction(
+        amount=final_amount,
+        type=action_type,
+        description=description
+    ))
+    
+    await db.commit()
+    msg = f"Успішно {'внесено' if action_type == 'deposit' else 'вилучено'} {amount}₴"
+    return RedirectResponse(f"/admin/delivery?message={msg}", status_code=302)
+
 
 @router.post("/admin/delivery/courier/commission")
 async def courier_update_commission(

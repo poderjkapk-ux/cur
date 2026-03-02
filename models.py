@@ -125,6 +125,10 @@ class CourierTransaction(Base):
     
     job_id = Column(Integer, ForeignKey("delivery_jobs.id"), nullable=True) # Якщо це комісія за конкретне замовлення
     
+    # --- НОВОЕ ПОЛЕ: была ли получена наличка ---
+    cash_received = Column(Boolean, default=True) 
+    # --------------------------------------------
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class DeliveryPartner(Base):
@@ -252,6 +256,18 @@ class SystemSetting(Base):
     key = Column(String(50), primary_key=True) # Наприклад: 'firebase_config', 'vapid_key'
     value = Column(String, nullable=True)      # Тут буде лежати JSON або рядок
 
+class CashRegisterTransaction(Base):
+    """
+    Таблиця транзакцій для Бухгалтерії (Каса).
+    """
+    __tablename__ = "cash_register_transactions"
+    
+    id = Column(Integer, primary_key=True)
+    amount = Column(Float, nullable=False) # Позитивне - прихід, негативне - вилучення
+    type = Column(String(50), nullable=False) # 'deposit_courier', 'deposit', 'withdraw'
+    description = Column(String(255), nullable=False) # На що вилучення / звідки прихід
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 # --- 3. Функції для роботи з БД ---
 
