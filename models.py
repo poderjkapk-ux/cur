@@ -102,6 +102,28 @@ class Courier(Base):
     avg_rating = Column(Float, default=5.0)  # Середній рейтинг (за замовчуванням 5.0)
     rating_count = Column(Integer, default=0) # Кількість отриманих оцінок
     # ---------------------------
+
+    # --- ФІНАНСИ ---
+    balance = Column(Float, default=0.0)              # Поточний баланс кур'єра
+    commission_rate = Column(Float, default=10.0)     # Відсоток комісії з доставки (за замовчуванням 10%)
+    # ---------------
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CourierTransaction(Base):
+    """
+    Таблиця транзакцій кур'єра (поповнення, списання комісії)
+    """
+    __tablename__ = "courier_transactions"
+    
+    id = Column(Integer, primary_key=True)
+    courier_id = Column(Integer, ForeignKey("couriers.id"), nullable=False)
+    
+    amount = Column(Float, nullable=False) # позитивне - поповнення, негативне - списання
+    type = Column(String(50), nullable=False) # 'deposit', 'commission', 'withdrawal'
+    description = Column(String(255), nullable=True)
+    
+    job_id = Column(Integer, ForeignKey("delivery_jobs.id"), nullable=True) # Якщо це комісія за конкретне замовлення
     
     created_at = Column(DateTime, default=datetime.utcnow)
 

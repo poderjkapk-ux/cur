@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta
 
-# --- 1. Импорты модулей проекта ---
+# --- 1. Імпорти модулів проекту ---
 import provision
 import auth 
 import templates_saas
@@ -31,20 +31,20 @@ import bot_service
 import order_monitor
 
 from models import (
-    Base, engine, async_session_maker, User, Instance, Courier, 
+    Base, engine, async_session_maker, User, Instance, Courier, CourierTransaction,
     DeliveryPartner, DeliveryJob, PendingVerification, ChatMessage, 
     create_db_tables, get_db
 )
 from auth import check_admin_auth
 
-# ИМПОРТ ФУНКЦИЙ ДЛЯ РАБОТЫ С НАСТРОЙКАМИ В БД
+# ІМПОРТ ФУНКЦІЙ ДЛЯ РОБОТИ З НАЛАШТУВАННЯМИ В БД
 from crud_settings import get_setting, set_setting, get_all_settings
 
 # --- FIREBASE IMPORTS ---
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-# --- 2. Конфигурация ---
+# --- 2. Конфігурація ---
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 ROOT_DOMAIN = os.environ.get("ROOT_DOMAIN", "restify.site")
@@ -52,7 +52,7 @@ BOT_USERNAME = os.environ.get("BOT_USERNAME", "Restify_Bot")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
-# Инициализация Firebase Admin SDK
+# Ініціалізація Firebase Admin SDK
 if not firebase_admin._apps:
     try:
         if os.path.exists("firebase_credentials.json"):
@@ -70,7 +70,7 @@ class ConnectionManager:
         self.active_couriers: Dict[int, WebSocket] = {}
         self.active_partners: Dict[int, WebSocket] = {}
 
-    # --- Методы для КУРЬЕРОВ ---
+    # --- Методи для КУР'ЄРІВ ---
     async def connect_courier(self, websocket: WebSocket, courier_id: int):
         await websocket.accept()
         self.active_couriers[courier_id] = websocket
@@ -89,7 +89,7 @@ class ConnectionManager:
                 logging.error(f"WS Error (Courier {courier_id}): {e}")
                 self.disconnect_courier(courier_id)
 
-    # --- Методы для ПАРТНЕРОВ (Ресторанов) ---
+    # --- Методи для ПАРТНЕРІВ (Ресторанів) ---
     async def connect_partner(self, websocket: WebSocket, partner_id: int):
         await websocket.accept()
         self.active_partners[partner_id] = websocket
@@ -109,23 +109,23 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# --- Настройки по умолчанию для Базы Данных ---
+# --- Налаштування за замовчуванням для Бази Даних ---
 DEFAULT_SETTINGS = {
     "admin_id": "", "bot_token": "", "price_light": "300", 
     "price_full": "600", "currency": "$", 
     "custom_btn_text": "", "custom_btn_content": "",
     "firebase_api_key": "", "firebase_project_id": "",
     "firebase_sender_id": "", "firebase_app_id": "",
-    "timezone": "Europe/Kiev" # Добавлен часовой пояс по умолчанию
+    "timezone": "Europe/Kiev" # Доданий часовий пояс за замовчуванням
 }
 
-# --- LIFESPAN (Запуск/Остановка) ---
+# --- LIFESPAN (Запуск/Зупинка) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.info("Startup: Connecting DB & Creating tables...")
     await create_db_tables()
     
-    # Инициализация дефолтных настроек в Базе Данных, если их еще нет
+    # Ініціалізація дефолтних налаштувань в Базі Даних, якщо їх ще немає
     async with async_session_maker() as session:
         for key, default_value in DEFAULT_SETTINGS.items():
             existing = await get_setting(session, key)
@@ -140,7 +140,7 @@ async def lifespan(app: FastAPI):
     else:
         logging.warning("TG_BOT_TOKEN not set, bot disabled.")
     
-    # Запуск монитора заказов
+    # Запуск монітора замовлень
     asyncio.create_task(order_monitor.monitor_stale_orders(manager))
     logging.info("Order Monitor started.")
     
@@ -149,7 +149,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Restify SaaS Control Plane", lifespan=lifespan)
 
-# Подключение роутера админки доставки
+# Підключення роутера адмінки доставки
 app.include_router(admin_delivery.router)
 
 os.makedirs("static", exist_ok=True)
@@ -213,7 +213,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
 
 # ==============================================================================
-# 1. ОБЩИЕ РОУТЫ И SAAS (ВИТРИНА)
+# 1. ЗАГАЛЬНІ РОУТИ ТА SAAS (ВІТРИНА)
 # ==============================================================================
 
 @app.get("/", response_class=HTMLResponse)
@@ -246,7 +246,7 @@ async def login_for_access_token(
     user = await auth.authenticate_user(db, form_data.username, form_data.password)
     if not user:
         return RedirectResponse(
-            url="/login?message=Неверный email или пароль", 
+            url="/login?message=Невірний email або пароль", 
             status_code=status.HTTP_302_FOUND
         )
     
@@ -255,13 +255,13 @@ async def login_for_access_token(
     response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True, samesite="strict", max_age=604800)
     return response
 
-# --- DASHBOARD (Личный кабинет клиента) ---
+# --- DASHBOARD (Особистий кабінет клієнта) ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def get_dashboard(
     current_user: User = Depends(auth.get_current_user), 
     db: AsyncSession = Depends(get_db)
 ):
-    # Загружаем пользователя вместе с его инстансами
+    # Завантажуємо користувача разом з його інстансами
     result = await db.execute(
         select(User).where(User.id == current_user.id).options(joinedload(User.instances))
     )
@@ -297,10 +297,10 @@ async def handle_registration(
 ):
     verif = await db.get(PendingVerification, verification_token)
     if not verif or verif.status != "verified":
-         return JSONResponse(status_code=400, content={"detail": "Номер телефона не подтвержден через Telegram."})
+         return JSONResponse(status_code=400, content={"detail": "Номер телефону не підтверджено через Telegram."})
 
     if await auth.get_user_by_email(db, email):
-        return JSONResponse(status_code=400, content={"detail": "Этот email уже зарегистрирован."})
+        return JSONResponse(status_code=400, content={"detail": "Цей email вже зареєстровано."})
 
     hashed_password = auth.get_password_hash(password)
     new_user = User(email=email, hashed_password=hashed_password)
@@ -314,7 +314,7 @@ async def handle_registration(
     return JSONResponse(content={"detail": "User created successfully."})
 
 # ==============================================================================
-# 2. УПРАВЛЕНИЕ ИНСТАНСАМИ (SAAS LOGIC)
+# 2. УПРАВЛІННЯ ІНСТАНСАМИ (SAAS LOGIC)
 # ==============================================================================
 
 @app.post("/api/create-instance")
@@ -324,18 +324,18 @@ async def handle_instance_creation(
     db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)
 ):
     try:
-        # Валидация имени
+        # Валідація імені
         c_name = "".join(x for x in name.lower() if x.isalnum() or x=='-')[:20] or "client"
         sub = f"{c_name}.{ROOT_DOMAIN}"
         
-        # Проверка уникальности
+        # Перевірка унікальності
         if (await db.execute(select(Instance).where(Instance.subdomain == sub))).scalar():
-            return JSONResponse(status_code=400, content={"detail": "Этот поддомен уже занят. Выберите другое имя."})
+            return JSONResponse(status_code=400, content={"detail": "Цей піддомен вже зайнятий. Виберіть інше ім'я."})
         
-        # Вызов provision для создания контейнера и БД
+        # Виклик provision для створення контейнера та БД
         res = provision.create_new_client_instance(c_name, ROOT_DOMAIN, client_bot_token, admin_bot_token, admin_chat_id)
         
-        # Сохранение в нашу БД
+        # Збереження в нашу БД
         db.add(Instance(
             user_id=current_user.id, subdomain=res["subdomain"], url=res["url"],
             container_name=res["container_name"], admin_pass=res["password"],
@@ -343,7 +343,7 @@ async def handle_instance_creation(
         ))
         await db.commit()
         
-        # Уведомление администратору SaaS
+        # Сповіщення адміністратору SaaS
         asyncio.create_task(send_tg_notification(name, phone, plan, res))
         
         return JSONResponse(res)
@@ -378,20 +378,20 @@ async def handle_instance_delete(
     if not instance or instance.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Instance not found")
     
-    # Полное удаление
+    # Повне видалення
     if provision.delete_client_instance(instance.container_name):
         await db.delete(instance)
         await db.commit()
-        return JSONResponse({"message": "Проект успешно удален."})
+        return JSONResponse({"message": "Проект успішно видалено."})
     else:
-        return JSONResponse(status_code=500, content={"detail": "Ошибка при удалении контейнера."})
+        return JSONResponse(status_code=500, content={"detail": "Помилка при видаленні контейнера."})
 
 # --- ADMIN API (SUPER ADMIN) ---
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard(
     db: AsyncSession = Depends(get_db), _ = Depends(check_admin_auth)
 ):
-    # Получаем всех клиентов и их инстансы
+    # Отримуємо всіх клієнтів та їхні інстанси
     res = await db.execute(select(User, Instance).outerjoin(Instance, User.id == Instance.user_id))
     clients = res.all()
     return templates_saas.get_admin_dashboard_html(clients)
@@ -429,25 +429,25 @@ async def settings_page(db: AsyncSession = Depends(get_db), _ = Depends(check_ad
 async def settings_save(request: Request, db: AsyncSession = Depends(get_db), _ = Depends(check_admin_auth)):
     form = await request.form()
     
-    # Обрабатываем все поля из формы
+    # Обробляємо всі поля з форми
     for k, v in form.items():
         if k == "firebase_credentials_json":
             if v.strip():
                 try:
                     import json
                     parsed = json.loads(v)
-                    # Firebase credentials всё ещё сохраняем в файл, так как SDK требует файл или словарь
+                    # Firebase credentials все ще зберігаємо у файл
                     with open("firebase_credentials.json", "w", encoding="utf-8") as f:
                         json.dump(parsed, f, indent=4)
                     
-                    # Пытаемся инициализировать на лету, если еще не было
+                    # Намагаємося ініціалізувати на льоту, якщо ще не було
                     if not firebase_admin._apps:
                         cred = credentials.Certificate("firebase_credentials.json")
                         firebase_admin.initialize_app(cred)
                 except Exception as e:
-                    logging.error(f"Ошибка сохранения Firebase JSON: {e}")
+                    logging.error(f"Помилка збереження Firebase JSON: {e}")
         else:
-            # Все остальные настройки (цены, токены и т.д.) пишем в БД
+            # Всі інші налаштування пишемо в БД
             await set_setting(db, k, v)
             
     config = await get_all_settings(db)
@@ -484,15 +484,15 @@ async def api_courier_register(
 ):
     verif = await db.get(PendingVerification, verification_token)
     if not verif or verif.status != "verified":
-         return JSONResponse(status_code=400, content={"detail": "Номер телефона не підтверджено."})
+         return JSONResponse(status_code=400, content={"detail": "Номер телефону не підтверджено."})
 
     if await auth.get_courier_by_phone(db, verif.phone):
         return JSONResponse(status_code=400, content={"detail": "Цей номер вже зареєстрований"})
     
-    # Создаем папку для документов, если ее нет
+    # Створюємо папку для документів, якщо її немає
     os.makedirs("static/documents", exist_ok=True)
     
-    # Сохраняем фото документа
+    # Зберігаємо фото документа
     file_extension = document_photo.filename.split(".")[-1]
     file_name = f"doc_{verif.phone}_{uuid.uuid4().hex[:6]}.{file_extension}"
     file_path = f"static/documents/{file_name}"
@@ -525,6 +525,22 @@ async def api_courier_login(
     is_secure = ROOT_DOMAIN.startswith("https") 
     resp.set_cookie(key="courier_token", value=token, httponly=True, max_age=604800, samesite="lax", secure=is_secure)
     return resp
+
+# --- НОВИЙ ЕНДПОІНТ ПРОФІЛЮ ДЛЯ PWA ТА ANDROID ---
+@app.get("/api/courier/profile")
+async def get_courier_profile(
+    courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)
+):
+    """Ендпоінт для PWA та Native Android App"""
+    return JSONResponse({
+        "id": courier.id,
+        "name": courier.name,
+        "phone": courier.phone,
+        "balance": getattr(courier, 'balance', 0.0),
+        "commission_rate": getattr(courier, 'commission_rate', 10.0),
+        "rating": getattr(courier, 'avg_rating', 5.0),
+        "rating_count": getattr(courier, 'rating_count', 0)
+    })
 
 @app.get("/courier/app", response_class=HTMLResponse)
 async def courier_pwa_main(courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)):
@@ -906,12 +922,11 @@ async def get_active_job(
             "payment_type": job.payment_type,
             "is_return_required": job.is_return_required,
             
-            # --- НОВЫЕ ПОЛЯ ДЛЯ ТАЙМЕРОВ ---
+            # --- ЧАСОВІ МІТКИ ДЛЯ ТАЙМЕРІВ ---
             "assigned_at": job.accepted_at.isoformat() + "Z" if job.accepted_at else None,
             "picked_up_at": job.picked_up_at.isoformat() + "Z" if job.picked_up_at else None,
             "delivered_at": job.delivered_at.isoformat() + "Z" if job.delivered_at else None,
-            "completed_at": None # Заказ исчезает с активного экрана после полного завершения
-            # ---------------------------------
+            "completed_at": None 
         }
     })
 
@@ -958,7 +973,7 @@ async def update_job_status(
     
     if status == "delivered" and job.is_return_required:
         job.status = "returning"
-        job.delivered_at = datetime.utcnow() # <--- ДОБАВЛЕНО ДЛЯ ТАЙМЕРА ПОВЕРНЕННЯ КОШТІВ
+        job.delivered_at = datetime.utcnow()
         msg_text = f"💰 Кур'єр {courier.name} віддав замовлення і везе гроші назад!"
         color = "#fb923c" 
         
@@ -987,6 +1002,24 @@ async def update_job_status(
             msg_text = f"🎉 Замовлення #{job.id} успішно доставлено!"
             status_text = "delivered"
             color = "#bbf7d0"
+            
+            # --- НОВЕ: СПИСАННЯ КОМІСІЇ ---
+            commission_rate = getattr(courier, 'commission_rate', 10.0)
+            commission_amount = (job.delivery_fee * commission_rate) / 100.0
+            
+            if not hasattr(courier, 'balance'):
+                courier.balance = 0.0
+            courier.balance -= commission_amount
+            
+            db.add(CourierTransaction(
+                courier_id=courier.id,
+                amount=-commission_amount,
+                type="commission",
+                description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
+                job_id=job.id
+            ))
+            # -------------------------------
+            
         else:
              msg_text = f"Статус замовлення #{job.id}: {status}"
              status_text = status
@@ -1156,7 +1189,7 @@ async def get_current_partner(request: Request, db: AsyncSession = Depends(get_d
     except Exception: raise HTTPException(status_code=401)
 
 # ==========================================
-# НАТИВНЫЕ JSON API ДЛЯ ANDROID ПРИЛОЖЕНИЯ ПАРТНЕРА
+# НАТИВНІ JSON API ДЛЯ ANDROID ДОДАТКА ПАРТНЕРА
 # ==========================================
 
 @app.post("/api/partner/login_native")
@@ -1191,7 +1224,8 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
         if j.courier:
             c_data = {
                 "name": j.courier.name, "phone": j.courier.phone,
-                "rating": j.courier.avg_rating or 5.0, "rating_count": j.courier.rating_count or 0
+                "rating": getattr(j.courier, 'avg_rating', 5.0), 
+                "rating_count": getattr(j.courier, 'rating_count', 0)
             }
         data.append({
             "id": j.id, 
@@ -1355,7 +1389,7 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
     try: partner = await get_current_partner(request, db)
     except HTTPException: return RedirectResponse("/partner/login")
     
-    # Загружаем настройки, чтобы достать нужный часовой пояс
+    # Завантажуємо налаштування, щоб дістати потрібний часовий пояс
     config = await get_all_settings(db)
     tz = config.get("timezone", "Europe/Kiev")
     
@@ -1365,7 +1399,7 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
         .where(DeliveryJob.partner_id == partner.id)
         .order_by(DeliveryJob.id.desc())
     )
-    # Передаем таймзону (tz) последним аргументом в шаблон
+    # Передаємо таймзону (tz) останнім аргументом в шаблон
     return templates_partner.get_partner_dashboard_html(partner, result.scalars().all(), tz)
 
 @app.post("/api/partner/confirm_return")
@@ -1380,15 +1414,31 @@ async def partner_confirm_return(
         
     job.status = "delivered" 
     job.delivered_at = datetime.utcnow()
-    await db.commit()
     
+    # --- НОВЕ: СПИСАННЯ КОМІСІЇ ПІСЛЯ ПОВЕРНЕННЯ КОШТІВ ---
     if job.courier_id:
+        courier = await db.get(Courier, job.courier_id)
+        if courier:
+            commission_rate = getattr(courier, 'commission_rate', 10.0)
+            commission_amount = (job.delivery_fee * commission_rate) / 100.0
+            
+            if not hasattr(courier, 'balance'):
+                courier.balance = 0.0
+            courier.balance -= commission_amount
+            
+            db.add(CourierTransaction(
+                courier_id=courier.id, amount=-commission_amount,
+                type="commission", description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
+                job_id=job.id
+            ))
+            
         await manager.notify_courier(job.courier_id, {
             "type": "job_update", 
             "status": "delivered",
             "message": "✅ Заклад підтвердив отримання коштів. Ви вільні!"
         })
         
+    await db.commit()
     return JSONResponse({"status": "ok"})
 
 @app.post("/api/partner/create_order")
@@ -1533,8 +1583,8 @@ async def partner_rate_courier(
         if job.courier_id:
             courier = await db.get(Courier, job.courier_id)
             if courier:
-                current_avg = courier.avg_rating or 5.0
-                current_count = courier.rating_count or 0
+                current_avg = getattr(courier, 'avg_rating', 5.0)
+                current_count = getattr(courier, 'rating_count', 0)
                 
                 new_count = current_count + 1
                 new_avg = ((current_avg * current_count) + rating) / new_count

@@ -12,15 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update
 from sqlalchemy.orm import joinedload
 
-# Импортируем bot_service для отправки сообщений при верификации
+# Імпортуємо bot_service для відправки повідомлень при верифікації
 import bot_service
 
-# Импортируем auth вместо app, чтобы избежать циклического импорта
-from models import get_db, Courier, DeliveryPartner, DeliveryJob
+# Імпортуємо auth замість app, щоб уникнути циклічного імпорту
+from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction
 from auth import check_admin_auth 
-from crud_settings import get_setting # Импорт для получения часового пояса
+from crud_settings import get_setting # Імпорт для отримання часового поясу
 
-# Импортируем GLOBAL_STYLES
+# Імпортуємо GLOBAL_STYLES
 from templates_saas import GLOBAL_STYLES
 
 router = APIRouter()
@@ -58,7 +58,7 @@ def save_pwa_config(config):
     with open(PWA_CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
 
-# --- УТИЛИТА КОНВЕРТАЦИИ ВРЕМЕНИ ---
+# --- УТИЛІТА КОНВЕРТАЦІЇ ЧАСУ ---
 def format_local_time(utc_dt, tz_string='Europe/Kiev', fmt='%d.%m.%Y %H:%M'):
     """Конвертує UTC datetime у локальний час заданого часового поясу."""
     if not utc_dt:
@@ -72,7 +72,7 @@ def format_local_time(utc_dt, tz_string='Europe/Kiev', fmt='%d.%m.%Y %H:%M'):
     except pytz.UnknownTimeZoneError:
         return utc_dt.strftime(fmt)
 
-# --- ГЕОКОДИНГ ДЛЯ КАРТЫ (КЕШИРОВАННЫЙ) ---
+# --- ГЕОКОДИНГ ДЛЯ КАРТИ (КЕШОВАНИЙ) ---
 GEOCODE_CACHE = {}
 
 async def get_coords(address: str):
@@ -353,7 +353,7 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
     
     for j in jobs:
         color = status_colors.get(j.status, "#ffffff")
-        # Применяем часовой пояс
+        # Застосовуємо часовий пояс
         date_str = format_local_time(j.created_at, tz_string, '%d.%m.%Y %H:%M') if j.created_at else "-"
         
         rating = f"⭐ {j.courier_rating}" if j.courier_rating else "-"
@@ -420,23 +420,45 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
 def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message=""):
     courier_rows = ""
     for c in couriers:
-        status_color = "#4ade80" if c.is_active else "#facc15" # Желтый для ожидающих
+        status_color = "#4ade80" if c.is_active else "#facc15" # Жовтий для очікуючих
         btn_action = "ban" if c.is_active else "unban"
         btn_icon = "fa-ban" if c.is_active else "fa-check"
         btn_class = "warn" if c.is_active else "success"
         
         last_seen_str = format_local_time(c.last_seen, tz_string, '%d.%m %H:%M') if c.last_seen else '-'
         
-        # --- ССЫЛКА НА ДОКУМЕНТ ---
+        # --- ПОСИЛАННЯ НА ДОКУМЕНТ ---
         doc_link = f"<br><a href='{c.document_photo}' target='_blank' style='color:#3b82f6; font-size:0.8rem; text-decoration:none; margin-top:5px; display:inline-block;'><i class='fa-solid fa-id-card'></i> Документ</a>" if getattr(c, 'document_photo', None) else "<br><span style='color:#94a3b8; font-size:0.8rem;'>Немає фото</span>"
+        
+        # --- ФІНАНСИ ---
+        balance_val = getattr(c, 'balance', 0.0)
+        balance_color = "#ef4444" if balance_val < 0 else "#4ade80"
+        commission_val = getattr(c, 'commission_rate', 10.0)
         
         courier_rows += f"""
         <tr>
             <td>{c.id}</td>
             <td><b>{c.name}</b><br><small>{c.phone}</small>{doc_link}</td>
+            <td>
+                <span style="color:{balance_color}; font-weight:bold;">{balance_val:.2f} ₴</span><br>
+                <small style="color:#94a3b8">Комісія: {commission_val}%</small>
+            </td>
             <td><span class="dot" style="background:{status_color}"></span> {'Активний' if c.is_active else 'Очікує / Бан'}</td>
             <td>{last_seen_str}</td>
-            <td style="display:flex; gap:5px;">
+            <td style="display:flex; gap:5px; flex-wrap: wrap; align-items: center;">
+                <form action="/admin/delivery/courier/finance" method="post" style="margin:0; display:flex; gap:5px;">
+                    <input type="hidden" name="id" value="{c.id}">
+                    <input type="number" step="0.01" name="amount" placeholder="+ Сума" style="width:70px; padding:4px; border-radius:4px; background:#334155; border:none; color:white; font-size:0.8rem;" required>
+                    <button class="btn-mini success" title="Поповнити баланс"><i class="fa-solid fa-plus"></i></button>
+                </form>
+                <form action="/admin/delivery/courier/commission" method="post" style="margin:0; display:flex; gap:5px;">
+                    <input type="hidden" name="id" value="{c.id}">
+                    <input type="number" step="0.1" name="rate" placeholder="%" value="{commission_val}" style="width:50px; padding:4px; border-radius:4px; background:#334155; border:none; color:white; font-size:0.8rem;" required>
+                    <button class="btn-mini info" title="Змінити % комісії"><i class="fa-solid fa-percent"></i></button>
+                </form>
+                
+                <div style="width:100%; height:1px; background:rgba(255,255,255,0.05); margin: 5px 0;"></div>
+                
                 <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
                 <form action="/admin/delivery/courier/control" method="post" style="margin:0;">
                     <input type="hidden" name="id" value="{c.id}">
@@ -517,7 +539,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
                     <h2>🚴 Кур'єри ({len(couriers)})</h2>
                     <div style="max-height: 400px; overflow-y: auto;">
                         <table>
-                            <thead><tr><th>ID</th><th>Інфо</th><th>Статус</th><th>Online</th><th>Дії</th></tr></thead>
+                            <thead><tr><th>ID</th><th>Інфо</th><th>Фінанси</th><th>Статус</th><th>Online</th><th>Дії</th></tr></thead>
                             <tbody>{courier_rows}</tbody>
                         </table>
                     </div>
@@ -606,7 +628,7 @@ async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession =
             .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
         )).scalar()
         
-        # Добавляем "Z", чтобы Javascript понимал, что это UTC время
+        # Добавляємо "Z", щоб Javascript розумів, що це UTC час
         courier_list.append({
             "id": c.id, 
             "name": c.name, 
@@ -634,7 +656,6 @@ async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession =
             # Кешований геокодинг адреси закладу
             p_lat, p_lon = await get_coords(j.partner.address)
             
-        # Добавляем "Z", чтобы Javascript понимал, что это UTC время
         jobs_list.append({
             "id": j.id,
             "status": j.status,
@@ -663,6 +684,39 @@ async def get_map_data(user: str = Depends(check_admin_auth), db: AsyncSession =
     return JSONResponse({"couriers": courier_list, "jobs": jobs_list})
 
 # --- УПРАВЛІННЯ КУР'ЄРАМИ ТА ПАРТНЕРАМИ ---
+
+# --- НОВІ ЕНДПОІНТИ ДЛЯ ФІНАНСІВ ---
+@router.post("/admin/delivery/courier/finance")
+async def courier_add_balance(
+    id: int = Form(...), amount: float = Form(...),
+    user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)
+):
+    """Поповнення балансу кур'єра адміністратором"""
+    courier = await db.get(Courier, id)
+    if courier:
+        if not hasattr(courier, 'balance'): courier.balance = 0.0
+        courier.balance += amount
+        
+        db.add(CourierTransaction(
+            courier_id=courier.id, amount=amount, type="deposit", 
+            description=f"Ручне поповнення адміністратором"
+        ))
+        await db.commit()
+    return RedirectResponse(f"/admin/delivery?message=Баланс кур'єра {courier.name} поповнено на {amount}₴", status_code=302)
+
+@router.post("/admin/delivery/courier/commission")
+async def courier_update_commission(
+    id: int = Form(...), rate: float = Form(...),
+    user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)
+):
+    """Зміна індивідуального відсотка комісії для кур'єра"""
+    courier = await db.get(Courier, id)
+    if courier:
+        courier.commission_rate = rate
+        await db.commit()
+    return RedirectResponse(f"/admin/delivery?message=Комісію для {courier.name} змінено на {rate}%", status_code=302)
+
+
 @router.post("/admin/delivery/courier/control")
 async def courier_control(
     id: int = Form(...),
@@ -681,7 +735,7 @@ async def courier_control(
         courier.is_active = True
         msg = f"Кур'єр {courier.name} верифікований та розблокований."
         
-        # --- ОТПРАВКА СООБЩЕНИЯ В TELEGRAM О ВЕРИФИКАЦИИ ---
+        # --- ВІДПРАВКА ПОВІДОМЛЕННЯ В TELEGRAM ПРО ВЕРИФІКАЦІЮ ---
         if courier.telegram_chat_id:
             tg_text = f"✅ <b>Ваш профіль успішно верифіковано!</b>\n\nТепер ви можете увійти в додаток і почати отримувати замовлення."
             asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_text))
@@ -727,7 +781,7 @@ async def partner_control(
     await db.commit()
     return RedirectResponse(f"/admin/delivery?message={msg}", status_code=302)
 
-# --- ІСТОРІЯ ЗАМОВЛЕНЬ (НОВІ ЕНДПОІНТИ) ---
+# --- ІСТОРІЯ ЗАМОВЛЕНЬ ---
 
 @router.get("/admin/delivery/courier/{courier_id}/history", response_class=HTMLResponse)
 async def admin_courier_history(

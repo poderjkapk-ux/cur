@@ -1,31 +1,31 @@
 from templates_saas import GLOBAL_STYLES
 
-# Импорт моделей для типизации
+# Імпорт моделей для типізації
 try:
     from models import Courier
 except ImportError:
     class Courier: pass
 
-# --- Добавляем стили специально для карты и PWA ---
+# --- Додаємо стилі спеціально для карти та PWA ---
 PWA_STYLES = """
 <style>
-    /* Глобальный сброс для PWA */
+    /* Глобальне скидання для PWA */
     * { box-sizing: border-box; }
 
-    /* Отключаем скролл страницы, чтобы ощущалось как Native App */
+    /* Вимикаємо скрол сторінки, щоб відчувалося як Native App */
     body, html { 
         height: 100%; 
         overflow: hidden; 
         overscroll-behavior: none;
-        padding: 0 !important; /* Сбрасываем padding из GLOBAL_STYLES */
+        padding: 0 !important; /* Скидаємо padding з GLOBAL_STYLES */
         margin: 0 !important;
     }
     
     /* Карта на весь фон */
     #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-    #map.hidden { visibility: hidden; } /* Скрываем карту, когда активна лента */
+    #map.hidden { visibility: hidden; } /* Ховаємо карту, коли активна стрічка */
 
-    /* Верхняя панель (Header) */
+    /* Верхня панель (Header) */
     .app-header {
         position: absolute; top: 0; left: 0; right: 0;
         background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px);
@@ -33,7 +33,7 @@ PWA_STYLES = """
         display: flex; justify-content: space-between; align-items: center;
         border-bottom: 1px solid var(--border);
         box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-        height: 60px; /* Фиксированная высота для расчетов */
+        height: 60px; /* Фіксована висота для розрахунків */
     }
     .status-indicator { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.9rem; cursor: pointer; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; box-shadow: 0 0 10px currentColor; }
@@ -41,7 +41,7 @@ PWA_STYLES = """
     .dot.offline { background: var(--status-delete); color: var(--status-delete); }
     .icon-btn { background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 5px; }
 
-    /* --- НИЖНЯЯ НАВИГАЦИЯ (TABS) --- */
+    /* --- НИЖНЯ НАВІГАЦІЯ (TABS) --- */
     .bottom-nav {
         position: fixed; bottom: 0; left: 0; right: 0;
         height: 70px; background: #1e293b;
@@ -60,27 +60,27 @@ PWA_STYLES = """
     .nav-item.active { color: var(--primary); }
     .nav-item.active i { transform: translateY(-2px); text-shadow: 0 0 10px var(--primary); }
 
-    /* Контейнеры экранов */
+    /* Контейнери екранів */
     .screen { 
         display: none; 
         height: 100%; 
         width: 100%; 
-        position: relative; /* Важно для абсолютного позиционирования внутри */
+        position: relative; 
     }
     .screen.active { display: block; }
 
-    /* --- ЛЕНТА ЗАКАЗОВ (FEED) --- */
+    /* --- СТРІЧКА ЗАМОВЛЕНЬ ТА ПРОФІЛЬ --- */
     .feed-container {
         position: absolute;
         top: 0;
         left: 0;
         right: 0;
-        bottom: 70px; /* Отступ снизу равен высоте меню */
+        bottom: 70px; /* Відступ знизу (меню) */
         
-        padding: 80px 15px 20px 15px; /* Отступ сверху для хедера (60px + 20px) */
+        padding: 80px 15px 20px 15px; /* Відступ зверху для хедера */
         
         overflow-y: auto; 
-        -webkit-overflow-scrolling: touch; /* Плавный скролл на iOS */
+        -webkit-overflow-scrolling: touch; 
         background: var(--bg-body);
     }
     
@@ -95,7 +95,7 @@ PWA_STYLES = """
     .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); margin-top: 50px; }
     .empty-state i { font-size: 3rem; margin-bottom: 15px; opacity: 0.3; }
 
-    /* Карточка заказа в ленте */
+    /* Картка замовлення в стрічці */
     .order-card {
         background: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 15px;
         border: 1px solid rgba(255,255,255,0.05);
@@ -106,7 +106,7 @@ PWA_STYLES = """
         content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
         background: var(--primary);
     }
-    .order-card.high-price::before { background: var(--status-active); } /* Зеленая полоска для дорогих */
+    .order-card.high-price::before { background: var(--status-active); } 
 
     .oc-header { display: flex; justify-content: space-between; margin-bottom: 12px; }
     .oc-dist-badge { 
@@ -128,7 +128,6 @@ PWA_STYLES = """
     .oc-point.rest::before { background: #facc15; border: 2px solid #1e293b; }
     .oc-point.client::before { background: #22c55e; border: 2px solid #1e293b; }
     
-    /* Доп. инфо о маршруте (дистанция поездки) */
     .route-meta {
         position: absolute; left: -5px; top: 50%; transform: translateY(-50%);
         background: var(--bg-card); color: var(--text-muted); font-size: 0.7rem;
@@ -146,7 +145,7 @@ PWA_STYLES = """
     }
     .btn-accept:active { transform: scale(0.95); }
 
-    /* --- ШТОРКА АКТИВНОГО ЗАКАЗА (Bottom Sheet) --- */
+    /* --- ШТОРКА АКТИВНОГО ЗАМОВЛЕННЯ (Bottom Sheet) --- */
     .bottom-sheet {
         position: absolute; bottom: 0; left: 0; right: 0;
         background: var(--bg-card);
@@ -154,7 +153,7 @@ PWA_STYLES = """
         padding: 25px;
         z-index: 200;
         box-shadow: 0 -5px 30px rgba(0,0,0,0.4);
-        transform: translateY(110%); /* Скрыта по умолчанию */
+        transform: translateY(110%);
         transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
         max-height: 85vh;
         overflow-y: auto;
@@ -179,14 +178,14 @@ PWA_STYLES = """
     .btn-nav { background: #3b82f6; color: white; border: none; padding: 15px; border-radius: 12px; font-weight: 600; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; font-size: 1rem; }
     .btn-main { background: var(--status-active); color: #0f172a; border: none; padding: 15px; border-radius: 12px; font-weight: 700; width: 100%; font-size: 1.1rem; cursor: pointer; transition: 0.2s; }
     
-    /* Модалки (История, Чат) */
+    /* Модалки (Історія, Чат) */
     .history-modal, .chat-sheet {
         position: fixed; inset: 0; background: var(--bg-body); z-index: 600;
         padding: 20px; transform: translateX(100%); transition: 0.3s; overflow-y: auto;
     }
     .history-modal.open, .chat-sheet.open { transform: translateX(0); }
 
-    /* Чат (стили) */
+    /* Чат (стилі) */
     .chat-header { padding-bottom: 15px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .chat-body { flex: 1; padding: 15px 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; height: calc(100% - 130px); }
     .chat-footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 15px; background: var(--bg-card); display: flex; gap: 10px; }
@@ -195,7 +194,7 @@ PWA_STYLES = """
     .msg.other { align-self: flex-start; background: #334155; border-bottom-left-radius: 4px; }
     .chat-input { flex: 1; background: #1e293b; border: 1px solid var(--border); padding: 12px; border-radius: 25px; color: white; }
 
-    /* --- НОВЫЕ СТИЛИ ДЛЯ ОПЛАТЫ И ГОТОВНОСТИ --- */
+    /* --- НОВІ СТИЛІ ДЛЯ ОПЛАТИ ТА ГОТОВНОСТІ --- */
     .client-pay-box {
         background: #fce7f3; color: #be185d; 
         padding: 10px; border-radius: 8px; margin-bottom: 15px; 
@@ -208,7 +207,7 @@ PWA_STYLES = """
     }
     @keyframes popIn { from { transform: scale(0.5); opacity:0; } to { transform: scale(1); opacity:1; } }
 
-    /* --- СТИЛИ ДЛЯ ТАЙМЕРОВ --- */
+    /* --- СТИЛІ ДЛЯ ТАЙМЕРІВ --- */
     .current-time {
         font-weight: 800; color: var(--primary); font-size: 1.1rem;
         background: rgba(99, 102, 241, 0.1); padding: 5px 10px;
@@ -230,7 +229,7 @@ PWA_STYLES = """
 """
 
 def get_courier_login_page(message="", msg_type="error"):
-    """Страница входа для курьеров"""
+    """Сторінка входу для кур'єрів"""
     pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
     return f"""
     <!DOCTYPE html><html lang="uk"><head>
@@ -250,7 +249,7 @@ def get_courier_login_page(message="", msg_type="error"):
     """
 
 def get_courier_register_page():
-    """Страница регистрации для курьеров с Telegram Verification и Загрузкой документов"""
+    """Сторінка реєстрації для кур'єрів з Telegram Verification та Завантаженням документів"""
     return f"""
     <!DOCTYPE html><html lang="uk"><head><title>Реєстрація кур'єра</title>{GLOBAL_STYLES}
     <style>
@@ -343,7 +342,7 @@ def get_courier_register_page():
 
 def get_courier_pwa_html(courier: Courier, config: dict = None):
     """
-    Полностью обновленный PWA интерфейс с Feed (Лентой заказов) + PUSH + WAKE LOCK + Onboarding + Timers.
+    Оновлений PWA інтерфейс із вкладкою Профіль (Баланс, Комісія), Feed (Стрічка замовлень) + PUSH + WAKE LOCK + Onboarding + Timers.
     """
     if config is None:
         config = {}
@@ -442,6 +441,44 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
             </div>
         </div>
 
+        <div id="screen-profile" class="screen">
+            <div class="feed-container">
+                <div class="feed-header">
+                    <h1 class="feed-title">Мій Профіль</h1>
+                </div>
+                
+                <div style="background: #1e293b; padding: 25px; border-radius: 16px; text-align: center; border: 1px solid var(--border); box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-bottom: 20px;">
+                    <div style="width: 80px; height: 80px; border-radius: 50%; background: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; margin: 0 auto 15px;">
+                        <i class="fa-solid fa-motorcycle"></i>
+                    </div>
+                    <h2 id="prof-name" style="margin: 0 0 5px 0; color: white;">Завантаження...</h2>
+                    <p id="prof-phone" style="color: var(--text-muted); margin: 0;"></p>
+                    <div style="margin-top: 15px; display: inline-block; background: rgba(255,255,255,0.05); padding: 5px 15px; border-radius: 20px; color: #facc15;">
+                        <i class="fa-solid fa-star"></i> <span id="prof-rating">5.0</span> (<span id="prof-rating-count">0</span>)
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid var(--border);">
+                        <div style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 5px; text-transform: uppercase;">Поточний Баланс</div>
+                        <div id="prof-balance" style="font-size: 1.8rem; font-weight: 800; color: #4ade80;">0.00 ₴</div>
+                    </div>
+                    <div style="background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid var(--border);">
+                        <div style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 5px; text-transform: uppercase;">Моя Комісія</div>
+                        <div id="prof-commission" style="font-size: 1.8rem; font-weight: 800; color: #3b82f6;">10%</div>
+                    </div>
+                </div>
+                
+                <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 12px; padding: 15px; color: #fca5a5; font-size: 0.85rem; margin-bottom: 20px;">
+                    <i class="fa-solid fa-circle-info"></i> Комісія автоматично списується з вашого балансу за кожне успішно виконане замовлення. Слідкуйте за тим, щоб баланс не був від'ємним.
+                </div>
+                
+                <button class="btn" style="width: 100%; background: #334155; color: white;" onclick="toggleHistory(true)">
+                    <i class="fa-solid fa-list-check"></i> Історія замовлень
+                </button>
+            </div>
+        </div>
+
         <div class="bottom-nav">
             <div class="nav-item active" onclick="switchTab('map')" id="nav-map">
                 <i class="fa-solid fa-map-location-dot"></i>
@@ -453,6 +490,10 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     <div id="orders-badge" style="display:none; position:absolute; top:-2px; right:-8px; width:10px; height:10px; background:var(--accent); border-radius:50%; border:2px solid #1e293b;"></div>
                 </div>
                 <span>Замовлення</span>
+            </div>
+            <div class="nav-item" onclick="switchTab('profile')" id="nav-profile">
+                <i class="fa-solid fa-user"></i>
+                <span>Профіль</span>
             </div>
         </div>
 
@@ -595,7 +636,6 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }}
             }}
 
-            // Слушаем обновление токена
             messaging.onTokenRefresh(() => {{
                 messaging.getToken().then((refreshedToken) => {{
                     console.log('Token refreshed.');
@@ -613,7 +653,6 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }} catch(e) {{}}
             }}
 
-            // Foreground message handler
             messaging.onMessage((payload) => {{
                 console.log('Message received.', payload);
                 const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
@@ -623,7 +662,6 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }}
             }});
 
-            // WAKE LOCK (Щоб екран не гас і WS не рвався)
             let wakeLock = null;
             async function requestWakeLock() {{
                 if ('wakeLock' in navigator) {{
@@ -639,7 +677,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }}
             }}
 
-            // --- ONBOARDING FLOW (Install PWA -> Notifications) ---
+            // --- ONBOARDING FLOW ---
             let deferredPrompt;
 
             window.addEventListener('beforeinstallprompt', (e) => {{
@@ -724,8 +762,29 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     setTimeout(() => map.invalidateSize(), 100);
                 }} else {{
                     document.getElementById('map').classList.add('hidden');
-                    if(currentLat && currentLon) fetchOrders();
+                    if(tab === 'orders' && currentLat && currentLon) fetchOrders();
+                    if(tab === 'profile') fetchProfileData();
                 }}
+            }}
+
+            async function fetchProfileData() {{
+                try {{
+                    const res = await fetch('/api/courier/profile');
+                    const data = await res.json();
+                    
+                    document.getElementById('prof-name').innerText = data.name;
+                    document.getElementById('prof-phone').innerText = data.phone;
+                    
+                    const balanceEl = document.getElementById('prof-balance');
+                    balanceEl.innerText = data.balance.toFixed(2) + ' ₴';
+                    balanceEl.style.color = data.balance < 0 ? '#ef4444' : '#4ade80';
+                    
+                    document.getElementById('prof-commission').innerText = data.commission_rate + '%';
+                    
+                    document.getElementById('prof-rating').innerText = data.rating ? data.rating.toFixed(1) : '5.0';
+                    document.getElementById('prof-rating-count').innerText = data.rating_count || '0';
+                    
+                }} catch(e) {{ console.error("Помилка завантаження профілю", e); }}
             }}
 
             async function fetchOrders() {{
@@ -823,7 +882,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }};
                 socket.onclose = (event) => {{
                     document.getElementById('connection-dot').style.background = 'red';
-                    // Если сервер разорвал соединение из-за протухшего токена (политика безопасности)
+                    // Якщо сервер розірвав з'єднання через протухший токен
                     if (event.code === 1008) {{
                         window.location.href = '/courier/login?message=Сесія закінчилась. Увійдіть знову.';
                         return;
@@ -842,19 +901,16 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     
                     if (activeTab === 'orders' && isOnline) fetchOrders();
 
-                    // --- ВАЖЛИВЕ ВИПРАВЛЕННЯ: ЗАПИТ ДО БД НЕ ЗАЛЕЖИТЬ ВІД СТАТУСУ WEBSOCKET ---
                     if (isOnline) {{
                         const fd = new FormData(); 
                         fd.append('lat', latitude); 
                         fd.append('lon', longitude);
                         navigator.sendBeacon('/api/courier/location', fd);
                         
-                        // Відправляємо у сокет лише якщо він існує та відкритий
                         if (socket && socket.readyState === WebSocket.OPEN) {{
                             socket.send(JSON.stringify({{type: 'init_location', lat: latitude, lon: longitude}}));
                         }}
                     }}
-                    // -------------------------------------------------------------------------
                     
                 }}, console.error, {{ enableHighAccuracy: true }});
             }}
@@ -918,7 +974,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                      statusDesc.innerHTML += `<div class="client-pay-box">${{label}} ${{currentJob.order_price}} ₴</div>`;
                 }}
 
-                // --- ГЕНЕРАЦИЯ ТАЙМЕРОВ ДЛЯ КРОКОВ ---
+                // --- ГЕНЕРАЦІЯ ТАЙМЕРІВ ---
                 let stepsHtml = '';
                 
                 // Step 1
