@@ -417,9 +417,11 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
     """
 
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None):
+def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None):
     if cash_transactions is None:
         cash_transactions = []
+    if non_cash_deposits is None:
+        non_cash_deposits = []
         
     courier_rows = ""
     for c in couriers:
@@ -522,6 +524,15 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
     if not cash_rows_html:
         cash_rows_html = "<tr><td colspan='4' style='text-align:center; padding: 20px; color:#94a3b8;'>Транзакцій у касі ще немає</td></tr>"
 
+    # ГЕНЕРАЦИЯ СТРОК ДЛЯ ОТЧЕТА "БЕЗ НАЛИЧКИ"
+    non_cash_rows_html = ""
+    for ct, courier_name in non_cash_deposits:
+        date_str = format_local_time(ct.created_at, tz_string, '%d.%m %H:%M')
+        non_cash_rows_html += f"<tr><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{date_str}</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'><b>{courier_name}</b></td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05); color:#facc15; font-weight:bold; white-space:nowrap;'>+{ct.amount:.2f} ₴</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{ct.description}</td></tr>"
+    if not non_cash_rows_html:
+        non_cash_rows_html = "<tr><td colspan='4' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає поповнень без готівки</td></tr>"
+
+
     return f"""
     <!DOCTYPE html><html><head><title>Delivery Admin</title>{GLOBAL_STYLES}
     <style>
@@ -600,7 +611,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
                         </form>
                     </div>
 
-                    <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; flex: 2; min-width: 300px;">
+                    <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; flex: 1.5; min-width: 300px;">
                         <h3 style="margin-top:0; color:#94a3b8; font-size: 1rem;">Звіт: Останні рухи по касі</h3>
                         <div style="max-height: 250px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
@@ -618,6 +629,27 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
                             </table>
                         </div>
                     </div>
+                    
+                    <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; flex: 1.5; min-width: 300px; border: 1px dashed #f59e0b;">
+                        <h3 style="margin-top:0; color:#facc15; font-size: 1rem;"><i class="fa-solid fa-ghost"></i> Звіт: Поповнення БЕЗ готівки</h3>
+                        <p style="font-size:0.8rem; color:#94a3b8; margin-top:-10px;">Гроші зараховані кур'єру, але в касу фізично не потрапили.</p>
+                        <div style="max-height: 250px; overflow-y: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Дата</th>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Кур'єр</th>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Сума</th>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Коментар</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {non_cash_rows_html}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
@@ -676,8 +708,19 @@ async def admin_delivery_page(
     cash_transactions = (await db.execute(
         select(CashRegisterTransaction).order_by(CashRegisterTransaction.id.desc()).limit(50)
     )).scalars().all()
+
+    # --- НОВЕ: Отчет по пополнениям без налички ---
+    non_cash_query = await db.execute(
+        select(CourierTransaction, Courier.name)
+        .join(Courier, CourierTransaction.courier_id == Courier.id)
+        .where(CourierTransaction.cash_received == False)
+        .where(CourierTransaction.type == 'deposit')
+        .order_by(CourierTransaction.id.desc())
+        .limit(50)
+    )
+    non_cash_deposits = non_cash_query.all()
     
-    return get_delivery_admin_html(couriers, partners, pwa_config, tz_string, message, cash_balance, cash_transactions)
+    return get_delivery_admin_html(couriers, partners, pwa_config, tz_string, message, cash_balance, cash_transactions, non_cash_deposits)
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
 async def admin_delivery_map_page(
