@@ -250,7 +250,7 @@ def get_courier_login_page(message="", msg_type="error"):
     """
 
 def get_courier_register_page():
-    """Страница регистрации для курьеров с Telegram Verification"""
+    """Страница регистрации для курьеров с Telegram Verification и Загрузкой документов"""
     return f"""
     <!DOCTYPE html><html lang="uk"><head><title>Реєстрація кур'єра</title>{GLOBAL_STYLES}
     <style>
@@ -264,9 +264,13 @@ def get_courier_register_page():
     </head>
     <body><div class="container">
         <h1>Реєстрація Кур'єра</h1>
-        <form id="regForm" method="post" action="/api/courier/register">
+        <form id="regForm" method="post" action="/api/courier/register" enctype="multipart/form-data">
             <input type="text" name="name" placeholder="Ваше Ім'я" required>
             <input type="password" name="password" placeholder="Пароль" required>
+            
+            <label style="color: var(--text-muted); text-align: left; display: block; margin-bottom: 5px; margin-top: 10px;">Фото документів (Паспорт / Водійське):</label>
+            <input type="file" name="document_photo" accept="image/*" required style="background: rgba(255,255,255,0.03); color: white; padding: 10px; border-radius: 8px; border: 1px dashed var(--border); margin-bottom: 15px; width: 100%; box-sizing: border-box;">
+            
             <div id="tg-step" class="tg-verify-box">
                 <div id="tg-initial">
                     <p style="margin:0 0 10px 0; color:var(--text-muted);">Підтвердіть телефон через Telegram:</p>
@@ -329,7 +333,7 @@ def get_courier_register_page():
             try {{
                 const resp = await fetch('/api/courier/register', {{ method: 'POST', body: form }});
                 const resData = await resp.json();
-                if(resp.ok) window.location.href='/courier/login?message=Успішно! Увійдіть.&type=success';
+                if(resp.ok) window.location.href='/courier/login?message=Ваша заявка прийнята! Після верифікації вам прийде повідомлення в Telegram.&type=success';
                 else {{ msgEl.style.display = 'block'; msgEl.className = 'message error'; msgEl.innerText = resData.detail || 'Помилка'; btn.disabled = false; btn.innerText = "Зареєструватися"; }}
             }} catch (err) {{ msgEl.style.display = 'block'; msgEl.innerText = "Помилка мережі"; btn.disabled = false; btn.innerText = "Зареєструватися"; }}
         }});

@@ -3,6 +3,7 @@ import os
 import logging
 import httpx
 import pytz
+import asyncio
 from datetime import datetime
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
@@ -10,6 +11,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update
 from sqlalchemy.orm import joinedload
+
+# Импортируем bot_service для отправки сообщений при верификации
+import bot_service
 
 # Импортируем auth вместо app, чтобы избежать циклического импорта
 from models import get_db, Courier, DeliveryPartner, DeliveryJob
@@ -416,18 +420,21 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
 def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message=""):
     courier_rows = ""
     for c in couriers:
-        status_color = "#4ade80" if c.is_active else "#f87171"
+        status_color = "#4ade80" if c.is_active else "#facc15" # Желтый для ожидающих
         btn_action = "ban" if c.is_active else "unban"
         btn_icon = "fa-ban" if c.is_active else "fa-check"
         btn_class = "warn" if c.is_active else "success"
         
         last_seen_str = format_local_time(c.last_seen, tz_string, '%d.%m %H:%M') if c.last_seen else '-'
         
+        # --- ССЫЛКА НА ДОКУМЕНТ ---
+        doc_link = f"<br><a href='{c.document_photo}' target='_blank' style='color:#3b82f6; font-size:0.8rem; text-decoration:none; margin-top:5px; display:inline-block;'><i class='fa-solid fa-id-card'></i> Документ</a>" if getattr(c, 'document_photo', None) else "<br><span style='color:#94a3b8; font-size:0.8rem;'>Немає фото</span>"
+        
         courier_rows += f"""
         <tr>
             <td>{c.id}</td>
-            <td><b>{c.name}</b><br><small>{c.phone}</small></td>
-            <td><span class="dot" style="background:{status_color}"></span> {'Активний' if c.is_active else 'Заблокований'}</td>
+            <td><b>{c.name}</b><br><small>{c.phone}</small>{doc_link}</td>
+            <td><span class="dot" style="background:{status_color}"></span> {'Активний' if c.is_active else 'Очікує / Бан'}</td>
             <td>{last_seen_str}</td>
             <td style="display:flex; gap:5px;">
                 <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
@@ -436,7 +443,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
                     <input type="hidden" name="action" value="{btn_action}">
                     <button class="btn-mini {btn_class}"><i class="fa-solid {btn_icon}"></i></button>
                 </form>
-                <form action="/admin/delivery/courier/control" method="post" style="margin:0;" onsubmit="return confirm('Видалити кур\'єра назавжди?');">
+                <form action="/admin/delivery/courier/control" method="post" style="margin:0;" onsubmit="return confirm('Видалити кур\\'єра назавжди?');">
                     <input type="hidden" name="id" value="{c.id}">
                     <input type="hidden" name="action" value="delete">
                     <button class="btn-mini danger"><i class="fa-solid fa-trash"></i></button>
@@ -672,7 +679,13 @@ async def courier_control(
         msg = f"Кур'єр {courier.name} заблокований."
     elif action == "unban":
         courier.is_active = True
-        msg = f"Кур'єр {courier.name} розблокований."
+        msg = f"Кур'єр {courier.name} верифікований та розблокований."
+        
+        # --- ОТПРАВКА СООБЩЕНИЯ В TELEGRAM О ВЕРИФИКАЦИИ ---
+        if courier.telegram_chat_id:
+            tg_text = f"✅ <b>Ваш профіль успішно верифіковано!</b>\n\nТепер ви можете увійти в додаток і почати отримувати замовлення."
+            asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_text))
+            
     elif action == "delete":
         # 1. Відв'язуємо кур'єра від усіх замовлень (щоб не було помилки ForeignKey)
         await db.execute(

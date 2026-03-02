@@ -84,10 +84,13 @@ class Courier(Base):
 
     # --- НОВЕ ПОЛЕ ДЛЯ PUSH-СПОВІЩЕНЬ (FIREBASE) ---
     fcm_token = Column(String(255), nullable=True)
-    # --------------------------------------------------
+    
+    # --- НОВЕ ПОЛЕ ДЛЯ ФОТО ДОКУМЕНТІВ ---
+    document_photo = Column(String(255), nullable=True)
 
     # Статуси
-    is_active = Column(Boolean, default=True)      # Чи може взагалі працювати (чи не забанений)
+    # За замовчуванням False, щоб після реєстрації кур'єр проходив перевірку
+    is_active = Column(Boolean, default=False)      
     is_online = Column(Boolean, default=False)     # Чи вийшов на зміну
     
     # Геопозиціонування
@@ -171,7 +174,6 @@ class DeliveryJob(Base):
     
     # --- НОВЕ ПОЛЕ: КОЛИ КУР'ЄР ПРИБУВ В ЗАКЛАД ---
     arrived_at_pickup_at = Column(DateTime, nullable=True) 
-    # ----------------------------------------------
     
     ready_at = Column(DateTime, nullable=True)     # Коли замовлення готове
     picked_up_at = Column(DateTime, nullable=True) # Коли забрав

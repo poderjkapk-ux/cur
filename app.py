@@ -7,10 +7,11 @@ import asyncio
 import json
 import uuid
 import pytz
+import shutil
 from math import radians, cos, sin, asin, sqrt
 from contextlib import asynccontextmanager
 from typing import List, Dict 
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Header, WebSocket, WebSocketDisconnect, Response
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Header, WebSocket, WebSocketDisconnect, Response, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -475,7 +476,10 @@ async def courier_register_page():
 
 @app.post("/api/courier/register")
 async def api_courier_register(
-    name: str = Form(...), password: str = Form(...), verification_token: str = Form(...),
+    name: str = Form(...), 
+    password: str = Form(...), 
+    verification_token: str = Form(...),
+    document_photo: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
     verif = await db.get(PendingVerification, verification_token)
@@ -485,11 +489,25 @@ async def api_courier_register(
     if await auth.get_courier_by_phone(db, verif.phone):
         return JSONResponse(status_code=400, content={"detail": "Цей номер вже зареєстрований"})
     
+    # Создаем папку для документов, если ее нет
+    os.makedirs("static/documents", exist_ok=True)
+    
+    # Сохраняем фото документа
+    file_extension = document_photo.filename.split(".")[-1]
+    file_name = f"doc_{verif.phone}_{uuid.uuid4().hex[:6]}.{file_extension}"
+    file_path = f"static/documents/{file_name}"
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(document_photo.file, buffer)
+    
     db.add(Courier(
-        name=name, phone=verif.phone, 
+        name=name, 
+        phone=verif.phone, 
         hashed_password=auth.get_password_hash(password),
-        telegram_chat_id=verif.telegram_chat_id 
+        telegram_chat_id=verif.telegram_chat_id,
+        document_photo=f"/{file_path}"
     ))
+    
     await db.delete(verif)
     await db.commit()
     return JSONResponse({"status": "ok"})

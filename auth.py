@@ -152,6 +152,10 @@ async def get_current_courier(
     courier = await get_courier_by_phone(db, phone)
     if not courier:
         raise HTTPException(status_code=401, detail="Courier user not found")
+    
+    # --- НОВАЯ ПРОВЕРКА: ЕСЛИ КУРЬЕР ЗАБЛОКИРОВАН ИЛИ НЕ ВЕРИФИЦИРОВАН ---
+    if getattr(courier, 'is_active', False) == False:
+        raise HTTPException(status_code=403, detail="Ваш профіль ще не верифіковано або заблоковано.")
         
     return courier
 
