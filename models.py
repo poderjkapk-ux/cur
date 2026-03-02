@@ -105,7 +105,7 @@ class Courier(Base):
 
     # --- ФІНАНСИ ---
     balance = Column(Float, default=0.0)              # Поточний баланс кур'єра
-    commission_rate = Column(Float, default=10.0)     # Відсоток комісії з доставки (за замовчуванням 10%)
+    commission_rate = Column(Float, default=7.5)     # Відсоток комісії з доставки (за замовчуванням 10%)
     # ---------------
     
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -1246,11 +1246,14 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
 @app.post("/api/partner/create_order_native")
 async def api_create_order_native(
     dropoff_address: str = Form(...), customer_phone: str = Form(...), 
-    order_price: float = Form(0.0), delivery_fee: float = Form(50.0), 
+    order_price: float = Form(0.0), delivery_fee: float = Form(80.0), 
     comment: str = Form(""), payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
     db: AsyncSession = Depends(get_db), partner: DeliveryPartner = Depends(get_current_partner)
 ):
+    if delivery_fee < 80.0:
+        return JSONResponse({"status": "error", "message": "Мінімальна вартість доставки 80 грн"}, status_code=400)
+        
     client_lat, client_lon = await geocode_address(dropoff_address)
     rest_lat, rest_lon = await geocode_address(partner.address)
 
@@ -1447,7 +1450,7 @@ async def create_partner_order(
     customer_phone: str = Form(...), 
     customer_name: str = Form(""),
     order_price: float = Form(0.0), 
-    delivery_fee: float = Form(50.0), 
+    delivery_fee: float = Form(80.0), 
     comment: str = Form(""),
     payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
@@ -1456,6 +1459,9 @@ async def create_partner_order(
     db: AsyncSession = Depends(get_db), 
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
+    if delivery_fee < 80.0:
+        delivery_fee = 80.0
+        
     client_lat, client_lon = lat, lon
     
     if not client_lat or not client_lon:

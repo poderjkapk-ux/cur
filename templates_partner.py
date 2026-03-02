@@ -796,7 +796,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             </div>
                             <div>
                                 <label>Доставка (грн)</label>
-                                <input type="number" step="0.01" name="delivery_fee" id="delivery_fee" value="50">
+                                <input type="number" step="0.01" name="delivery_fee" id="delivery_fee" value="80" min="80">
                             </div>
                         </div>
                         
@@ -879,7 +879,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
             // --- ЛОГИКА ОПЛАТЫ ---
-            const baseFee = 50; 
+            const baseFee = 80; 
             const returnFee = 40; 
             function updateFormLogic() {{
                 const type = document.querySelector('input[name="payment_type"]:checked').value;
