@@ -838,11 +838,20 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     
                     if (activeTab === 'orders' && isOnline) fetchOrders();
 
-                    if(isOnline && socket && socket.readyState === WebSocket.OPEN) {{
-                        const fd = new FormData(); fd.append('lat', latitude); fd.append('lon', longitude);
+                    // --- ВАЖЛИВЕ ВИПРАВЛЕННЯ: ЗАПИТ ДО БД НЕ ЗАЛЕЖИТЬ ВІД СТАТУСУ WEBSOCKET ---
+                    if (isOnline) {{
+                        const fd = new FormData(); 
+                        fd.append('lat', latitude); 
+                        fd.append('lon', longitude);
                         navigator.sendBeacon('/api/courier/location', fd);
-                        socket.send(JSON.stringify({{type: 'init_location', lat: latitude, lon: longitude}}));
+                        
+                        // Відправляємо у сокет лише якщо він існує та відкритий
+                        if (socket && socket.readyState === WebSocket.OPEN) {{
+                            socket.send(JSON.stringify({{type: 'init_location', lat: latitude, lon: longitude}}));
+                        }}
                     }}
+                    // -------------------------------------------------------------------------
+                    
                 }}, console.error, {{ enableHighAccuracy: true }});
             }}
             
