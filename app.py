@@ -420,6 +420,68 @@ async def admin_control(
     await db.commit()
     return RedirectResponse("/admin", status_code=302)
 
+@app.post("/admin/delivery/force_cancel_order")
+async def admin_force_cancel_order(
+    job_id: int = Form(...), 
+    db: AsyncSession = Depends(get_db), 
+    _ = Depends(check_admin_auth)
+):
+    """Принудительная отмена заказа администратором с рассылкой уведомлений"""
+    result = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+
+    if not job:
+        return RedirectResponse("/admin/delivery?message=Замовлення не знайдено", status_code=302)
+        
+    if job.status in ["delivered", "cancelled"]:
+        return RedirectResponse("/admin/delivery?message=Замовлення вже завершено або скасовано", status_code=302)
+
+    job.status = "cancelled"
+    await db.commit()
+
+    cancel_msg = f"⚠️ Замовлення #{job.id} було скасовано адміністратором."
+
+    # 1. Сповіщення для ПАРТНЕРА (Закладу)
+    if job.partner_id:
+        partner = job.partner
+        # WebSocket
+        await manager.notify_partner(partner.id, {
+            "type": "order_update", 
+            "job_id": job.id, 
+            "status": "cancelled",
+            "status_text": "Скасовано адміном", 
+            "status_color": "#f87171",
+            "message": cancel_msg
+        })
+        # Telegram
+        if partner.telegram_chat_id:
+            asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, f"❌ <b>УВАГА</b>\n{cancel_msg}"))
+        # Push FCM
+        if partner.fcm_token:
+            await send_push_to_partners([partner.fcm_token], "Замовлення скасовано", cancel_msg, job_id=job.id)
+
+    # 2. Сповіщення для КУР'ЄРА (Якщо він був призначений)
+    if job.courier_id:
+        courier = job.courier
+        # WebSocket
+        await manager.notify_courier(courier.id, {
+            "type": "job_update", 
+            "status": "cancelled",
+            "message": cancel_msg
+        })
+        # Telegram
+        if courier.telegram_chat_id:
+            asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, f"❌ <b>УВАГА</b>\n{cancel_msg}\nМожете брати нові замовлення."))
+        # Push FCM
+        if courier.fcm_token:
+            await send_push_to_couriers([courier.fcm_token], "Замовлення скасовано", cancel_msg, job_id=job.id)
+
+    return RedirectResponse(f"/admin/delivery?message=Замовлення #{job.id} успішно скасовано.", status_code=302)
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(db: AsyncSession = Depends(get_db), _ = Depends(check_admin_auth)):
     config = await get_all_settings(db)

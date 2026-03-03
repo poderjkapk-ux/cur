@@ -16,7 +16,7 @@ from sqlalchemy.orm import joinedload
 import bot_service
 
 # Імпортуємо auth замість app, щоб уникнути циклічного імпорту
-from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction
+from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage
 from auth import check_admin_auth 
 from crud_settings import get_setting # Імпорт для отримання часового поясу
 
@@ -416,12 +416,56 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
     </body></html>
     """
 
+# --- HTML TEMPLATE: Чат замовлення ---
+def get_admin_chat_html(job_id, messages, tz_string="Europe/Kiev"):
+    rows = ""
+    for m in messages:
+        time_str = format_local_time(m.created_at, tz_string, '%d.%m %H:%M')
+        if m.sender_role == 'partner':
+            sender = "🏪 Заклад"
+            color = "#facc15"
+            align = "left"
+        else:
+            sender = "🚴 Кур'єр"
+            color = "#60a5fa"
+            align = "right"
+            
+        rows += f"""
+        <div style="margin-bottom: 15px; text-align: {align};">
+            <div style="display: inline-block; max-width: 70%; text-align: left; background: rgba(255,255,255,0.05); padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                <div style="font-size: 0.8rem; color: {color}; font-weight: bold; margin-bottom: 5px;">{sender} <span style="color:#94a3b8; font-weight:normal; margin-left:10px;">{time_str}</span></div>
+                <div style="color: white; font-size: 0.95rem; word-wrap: break-word;">{m.message}</div>
+            </div>
+        </div>
+        """
+
+    return f"""
+    <!DOCTYPE html><html><head><title>Чат замовлення #{job_id}</title>{GLOBAL_STYLES}
+    <style>
+        .panel {{ background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px; }}
+    </style>
+    </head>
+    <body>
+        <div style="max-width: 800px; margin: 0 auto; padding: 20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h1><i class="fa-regular fa-comments"></i> Чат замовлення #{job_id}</h1>
+                <a href="/admin/delivery" class="btn" style="width:auto; padding: 10px 20px;">← Назад</a>
+            </div>
+            <div class="panel">
+                {rows if rows else '<p style="text-align:center; color:#94a3b8;">Повідомлень немає</p>'}
+            </div>
+        </div>
+    </body></html>
+    """
+
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None):
+def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None):
     if cash_transactions is None:
         cash_transactions = []
     if non_cash_deposits is None:
         non_cash_deposits = []
+    if active_jobs is None:
+        active_jobs = []
         
     courier_rows = ""
     for c in couriers:
@@ -513,6 +557,32 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
             </td>
         </tr>"""
 
+    # ГЕНЕРАЦИЯ СТРОК АКТИВНЫХ ЗАКАЗОВ
+    active_jobs_rows = ""
+    for j in active_jobs:
+        date_str = format_local_time(j.created_at, tz_string, '%H:%M') if j.created_at else "-"
+        partner_name = j.partner.name if j.partner else "Невідомо"
+        courier_name = j.courier.name if j.courier else "Не призначено"
+        
+        active_jobs_rows += f"""
+        <tr>
+            <td><b>#{j.id}</b><br><small>{date_str}</small></td>
+            <td>{partner_name}</td>
+            <td>{courier_name}</td>
+            <td>{j.status}</td>
+            <td>{j.order_price} / {j.delivery_fee} ₴</td>
+            <td style="display:flex; gap:5px;">
+                <a href="/admin/delivery/job/{j.id}/chat" class="btn-mini info" title="Відкрити чат"><i class="fa-regular fa-comments"></i></a>
+                <form action="/admin/delivery/force_cancel_order" method="post" style="margin:0;" onsubmit="return confirm('Ви впевнені, що хочете примусово скасувати це замовлення?');">
+                    <input type="hidden" name="job_id" value="{j.id}">
+                    <button type="submit" class="btn-mini danger" title="Скасувати замовлення"><i class="fa-solid fa-xmark"></i></button>
+                </form>
+            </td>
+        </tr>"""
+
+    if not active_jobs_rows:
+        active_jobs_rows = "<tr><td colspan='6' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає активних замовлень</td></tr>"
+
     # ГЕНЕРАЦИЯ СТРОК ДЛЯ ОТЧЕТА КАССЫ
     cash_rows_html = ""
     for ct in cash_transactions:
@@ -585,6 +655,16 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
                             <tbody>{partner_rows}</tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top: 20px; border-color: var(--primary);">
+                <h2>🚀 Активні замовлення в роботі</h2>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table>
+                        <thead><tr><th>ID / Час</th><th>Заклад</th><th>Кур'єр</th><th>Статус</th><th>Сума / Доставка</th><th>Дії (Чат / Відміна)</th></tr></thead>
+                        <tbody>{active_jobs_rows}</tbody>
+                    </table>
                 </div>
             </div>
 
@@ -698,6 +778,15 @@ async def admin_delivery_page(
 ):
     couriers = (await db.execute(select(Courier).order_by(Courier.id.desc()))).scalars().all()
     partners = (await db.execute(select(DeliveryPartner).order_by(DeliveryPartner.id.desc()))).scalars().all()
+    
+    # Отримуємо активні замовлення
+    active_jobs = (await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        .order_by(DeliveryJob.id.desc())
+    )).scalars().all()
+
     pwa_config = load_pwa_config()
     tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
     
@@ -720,13 +809,27 @@ async def admin_delivery_page(
     )
     non_cash_deposits = non_cash_query.all()
     
-    return get_delivery_admin_html(couriers, partners, pwa_config, tz_string, message, cash_balance, cash_transactions, non_cash_deposits)
+    return get_delivery_admin_html(
+        couriers, partners, pwa_config, tz_string, message, 
+        cash_balance, cash_transactions, non_cash_deposits, active_jobs
+    )
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
 async def admin_delivery_map_page(
     user: str = Depends(check_admin_auth)
 ):
     return get_ops_map_html() 
+
+@router.get("/admin/delivery/job/{job_id}/chat", response_class=HTMLResponse)
+async def admin_view_chat(
+    job_id: int, user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)
+):
+    messages = (await db.execute(
+        select(ChatMessage).where(ChatMessage.job_id == job_id).order_by(ChatMessage.created_at.asc())
+    )).scalars().all()
+    
+    tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
+    return get_admin_chat_html(job_id, messages, tz_string)
 
 # --- НОВИЙ АПІ ЕНДПОІНТ ДЛЯ ОТРИМАННЯ ДАНИХ ДЛЯ КАРТИ ---
 @router.get("/api/admin/delivery/map_data")
