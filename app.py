@@ -12,7 +12,7 @@ from math import radians, cos, sin, asin, sqrt
 from contextlib import asynccontextmanager
 from typing import List, Dict 
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Header, WebSocket, WebSocketDisconnect, Response, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,6 +151,26 @@ app = FastAPI(title="Restify SaaS Control Plane", lifespan=lifespan)
 
 # Підключення роутера адмінки доставки
 app.include_router(admin_delivery.router)
+
+# ==============================================================================
+# ЗАХИСТ ДОКУМЕНТІВ: ПЕРЕХОПЛЮЄМО РОУТ ДО МОНТУВАННЯ СТАТИКИ
+# ==============================================================================
+@app.get("/static/documents/{file_name}")
+async def get_secure_document(
+    file_name: str, 
+    _ = Depends(check_admin_auth) # Перевірка прав адміністратора
+):
+    file_path = f"static/documents/{file_name}"
+    
+    # Захист від виходу за межі папки (Path Traversal)
+    if ".." in file_name or "/" in file_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+        
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    return FileResponse(file_path)
+# ==============================================================================
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
