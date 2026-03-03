@@ -88,6 +88,9 @@ class Courier(Base):
     # --- НОВЕ ПОЛЕ ДЛЯ ФОТО ДОКУМЕНТІВ ---
     document_photo = Column(String(255), nullable=True)
 
+    # --- НОВЕ ПОЛЕ ДЛЯ СЕЛФІ ---
+    selfie_photo = Column(String(255), nullable=True)
+
     # Статуси
     # За замовчуванням False, щоб після реєстрації кур'єр проходив перевірку
     is_active = Column(Boolean, default=False)      

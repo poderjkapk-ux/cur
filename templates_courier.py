@@ -270,6 +270,9 @@ def get_courier_register_page():
             <label style="color: var(--text-muted); text-align: left; display: block; margin-bottom: 5px; margin-top: 10px;">Фото документів (Паспорт / Водійське):</label>
             <input type="file" name="document_photo" accept="image/*" required style="background: rgba(255,255,255,0.03); color: white; padding: 10px; border-radius: 8px; border: 1px dashed var(--border); margin-bottom: 15px; width: 100%; box-sizing: border-box;">
             
+            <label style="color: var(--text-muted); text-align: left; display: block; margin-bottom: 5px;">Селфі (Фото вашого обличчя):</label>
+            <input type="file" name="selfie_photo" accept="image/*" capture="user" required style="background: rgba(255,255,255,0.03); color: white; padding: 10px; border-radius: 8px; border: 1px dashed var(--border); margin-bottom: 15px; width: 100%; box-sizing: border-box;">
+            
             <div id="tg-step" class="tg-verify-box">
                 <div id="tg-initial">
                     <p style="margin:0 0 10px 0; color:var(--text-muted);">Підтвердіть телефон через Telegram:</p>

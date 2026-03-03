@@ -475,7 +475,12 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
         btn_class = "warn" if c.is_active else "success"
         
         last_seen_str = format_local_time(c.last_seen, tz_string, '%d.%m %H:%M') if c.last_seen else '-'
-        doc_link = f"<br><a href='{c.document_photo}' target='_blank' style='color:#3b82f6; font-size:0.8rem; text-decoration:none; margin-top:5px; display:inline-block;'><i class='fa-solid fa-id-card'></i> Документ</a>" if getattr(c, 'document_photo', None) else "<br><span style='color:#94a3b8; font-size:0.8rem;'>Немає фото</span>"
+        
+        # Посилання на документ
+        doc_link = f"<a href='{c.document_photo}' target='_blank' style='color:#3b82f6; font-size:0.8rem; text-decoration:none; display:inline-block; margin-right: 10px;'><i class='fa-solid fa-id-card'></i> Документ</a>" if getattr(c, 'document_photo', None) else "<span style='color:#94a3b8; font-size:0.8rem; margin-right: 10px;'>Немає документа</span>"
+        
+        # НОВЕ: Посилання на селфі
+        selfie_link = f"<a href='{c.selfie_photo}' target='_blank' style='color:#8b5cf6; font-size:0.8rem; text-decoration:none; display:inline-block;'><i class='fa-solid fa-camera'></i> Селфі</a>" if getattr(c, 'selfie_photo', None) else "<span style='color:#94a3b8; font-size:0.8rem;'>Немає селфі</span>"
         
         balance_val = getattr(c, 'balance', 0.0)
         balance_color = "#ef4444" if balance_val < 0 else "#4ade80"
@@ -484,7 +489,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, tz_string="Europe/Ki
         courier_rows += f"""
         <tr>
             <td>{c.id}</td>
-            <td><b>{c.name}</b><br><small>{c.phone}</small>{doc_link}</td>
+            <td><b>{c.name}</b><br><small>{c.phone}</small><br><div style="margin-top:5px;">{doc_link}{selfie_link}</div></td>
             <td>
                 <span style="color:{balance_color}; font-weight:bold; font-size: 1.1rem;">{balance_val:.2f} ₴</span><br>
                 <small style="color:#94a3b8">Комісія: {commission_val}%</small>

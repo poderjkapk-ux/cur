@@ -542,6 +542,7 @@ async def api_courier_register(
     password: str = Form(...), 
     verification_token: str = Form(...),
     document_photo: UploadFile = File(...),
+    selfie_photo: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
     verif = await db.get(PendingVerification, verification_token)
@@ -561,13 +562,22 @@ async def api_courier_register(
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(document_photo.file, buffer)
+        
+    # Зберігаємо фото селфі
+    selfie_extension = selfie_photo.filename.split(".")[-1]
+    selfie_name = f"selfie_{verif.phone}_{uuid.uuid4().hex[:6]}.{selfie_extension}"
+    selfie_path = f"static/documents/{selfie_name}"
+    
+    with open(selfie_path, "wb") as buffer:
+        shutil.copyfileobj(selfie_photo.file, buffer)
     
     db.add(Courier(
         name=name, 
         phone=verif.phone, 
         hashed_password=auth.get_password_hash(password),
         telegram_chat_id=verif.telegram_chat_id,
-        document_photo=f"/{file_path}"
+        document_photo=f"/{file_path}",
+        selfie_photo=f"/{selfie_path}"
     ))
     
     await db.delete(verif)
