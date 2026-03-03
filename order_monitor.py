@@ -2,9 +2,9 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import joinedload
-from models import async_session_maker, DeliveryJob, Courier, DeliveryPartner
+from models import async_session_maker, DeliveryJob, Courier, DeliveryPartner, engine
 
 # Импортируем сервис бота для отправки сообщений
 import bot_service
@@ -15,20 +15,39 @@ from firebase_admin import messaging
 # Получаем ID админа для тревожных уведомлений (берем из окружения, как в app.py)
 ADMIN_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
+async def auto_vacuum_couriers():
+    """Фонова очистка мертвих координат курьєрів без блокування таблиці"""
+    try:
+        async with engine.connect() as conn:
+            # Включаем AUTOCOMMIT, так как VACUUM нельзя запускать внутри транзакции
+            await conn.execution_options(isolation_level="AUTOCOMMIT").execute(text("VACUUM couriers;"))
+        logging.info("🧹 Автоматичний VACUUM таблиці couriers виконано успішно. Місце під координати оптимізовано.")
+    except Exception as e:
+        logging.error(f"Помилка при виконанні автоматичного VACUUM: {e}")
+
 async def monitor_stale_orders(ws_manager):
     """
     Фоновая задача (Background Task).
     Периодически проверяет базу на наличие заказов, которые долго висят в статусе 'pending'.
+    А также раз в 3 часа запускает очистку мусора от координат курьеров.
     
     Аргументы:
     ws_manager -- экземпляр ConnectionManager из app.py (для рассылки WebSocket, если понадобится)
     """
     logging.info("🕵️ Запуск моніторингу завислих замовлень (Order Monitor)...")
     
+    minutes_passed = 0  # Таймер для очистки координат
+    
     while True:
         try:
             # Проверяем каждую минуту
             await asyncio.sleep(60)
+            minutes_passed += 1
+            
+            # Если прошло 3 часа (180 минут), запускаем очистку (VACUUM)
+            if minutes_passed >= 180:
+                await auto_vacuum_couriers()
+                minutes_passed = 0  # Сбрасываем таймер
             
             async with async_session_maker() as db:
                 now = datetime.utcnow()
