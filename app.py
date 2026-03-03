@@ -539,7 +539,8 @@ async def get_courier_profile(
         "balance": getattr(courier, 'balance', 0.0),
         "commission_rate": getattr(courier, 'commission_rate', 10.0),
         "rating": getattr(courier, 'avg_rating', 5.0),
-        "rating_count": getattr(courier, 'rating_count', 0)
+        "rating_count": getattr(courier, 'rating_count', 0),
+	"is_online": courier.is_online
     })
 
 @app.get("/courier/app", response_class=HTMLResponse)
