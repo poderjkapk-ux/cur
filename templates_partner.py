@@ -786,6 +786,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         <input type="hidden" name="lat" id="form_lat">
                         <input type="hidden" name="lon" id="form_lon">
 
+                        <label>Ім'я клієнта</label>
+                        <input type="text" name="customer_name" placeholder="Ім'я" required>
+
                         <label>Телефон клієнта</label>
                         <input type="tel" name="customer_phone" placeholder="0XX XXX XX XX" required>
                         

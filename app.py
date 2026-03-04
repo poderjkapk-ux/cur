@@ -929,6 +929,7 @@ async def get_open_orders(
             "restaurant_name": job.partner.name,
             "restaurant_address": job.partner.address,
             "dropoff_address": job.dropoff_address,
+            "customer_name": job.customer_name, # <-- ДОДАНО ІМ'Я КЛІЄНТА В СТРІЧКУ ЗАМОВЛЕНЬ
             "fee": job.delivery_fee,
             "price": job.order_price,
             "dist_to_rest": dist_to_rest, 
@@ -1365,6 +1366,7 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
 @app.post("/api/partner/create_order_native")
 async def api_create_order_native(
     dropoff_address: str = Form(...), customer_phone: str = Form(...), 
+    customer_name: str = Form(""), # <-- ДОДАНО ІМ'Я КЛІЄНТА В НАТИВНЕ API
     order_price: float = Form(0.0), delivery_fee: float = Form(80.0), 
     comment: str = Form(""), payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
@@ -1385,7 +1387,8 @@ async def api_create_order_native(
     job = DeliveryJob(
         partner_id=partner.id, dropoff_address=dropoff_address, 
         dropoff_lat=client_lat, dropoff_lon=client_lon, 
-        customer_phone=customer_phone, order_price=order_price, delivery_fee=delivery_fee,
+        customer_phone=customer_phone, customer_name=customer_name, # <-- ЗБЕРІГАЄМО ІМ'Я КЛІЄНТА
+        order_price=order_price, delivery_fee=delivery_fee,
         comment=full_comment, payment_type=payment_type,
         is_return_required=is_return_required, status="pending"
     )
@@ -1423,6 +1426,7 @@ async def api_create_order_native(
 
         personal_data = {
             "id": job.id, "address": dropoff_address, 
+            "customer_name": job.customer_name, # <-- ДОДАНО В ПЕРСОНАЛЬНІ ДАНІ ДЛЯ WEBSOCKET (НАТИВКА)
             "restaurant": partner.name, "restaurant_address": partner.address,
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
             "dist_to_rest": display_dist,
@@ -1637,6 +1641,7 @@ async def create_partner_order(
 
         personal_data = {
             "id": job.id, "address": dropoff_address, 
+            "customer_name": job.customer_name, # <-- ДОДАНО В ПЕРСОНАЛЬНІ ДАНІ ДЛЯ WEBSOCKET (WEB API)
             "restaurant": partner.name, "restaurant_address": partner.address,
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
             "dist_to_rest": display_dist,

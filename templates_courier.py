@@ -831,7 +831,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                         </div>
                         <div class="oc-route">
                             <div class="oc-point rest"><div style="font-weight:600; color:white;">${{o.restaurant_name}}</div><div style="font-size:0.8rem;">${{o.restaurant_address}}</div></div>
-                            <div class="oc-point client"><div style="font-weight:600; color:white;">Клієнт</div><div style="font-size:0.8rem;">${{o.dropoff_address}}</div></div>
+                            <div class="oc-point client"><div style="font-weight:600; color:white;">${{o.customer_name || 'Клієнт'}}</div><div style="font-size:0.8rem;">${{o.dropoff_address}}</div></div>
                             ${{tripText ? `<div style="position:absolute; left:0; top:50%; transform:translateY(-50%); font-size:0.75rem; background:var(--bg-card); color:#94a3b8; padding:2px 0; z-index:2;">${{tripText}}</div>` : ''}}
                         </div>
                         ${{o.comment ? `<div style="font-size:0.85rem; color:#94a3b8; margin-bottom:10px; background:rgba(255,255,255,0.03); padding:8px; border-radius:8px;">💬 ${{o.comment}}</div>` : ''}}
@@ -1113,7 +1113,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 document.getElementById('modal-route').innerHTML = `
                     <div style="text-align:left; background:rgba(0,0,0,0.05); padding:10px; border-radius:8px; font-size:0.9rem;">
                         <div style="margin-bottom:8px;"><i class="fa-solid fa-shop" style="color:#f59e0b"></i> <b>${{data.restaurant}}</b><br><span style="color:#555; font-size:0.8rem">${{data.restaurant_address}}</span></div>
-                        <div><i class="fa-solid fa-location-dot" style="color:#ef4444"></i> <b>Клієнт</b><br><span style="color:#555; font-size:0.8rem">${{data.address}}</span></div>
+                        <div><i class="fa-solid fa-location-dot" style="color:#ef4444"></i> <b>${{data.customer_name || 'Клієнт'}}</b><br><span style="color:#555; font-size:0.8rem">${{data.address}}</span></div>
                     </div>
                 `;
                 
