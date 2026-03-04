@@ -484,19 +484,28 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             """
         elif j.status in ['assigned', 'arrived_pickup']:
             is_ready = (j.ready_at is not None) or (j.status == 'ready')
+            
+            # --- НОВАЯ КНОПКА: Подтверждение оплаты выкупа (только если курьер уже прибыл) ---
+            if j.payment_type == 'buyout' and not getattr(j, 'is_return_required', False) and j.status == 'arrived_pickup':
+                action_btn += f"""
+                <button class="btn-mini success" onclick="confirmBuyoutPaid({j.id})" title="Підтвердити оплату від кур'єра">
+                    <i class="fa-solid fa-check-double"></i> Оплачено
+                </button>
+                """
+
             if not is_ready:
-                action_btn = f"""
+                action_btn += f"""
                 <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
                     <i class="fa-solid fa-utensils"></i> Готово
                 </button>
                 """
             else:
-                action_btn = '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
+                action_btn += '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
         
         payment_badges = {
             "prepaid": "<span style='color:#4ade80'>✅ Оплачено</span>",
-            "cash": "<span style='color:#facc15'>💵 Готівка</span>",
-            "buyout": "<span style='color:#f472b6'>💰 Викуп</span>"
+            "buyout": "<span style='color:#f472b6'>💰 Викуп</span>",
+            "buyout_paid": "<span style='color:#4ade80'>✅ Оплачено</span>"
         }
         pay_info = payment_badges.get(j.payment_type, j.payment_type)
         if getattr(j, 'is_return_required', False):
@@ -697,7 +706,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         .msg.other {{ align-self: flex-start; background: #334155; color: white; border-bottom-left-radius: 4px; }}
         .msg-time {{ font-size: 0.7rem; opacity: 0.7; text-align: right; margin-top: 4px; }}
 
-        .payment-options {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }}
+        .payment-options {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }}
         .payment-option input {{ display: none; }}
         .payment-option label {{ display: block; background: rgba(255,255,255,0.05); padding: 12px; text-align: center; border-radius: 10px; cursor: pointer; border: 1px solid transparent; font-size: 0.9rem; transition: 0.2s; }}
         .payment-option input:checked + label {{ background: rgba(99, 102, 241, 0.2); border-color: var(--primary); color: white; font-weight: bold; }}
@@ -752,26 +761,21 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                                 <label for="pay_prepaid">✅ Оплачено</label>
                             </div>
                             <div class="payment-option">
-                                <input type="radio" name="payment_type" id="pay_cash" value="cash" onchange="updateFormLogic()">
-                                <label for="pay_cash">💵 Готівка</label>
-                            </div>
-                            <div class="payment-option">
                                 <input type="radio" name="payment_type" id="pay_buyout" value="buyout" onchange="updateFormLogic()">
                                 <label for="pay_buyout">💰 Викуп</label>
                             </div>
                         </div>
 
-                        <div id="cash-options" style="display:none; background:rgba(255,255,255,0.05); padding:12px; border-radius:10px; margin-bottom:15px; border:1px solid rgba(255,255,255,0.1);">
-                            <div style="display:flex; align-items:center; gap:10px;">
+                        <div id="buyout-options" style="display:none; background:rgba(255,255,255,0.05); padding:12px; border-radius:10px; margin-bottom:15px; border:1px solid rgba(255,255,255,0.1);">
+                            <div style="display:flex; align-items:center; gap:10px; margin-bottom: 8px;">
                                 <input type="checkbox" id="return_check" name="is_return_required" value="true" style="width:20px; height:20px; margin:0;" onchange="toggleReturnFee()">
                                 <label for="return_check" style="margin:0; cursor:pointer; color:white;">
-                                    Кур'єр має повернути гроші в заклад? (+40 грн)
+                                    Кур'єр має повернути гроші в заклад після доставки? (+40 грн)
                                 </label>
                             </div>
-                        </div>
-
-                        <div id="buyout-hint" style="display:none; margin-bottom:15px; color:#f472b6; font-size:0.9rem; border:1px dashed #f472b6; padding:12px; border-radius:10px; background: rgba(244, 114, 182, 0.1);">
-                            <i class="fa-solid fa-circle-info"></i> <b>Порада:</b> При викупі кур'єр витрачає свої кошти. Рекомендуємо збільшити вартість доставки на 20-30 грн.
+                            <div style="color:#f472b6; font-size:0.85rem;">
+                                <i class="fa-solid fa-circle-info"></i> Якщо галочка знята — кур'єр віддає вам свої гроші одразу при отриманні замовлення.
+                            </div>
                         </div>
 
                         <div class="autocomplete-wrapper">
@@ -886,13 +890,16 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             const returnFee = 40; 
             function updateFormLogic() {{
                 const type = document.querySelector('input[name="payment_type"]:checked').value;
-                const cashBlock = document.getElementById('cash-options');
-                const buyoutHint = document.getElementById('buyout-hint');
+                const buyoutBlock = document.getElementById('buyout-options');
                 const returnCheck = document.getElementById('return_check');
-                cashBlock.style.display = 'none'; buyoutHint.style.display = 'none';
-                if (type === 'cash') cashBlock.style.display = 'block';
-                else if (type === 'buyout') {{ buyoutHint.style.display = 'block'; returnCheck.checked = false; }} 
-                else returnCheck.checked = false;
+                
+                buyoutBlock.style.display = 'none';
+                
+                if (type === 'buyout') {{ 
+                    buyoutBlock.style.display = 'block'; 
+                }} else {{ 
+                    returnCheck.checked = false; 
+                }}
                 toggleReturnFee(); 
             }}
             function toggleReturnFee() {{
@@ -1135,6 +1142,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             async function cancelOrder(jobId) {{ if(!confirm("Скасувати це замовлення?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/cancel_order', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
             async function markReady(jobId) {{ if(!confirm("Підтвердити готовність?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/order_ready', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
             async function confirmReturn(jobId) {{ if(!confirm("Гроші отримано?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/confirm_return', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
+            async function confirmBuyoutPaid(jobId) {{ if(!confirm("Підтвердити, що кур'єр оплатив своє замовлення на касі?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/confirm_buyout_paid', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
 
             // --- RATING & TRACKING ---
             function openRateModal(jobId) {{ document.getElementById('rate_job_id').value = jobId; document.getElementById('rateModal').style.display = 'flex'; }}

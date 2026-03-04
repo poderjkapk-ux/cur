@@ -922,7 +922,7 @@ async def get_open_orders(
             val = calculate_distance(rest_lat, rest_lon, job.dropoff_lat, job.dropoff_lon)
             if val: dist_trip = val
 
-        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
 
         response_data.append({
             "id": job.id,
@@ -990,7 +990,7 @@ async def get_active_job(
     partner_address = job.partner.address if job.partner else "Адреса не знайдена"
     partner_phone = job.partner.phone if job.partner else ""
     
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
     
     server_status = job.status 
     is_ready = True if (job.ready_at or job.status == 'ready') else False
@@ -1406,7 +1406,7 @@ async def api_create_order_native(
     res = await db.execute(select(Courier).where(Courier.is_online == True))
     online_couriers = res.scalars().all()
     
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(payment_type, "Оплата")
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(payment_type, "Оплата")
 
     async def notify_courier_async(courier):
         is_location_fresh = True
@@ -1567,6 +1567,30 @@ async def partner_confirm_return(
     await db.commit()
     return JSONResponse({"status": "ok"})
 
+@app.post("/api/partner/confirm_buyout_paid")
+async def partner_confirm_buyout_paid(
+    job_id: int = Form(...), partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)
+):
+    job = await db.get(DeliveryJob, job_id)
+    if not job or job.partner_id != partner.id: 
+        return JSONResponse({"status": "error"}, 404)
+    
+    # Меняем тип оплаты, чтобы курьеру теперь писало "Оплачено"
+    job.payment_type = "buyout_paid"
+    await db.commit()
+    
+    if job.courier_id:
+        await manager.notify_courier(job.courier_id, {
+            "type": "order_update", 
+            "job_id": job.id,
+            "status": job.status,
+            "status_text": "Оплачено",
+            "status_color": "#4ade80",
+            "message": "✅ Заклад підтвердив вашу оплату. Замовлення тепер 'Оплачено'."
+        })
+        
+    return JSONResponse({"status": "ok"})
+
 @app.post("/api/partner/create_order")
 async def create_partner_order(
     dropoff_address: str = Form(...), 
@@ -1621,7 +1645,7 @@ async def create_partner_order(
     res = await db.execute(select(Courier).where(Courier.is_online == True))
     online_couriers = res.scalars().all()
     
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(payment_type, "Оплата")
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(payment_type, "Оплата")
 
     async def notify_courier_async(courier):
         is_location_fresh = True
@@ -1750,7 +1774,7 @@ async def partner_boost_order(
     
     rest_lat, rest_lon = await geocode_address(job.partner.address)
     
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп"}.get(job.payment_type, "Оплата")
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
     
     full_job_data = {
         "id": job.id,

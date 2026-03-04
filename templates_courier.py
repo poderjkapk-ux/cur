@@ -200,6 +200,9 @@ PWA_STYLES = """
         padding: 10px; border-radius: 8px; margin-bottom: 15px; 
         font-weight: bold; text-align: center; border: 1px dashed #be185d;
     }
+    .client-pay-box.success {
+        background: #d1fae5; color: #064e3b; border-color: #059669;
+    }
     .ready-badge {
         background: #4ade80; color: #064e3b; padding: 5px 10px; 
         border-radius: 6px; font-weight: bold; display: inline-block; 
@@ -818,6 +821,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     let badgesHtml = '';
                     if (o.payment_type === 'cash') badgesHtml += '<span class="oc-tag" style="color:#facc15">Готівка</span>';
                     if (o.payment_type === 'buyout') badgesHtml += '<span class="oc-tag" style="color:#ec4899">Викуп</span>';
+                    if (o.payment_type === 'buyout_paid') badgesHtml += '<span class="oc-tag" style="color:#4ade80">Оплачено</span>';
                     if (o.is_return) badgesHtml += '<span class="oc-tag" style="color:#f97316">Повернення</span>';
                     
                     let distText = o.dist_to_rest !== null ? o.dist_to_rest.toFixed(1) + ' км' : '?';
@@ -972,9 +976,15 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     statusDesc.innerHTML += '<div class="ready-badge">🍳 ЗАМОВЛЕННЯ ГОТОВЕ!</div><br>';
                 }}
                 
-                if (currentJob.payment_type === 'cash' || currentJob.payment_type === 'buyout') {{
-                     let label = currentJob.payment_type === 'cash' ? '💵 ВЗЯТИ ГОТІВКУ:' : '💰 ВИКУП (Свої гроші):';
-                     statusDesc.innerHTML += `<div class="client-pay-box">${{label}} ${{currentJob.order_price}} ₴</div>`;
+                if (currentJob.payment_type === 'cash' || currentJob.payment_type === 'buyout' || currentJob.payment_type === 'buyout_paid') {{
+                     let label = '💵 ВІЗЬМІТЬ ГОТІВКУ:';
+                     let boxClass = 'client-pay-box';
+                     if (currentJob.payment_type === 'buyout') label = '💰 ВИКУП (Свої гроші):';
+                     else if (currentJob.payment_type === 'buyout_paid') {{
+                         label = '✅ ОПЛАЧЕНО ЗАКЛАДОМ (Візьміть у клієнта):';
+                         boxClass += ' success';
+                     }}
+                     statusDesc.innerHTML += `<div class="${{boxClass}}">${{label}} ${{currentJob.order_price}} ₴</div>`;
                 }}
 
                 // --- ГЕНЕРАЦІЯ ТАЙМЕРІВ ---
@@ -1058,6 +1068,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     
                     if (currentJob.payment_type === 'cash') statusDesc.innerHTML = `<div class="client-pay-box">💵 ОТРИМАЙТЕ ГОТІВКУ: ${{currentJob.order_price}} ₴</div>`;
                     else if (currentJob.payment_type === 'buyout') statusDesc.innerHTML = `<div class="client-pay-box">💰 ЗАБЕРІТЬ СВОЇ: ${{currentJob.order_price}} ₴</div>`;
+                    else if (currentJob.payment_type === 'buyout_paid') statusDesc.innerHTML = `<div class="client-pay-box success">💰 ВІЗЬМІТЬ У КЛІЄНТА: ${{currentJob.order_price}} ₴ (Свої гроші)</div>`;
                     else statusDesc.innerHTML = 'Везіть до клієнта';
 
                     if (currentJob.is_return_required) {{
