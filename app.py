@@ -1298,6 +1298,32 @@ async def api_partner_login_native(email: str = Form(...), password: str = Form(
     resp.set_cookie(key="partner_token", value=token, httponly=True, max_age=604800, samesite="lax")
     return resp
 
+@app.post("/api/partner/register_native")
+async def api_partner_register_native(
+    name: str = Form(...), 
+    address: str = Form(...), 
+    email: str = Form(...),
+    password: str = Form(...), 
+    verification_token: str = Form(...), 
+    db: AsyncSession = Depends(get_db)
+):
+    verif = await db.get(PendingVerification, verification_token)
+    if not verif or verif.status != "verified":
+         return JSONResponse({"status": "error", "message": "Телефон не підтверджено в Telegram"}, status_code=400)
+    
+    existing = await db.execute(select(DeliveryPartner).where(DeliveryPartner.email == email))
+    if existing.scalar():
+        return JSONResponse({"status": "error", "message": "Цей Email вже зайнятий"}, status_code=400)
+    
+    db.add(DeliveryPartner(
+        name=name, phone=verif.phone, address=address, email=email, 
+        hashed_password=auth.get_password_hash(password), telegram_chat_id=verif.telegram_chat_id
+    ))
+    await db.delete(verif)
+    await db.commit()
+    
+    return JSONResponse({"status": "ok"})
+
 @app.get("/api/partner/orders_native")
 async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)):
     config = await get_all_settings(db)
