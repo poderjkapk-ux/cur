@@ -214,7 +214,6 @@ def get_partner_auth_html(is_register=False, message=""):
                         const reqId = ++latestReqId;
                         
                         try {
-                            // Добавили addressdetails=1 чтобы получить структуру (город, улица) отдельно
                             const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
                             
                             const res = await fetch(url);
@@ -230,7 +229,6 @@ def get_partner_auth_html(is_register=False, message=""):
                                     const div = document.createElement('div');
                                     div.className = 'autocomplete-item';
                                     
-                                    // Формируем отображение в списке (красивое)
                                     const displayName = item.display_name;
                                     const parts = displayName.split(',');
                                     const mainName = parts[0];
@@ -238,25 +236,20 @@ def get_partner_auth_html(is_register=False, message=""):
                                     
                                     div.innerHTML = `<span>${mainName}</span><small>${subName}</small>`;
                                     div.onclick = () => { 
-                                        // --- СБОРКА АДРЕСА БЕЗ РАЙОНА ---
                                         const a = item.address;
                                         const cleanParts = [];
                                         
-                                        // 1. Улица / Название места
                                         if (a.road) cleanParts.push(a.road);
                                         else if (a.pedestrian) cleanParts.push(a.pedestrian);
                                         else if (a.hamlet) cleanParts.push(a.hamlet);
-                                        else cleanParts.push(mainName); // Фолбек, если улицы нет
+                                        else cleanParts.push(mainName);
                                         
-                                        // 2. Номер дома
                                         if (a.house_number) cleanParts.push(a.house_number);
                                         
-                                        // 3. Город (без района!)
                                         if (a.city) cleanParts.push(a.city);
                                         else if (a.town) cleanParts.push(a.town);
                                         else if (a.village) cleanParts.push(a.village);
                                         
-                                        // Результат: "Дерибасівська вулиця, 1, Одеса"
                                         addrInput.value = cleanParts.join(', ');
                                         addrResults.style.display = 'none';
                                         
@@ -324,6 +317,452 @@ def get_partner_auth_html(is_register=False, message=""):
     {verify_script}
     </body></html>
     """
+
+
+# =================================================================================
+# CSS та JavaScript для Дашборду винесені у звичайні змінні, щоб уникнути помилок з `{` `}`
+# =================================================================================
+
+DASHBOARD_CSS = """
+<style>
+    body { background-color: #0f172a; padding: 20px; }
+    
+    /* Layout */
+    .dashboard-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 30px; max-width: 1400px; margin: 0 auto; width: 100%; }
+    @media (max-width: 1000px) { .dashboard-grid { grid-template-columns: 1fr; } }
+    
+    .panel { 
+        background: #1e293b; 
+        border: 1px solid rgba(255,255,255,0.05); 
+        border-radius: 20px; 
+        padding: 25px; 
+        margin-bottom: 20px; 
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    
+    .header-bar { 
+        display: flex; justify-content: space-between; align-items: center; 
+        max-width: 1400px; margin: 0 auto 30px; width: 100%;
+    }
+    .header-bar h2 { color: white; margin: 0; font-size: 1.5rem; }
+    
+    /* Tables Default (Desktop) */
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+    th, td { padding: 15px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); color: #e2e8f0; vertical-align: middle; }
+    th { color: #94a3b8; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+    
+    /* СТИЛІ ТАЙМЛАЙНУ (ХРОНОЛОГІЇ) */
+    .timeline { display: flex; flex-direction: column; gap: 8px; margin-top: 15px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 12px; }
+    .tl-title { font-size: 0.75rem; color: #6366f1; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 0.05em; }
+    .tl-step { display: flex; align-items: flex-start; gap: 10px; }
+    .tl-icon-wrap { display: flex; flex-direction: column; align-items: center; width: 12px; }
+    .tl-icon { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.2); z-index: 2; margin-top: 3px; }
+    .tl-icon.done { background: #6366f1; }
+    .tl-line { width: 2px; background: rgba(255,255,255,0.1); flex-grow: 1; min-height: 15px; margin-top: 2px; }
+    .tl-icon.done + .tl-line { background: rgba(99, 102, 241, 0.5); }
+    .tl-content { flex: 1; display: flex; justify-content: space-between; align-items: flex-start; line-height: 1.2; }
+    .tl-text { font-size: 0.85rem; color: #94a3b8; }
+    .tl-text.done { color: #f8fafc; font-weight: 600; }
+    .tl-time { font-size: 0.75rem; color: #64748b; margin-left: 10px; white-space: nowrap; }
+    .tl-badge { background: rgba(239, 68, 68, 0.2); color: #fca5a5; padding: 2px 5px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-left: 5px; }
+
+    /* Status Badge */
+    .status-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* Buttons */
+    .btn-mini { 
+        border: none; border-radius: 8px; width: 36px; height: 36px; cursor: pointer; 
+        display: flex; align-items: center; justify-content: center; transition: 0.2s; 
+        background: rgba(255,255,255,0.05); color: #94a3b8; text-decoration: none; font-size: 1rem;
+    }
+    .btn-mini:hover { transform: translateY(-2px); color: white; }
+    .btn-mini.info:hover { background: #6366f1; }
+    .btn-mini.danger:hover { background: #e11d48; }
+    .btn-mini.success:hover { background: #22c55e; }
+    .btn-mini.warn:hover { background: #f59e0b; }
+
+    /* Forms */
+    label { color: #94a3b8; font-size: 0.85rem; margin-bottom: 5px; display: block; }
+    input, select, textarea {
+        background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white;
+        padding: 12px 15px; border-radius: 10px; width: 100%; box-sizing: border-box;
+        font-size: 1rem; margin-bottom: 15px; transition: 0.3s;
+    }
+    input:focus, select:focus, textarea:focus {
+        outline: none; border-color: #6366f1; background: rgba(99, 102, 241, 0.05);
+    }
+
+    /* --- MOBILE ADAPTATION (RESPONSIVE) --- */
+    @media (max-width: 768px) {
+        body { padding: 10px; }
+        .header-bar { margin-bottom: 20px; }
+        .header-bar h2 { font-size: 1.2rem; }
+        .panel { padding: 15px; border-radius: 16px; }
+        thead { display: none; }
+        tr {
+            display: block;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        td {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            text-align: right;
+        }
+        td:last-child { border-bottom: none; padding-bottom: 0; }
+        td::before {
+            content: attr(data-label);
+            font-weight: 600;
+            color: #64748b;
+            font-size: 0.85rem;
+            text-align: left;
+            margin-right: 15px;
+        }
+        .actions-cell {
+            display: block;
+            margin-top: 10px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .actions-cell::before { display: none; }
+        .actions-cell > div { justify-content: space-between; width: 100%; }
+        .btn-mini { width: 42px; height: 42px; font-size: 1.1rem; }
+        .payment-options { grid-template-columns: 1fr; gap: 8px; }
+        .courier-cell { flex-direction: column; align-items: flex-end; text-align: right; }
+        .courier-cell::before { align-self: flex-start; }
+        .timeline { width: 100%; text-align: left; box-sizing: border-box; }
+    }
+
+    /* Modals */
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 2000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+    .modal-card { background: #1e293b; width: 95%; max-width: 500px; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; position: relative; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); max-height: 90vh; overflow-y: auto; }
+    .track-card { max-width: 800px; height: 60vh; padding: 0; }
+    #track-map { flex: 1; width: 100%; min-height: 300px; }
+    
+    .chat-modal { height: 80vh; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }
+    .msg { max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; position: relative; line-height: 1.4; }
+    .msg.me { align-self: flex-end; background: #6366f1; color: white; border-bottom-right-radius: 4px; }
+    .msg.other { align-self: flex-start; background: #334155; color: white; border-bottom-left-radius: 4px; }
+    .msg-time { font-size: 0.7rem; opacity: 0.7; text-align: right; margin-top: 4px; }
+
+    .payment-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+    .payment-option input { display: none; }
+    .payment-option label { display: block; background: rgba(255,255,255,0.05); padding: 12px; text-align: center; border-radius: 10px; cursor: pointer; border: 1px solid transparent; font-size: 0.9rem; transition: 0.2s; }
+    .payment-option input:checked + label { background: rgba(99, 102, 241, 0.2); border-color: #6366f1; color: white; font-weight: bold; }
+    
+    .star-rating { display: flex; flex-direction: row-reverse; justify-content: center; gap: 5px; margin: 20px 0; }
+    .star-rating input { display: none; }
+    .star-rating label { cursor: pointer; font-size: 2.5rem; color: #444; transition: 0.2s; }
+    .star-rating input:checked ~ label, .star-rating label:hover, .star-rating label:hover ~ label { color: #fbbf24; }
+
+    #toast-container { position: fixed; top: 20px; right: 20px; z-index: 3000; pointer-events: none; }
+    .toast { pointer-events: auto; background: #1e293b; color: white; padding: 15px 20px; border-left: 5px solid #6366f1; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 15px; animation: slideIn 0.3s ease-out; min-width: 300px; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    
+    /* Autocomplete & Loading */
+    .autocomplete-wrapper { position: relative; z-index: 1001; }
+    .autocomplete-results { position: absolute; top: 100%; left: 0; right: 0; background: #1e293b; border: 1px solid rgba(255,255,255,0.1); border-top: none; border-radius: 0 0 10px 10px; max-height: 250px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .autocomplete-item { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.95rem; color: #cbd5e1; display:flex; flex-direction:column; }
+    .autocomplete-item small { color: #64748b; font-size: 0.8rem; margin-top:2px; }
+    .autocomplete-item:hover { background: #6366f1; color: white; }
+    
+    /* Spinner */
+    .loading-input {
+        background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC{transform-origin:center;animation:spinner_svv2 .75s infinite linear}@keyframes spinner_svv2{100%{transform:rotate(360deg)}}%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-size: 20px 20px;
+    }
+
+    #picker-map { width: 100%; height: 250px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); z-index: 1; display:none; }
+    #picker-map.visible { display: block; }
+    .map-hint { font-size: 0.85rem; color: #facc15; margin-bottom: 10px; display:none; background: rgba(250, 204, 21, 0.1); padding: 8px; border-radius: 6px; }
+</style>
+"""
+
+DASHBOARD_SCRIPT = """
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // --- ЛОГИКА ОПЛАТЫ ---
+    const baseFee = 80; 
+    const returnFee = 40; 
+    function updateFormLogic() {
+        const type = document.querySelector('input[name="payment_type"]:checked').value;
+        const buyoutBlock = document.getElementById('buyout-options');
+        
+        buyoutBlock.style.display = 'none';
+        if (type === 'buyout') { 
+            buyoutBlock.style.display = 'block'; 
+        }
+    }
+    
+    // --- ЗВУК И TOAST ---
+    const alertSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    function showToast(text) {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.innerHTML = `<i class="fa-solid fa-bell" style="color:#6366f1"></i> <div>${text}</div>`;
+        container.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 5000);
+    }
+
+    // --- BOOST ---
+    async function boostOrder(id) {
+        if(!confirm("Підняти ціну доставки на 10 грн, щоб пришвидшити пошук?")) return;
+        const fd = new FormData(); fd.append('job_id', id); fd.append('amount', 10);
+        try {
+            const res = await fetch('/api/partner/boost_order', {method:'POST', body:fd});
+            const data = await res.json();
+            if(res.ok) { showToast(`💸 Ціну піднято! Нова сума: ${data.new_fee} грн`); setTimeout(() => location.reload(), 1500); }
+            else { alert(data.message || "Помилка"); }
+        } catch(e) { alert("Помилка з'єднання"); }
+    }
+
+    // ==========================================
+    // ПОИСК АДРЕСА: ОБНОВЛЕН (Одесса + Nominatim + БЕЗ РАЙОНА)
+    // ==========================================
+    const addrInput = document.getElementById('addr_input');
+    const addrResults = document.getElementById('addr_results');
+    const latInput = document.getElementById('form_lat');
+    const lonInput = document.getElementById('form_lon');
+    const pickerMapDiv = document.getElementById('picker-map');
+    const mapHint = document.getElementById('map-hint');
+    
+    let pickerMap, pickerMarker;
+    let searchTimeout = null;
+    let latestReqId = 0; // Счетчик запросов
+
+    // КООРДИНАТЫ ОДЕССЫ ПО УМОЛЧАНИЮ
+    const ODESA_LAT = 46.4825;
+    const ODESA_LON = 30.7233;
+
+    function initPickerMap(lat, lon) {
+        if (pickerMap) return;
+        try {
+            pickerMapDiv.classList.add('visible');
+            mapHint.style.display = 'block';
+            const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
+            
+            pickerMap = L.map('picker-map').setView(startPos, 13);
+            // Используем OpenStreetMap (Open Map)
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(pickerMap);
+
+            pickerMarker = L.marker(startPos, {draggable: true}).addTo(pickerMap);
+            
+            pickerMarker.on('dragend', function(e) {
+                const pos = e.target.getLatLng();
+                latInput.value = pos.lat; lonInput.value = pos.lng;
+            });
+            pickerMap.on('click', function(e) {
+                pickerMarker.setLatLng(e.latlng);
+                latInput.value = e.latlng.lat; lonInput.value = e.latlng.lng;
+            });
+            setTimeout(() => pickerMap.invalidateSize(), 200);
+        } catch(e) { console.error("Leaflet init error:", e); }
+    }
+
+    if(addrInput) {
+        addrInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim();
+            
+            if (!pickerMap) initPickerMap();
+            
+            if(query.length < 3) { 
+                addrResults.style.display = 'none'; 
+                addrInput.classList.remove('loading-input');
+                return; 
+            }
+            
+            addrInput.classList.add('loading-input');
+            
+            // Дебаунс 800мс
+            searchTimeout = setTimeout(async () => {
+                const reqId = ++latestReqId;
+                
+                try {
+                    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
+                    
+                    const res = await fetch(url);
+                    
+                    if (reqId !== latestReqId) return;
+
+                    if (!res.ok) throw new Error("API Error");
+                    const data = await res.json();
+                    
+                    addrResults.innerHTML = '';
+                    if(data && data.length > 0) {
+                        data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.className = 'autocomplete-item';
+                            
+                            const displayName = item.display_name;
+                            const parts = displayName.split(',');
+                            const mainName = parts[0];
+                            const subName = parts.slice(1).join(',').trim();
+                            
+                            div.innerHTML = `<span>${mainName}</span><small>${subName}</small>`;
+                            div.onclick = () => { 
+                                // --- СБОРКА КОРОТКОГО АДРЕСА ---
+                                const a = item.address;
+                                const cleanParts = [];
+                                
+                                if (a.road) cleanParts.push(a.road);
+                                else if (a.pedestrian) cleanParts.push(a.pedestrian);
+                                else if (a.hamlet) cleanParts.push(a.hamlet);
+                                else cleanParts.push(mainName);
+                                
+                                if (a.house_number) cleanParts.push(a.house_number);
+                                
+                                if (a.city) cleanParts.push(a.city);
+                                else if (a.town) cleanParts.push(a.town);
+                                else if (a.village) cleanParts.push(a.village);
+                                
+                                addrInput.value = cleanParts.join(', ');
+                                addrResults.style.display = 'none';
+                                
+                                const lat = parseFloat(item.lat);
+                                const lon = parseFloat(item.lon);
+                                
+                                latInput.value = lat; lonInput.value = lon;
+                                if(pickerMap) { 
+                                    pickerMarker.setLatLng([lat, lon]); 
+                                    pickerMap.setView([lat, lon], 16); 
+                                } else { 
+                                    initPickerMap(lat, lon); 
+                                }
+                            };
+                            addrResults.appendChild(div);
+                        });
+                        addrResults.style.display = 'block';
+                    } else { addrResults.style.display = 'none'; }
+                } catch(e) { 
+                    console.error("Search error:", e); 
+                } finally { 
+                    if (reqId === latestReqId) {
+                        addrInput.classList.remove('loading-input'); 
+                    }
+                }
+            }, 800);
+        });
+        document.addEventListener('click', (e) => { if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; });
+    }
+    
+    // --- WEBSOCKET ---
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/partner`);
+    socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'order_update') {
+            alertSound.play().catch(e => {});
+            showToast(data.message);
+            setTimeout(() => location.reload(), 2000); 
+        } 
+        else if (data.type === 'chat_message') {
+            const openJobId = document.getElementById('chat_job_id').value;
+            const modalOpen = document.getElementById('chatModal').style.display === 'flex';
+            if (modalOpen && openJobId == data.job_id) {
+                const container = document.getElementById('chat-messages');
+                const div = document.createElement('div');
+                div.className = 'msg other';
+                div.innerHTML = `${data.text} <div class="msg-time">${data.time}</div>`;
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+            } else { showToast(`💬 Нове повідомлення: ${data.text}`); }
+        }
+    };
+
+    // --- CHAT LOGIC ---
+    async function openChat(jobId, title) {
+        document.getElementById('chatModal').style.display = 'flex';
+        document.getElementById('chat-title').innerText = title;
+        document.getElementById('chat_job_id').value = jobId;
+        document.getElementById('chat-messages').innerHTML = '<div style="text-align:center; color:#888">Завантаження...</div>';
+        try {
+            const res = await fetch(`/api/chat/history/${jobId}`);
+            const msgs = await res.json();
+            renderMessages(msgs);
+        } catch(e) {}
+    }
+    function renderMessages(msgs) {
+        const container = document.getElementById('chat-messages');
+        container.innerHTML = '';
+        msgs.forEach(m => {
+            const div = document.createElement('div');
+            div.className = `msg ${m.role === 'partner' ? 'me' : 'other'}`;
+            div.innerHTML = `${m.text} <div class="msg-time">${m.time}</div>`;
+            container.appendChild(div);
+        });
+        container.scrollTop = container.scrollHeight;
+    }
+    async function sendChatMessage(e) {
+        e.preventDefault();
+        const input = document.getElementById('chat_input');
+        const jobId = document.getElementById('chat_job_id').value;
+        const text = input.value.trim();
+        if(!text) return;
+        input.value = '';
+        const container = document.getElementById('chat-messages');
+        const div = document.createElement('div');
+        div.className = 'msg me';
+        // Локальное время бразуера (пользователя) - здесь конвертация не нужна
+        const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        div.innerHTML = `${text} <div class="msg-time">${time}</div>`;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        const fd = new FormData();
+        fd.append('job_id', jobId); fd.append('message', text); fd.append('role', 'partner');
+        await fetch('/api/chat/send', {method: 'POST', body: fd});
+    }
+
+    // --- ACTIONS ---
+    async function cancelOrder(jobId) { if(!confirm("Скасувати це замовлення?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/cancel_order', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
+    async function markReady(jobId) { if(!confirm("Підтвердити готовність?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/order_ready', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
+    async function confirmReturn(jobId) { if(!confirm("Гроші отримано?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/confirm_return', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
+    async function confirmBuyoutPaid(jobId) { if(!confirm("Підтвердити, що кур'єр оплатив своє замовлення на касі?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/confirm_buyout_paid', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
+
+    // --- RATING & TRACKING ---
+    function openRateModal(jobId) { document.getElementById('rate_job_id').value = jobId; document.getElementById('rateModal').style.display = 'flex'; }
+    async function submitRating(e) { e.preventDefault(); const form = new FormData(e.target); try { await fetch('/api/partner/rate_courier', {method:'POST', body:form}); location.reload(); } catch(e) {} }
+
+    let map, courierMarker, trackInterval;
+    function openTrackModal(jobId) {
+        document.getElementById('trackModal').style.display = 'flex';
+        if(!map) {
+            map = L.map('track-map').setView([46.4825, 30.7233], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+        }
+        fetchLocation(jobId);
+        trackInterval = setInterval(() => fetchLocation(jobId), 5000);
+    }
+    function closeTrackModal() { document.getElementById('trackModal').style.display = 'none'; clearInterval(trackInterval); }
+    async function fetchLocation(jobId) {
+        try {
+            const res = await fetch(`/api/partner/track_courier/${jobId}`);
+            const data = await res.json();
+            if(data.status === 'ok' && data.lat) {
+                document.getElementById('track-info').innerHTML = `🚴 <b>${data.name}</b> • ${data.job_status}`;
+                const pos = [data.lat, data.lon];
+                if(!courierMarker) courierMarker = L.marker(pos).addTo(map); else courierMarker.setLatLng(pos);
+                map.setView(pos, 15);
+            }
+        } catch(e) {}
+    }
+</script>
+"""
 
 def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob], tz_string: str = "Europe/Kiev"):
     """
@@ -577,168 +1016,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     return f"""
     <!DOCTYPE html><html lang="uk"><head><title>Кабінет Партнера</title>{GLOBAL_STYLES}{pwa_meta}{viewport_meta}
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <style>
-        body {{ background-color: #0f172a; padding: 20px; }}
-        
-        /* Layout */
-        .dashboard-grid {{ display: grid; grid-template-columns: 1fr 2fr; gap: 30px; max-width: 1400px; margin: 0 auto; width: 100%; }}
-        @media (max-width: 1000px) {{ .dashboard-grid {{ grid-template-columns: 1fr; }} }}
-        
-        .panel {{ 
-            background: #1e293b; 
-            border: 1px solid rgba(255,255,255,0.05); 
-            border-radius: 20px; 
-            padding: 25px; 
-            margin-bottom: 20px; 
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }}
-        
-        .header-bar {{ 
-            display: flex; justify-content: space-between; align-items: center; 
-            max-width: 1400px; margin: 0 auto 30px; width: 100%;
-        }}
-        .header-bar h2 {{ color: white; margin: 0; font-size: 1.5rem; }}
-        
-        /* Tables Default (Desktop) */
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }}
-        th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); color: #e2e8f0; vertical-align: middle; }}
-        th {{ color: #94a3b8; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }}
-        
-        /* СТИЛІ ТАЙМЛАЙНУ (ХРОНОЛОГІЇ) */
-        .timeline {{ display: flex; flex-direction: column; gap: 8px; margin-top: 15px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 12px; }}
-        .tl-title {{ font-size: 0.75rem; color: #6366f1; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 0.05em; }}
-        .tl-step {{ display: flex; align-items: flex-start; gap: 10px; }}
-        .tl-icon-wrap {{ display: flex; flex-direction: column; align-items: center; width: 12px; }}
-        .tl-icon {{ width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.2); z-index: 2; margin-top: 3px; }}
-        .tl-icon.done {{ background: #6366f1; }}
-        .tl-line {{ width: 2px; background: rgba(255,255,255,0.1); flex-grow: 1; min-height: 15px; margin-top: 2px; }}
-        .tl-icon.done + .tl-line {{ background: rgba(99, 102, 241, 0.5); }}
-        .tl-content {{ flex: 1; display: flex; justify-content: space-between; align-items: flex-start; line-height: 1.2; }}
-        .tl-text {{ font-size: 0.85rem; color: #94a3b8; }}
-        .tl-text.done {{ color: #f8fafc; font-weight: 600; }}
-        .tl-time {{ font-size: 0.75rem; color: #64748b; margin-left: 10px; white-space: nowrap; }}
-        .tl-badge {{ background: rgba(239, 68, 68, 0.2); color: #fca5a5; padding: 2px 5px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-left: 5px; }}
-
-        /* Status Badge */
-        .status-badge {{ padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }}
-
-        /* Buttons */
-        .btn-mini {{ 
-            border: none; border-radius: 8px; width: 36px; height: 36px; cursor: pointer; 
-            display: flex; align-items: center; justify-content: center; transition: 0.2s; 
-            background: rgba(255,255,255,0.05); color: #94a3b8; text-decoration: none; font-size: 1rem;
-        }}
-        .btn-mini:hover {{ transform: translateY(-2px); color: white; }}
-        .btn-mini.info:hover {{ background: #6366f1; }}
-        .btn-mini.danger:hover {{ background: #e11d48; }}
-        .btn-mini.success:hover {{ background: #22c55e; }}
-        .btn-mini.warn:hover {{ background: #f59e0b; }}
-
-        /* Forms */
-        label {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 5px; display: block; }}
-        input, select, textarea {{
-            background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white;
-            padding: 12px 15px; border-radius: 10px; width: 100%; box-sizing: border-box;
-            font-size: 1rem; margin-bottom: 15px; transition: 0.3s;
-        }}
-        input:focus, select:focus, textarea:focus {{
-            outline: none; border-color: var(--primary); background: rgba(99, 102, 241, 0.05);
-        }}
-
-        /* --- MOBILE ADAPTATION (RESPONSIVE) --- */
-        @media (max-width: 768px) {{
-            body {{ padding: 10px; }}
-            .header-bar {{ margin-bottom: 20px; }}
-            .header-bar h2 {{ font-size: 1.2rem; }}
-            .panel {{ padding: 15px; border-radius: 16px; }}
-            thead {{ display: none; }}
-            tr {{
-                display: block;
-                background: rgba(255,255,255,0.02);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 12px;
-                padding: 15px;
-                margin-bottom: 15px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            }}
-            td {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 8px 0;
-                border-bottom: 1px solid rgba(255,255,255,0.05);
-                text-align: right;
-            }}
-            td:last-child {{ border-bottom: none; padding-bottom: 0; }}
-            td::before {{
-                content: attr(data-label);
-                font-weight: 600;
-                color: #64748b;
-                font-size: 0.85rem;
-                text-align: left;
-                margin-right: 15px;
-            }}
-            .actions-cell {{
-                display: block;
-                margin-top: 10px;
-                padding-top: 15px;
-                border-top: 1px solid rgba(255,255,255,0.1);
-            }}
-            .actions-cell::before {{ display: none; }}
-            .actions-cell > div {{ justify-content: space-between; width: 100%; }}
-            .btn-mini {{ width: 42px; height: 42px; font-size: 1.1rem; }}
-            .payment-options {{ grid-template-columns: 1fr; gap: 8px; }}
-            .courier-cell {{ flex-direction: column; align-items: flex-end; text-align: right; }}
-            .courier-cell::before {{ align-self: flex-start; }}
-            .timeline {{ width: 100%; text-align: left; box-sizing: border-box; }}
-        }}
-
-        /* Modals */
-        .modal-overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 2000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(5px); }}
-        .modal-card {{ background: #1e293b; width: 95%; max-width: 500px; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; position: relative; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); max-height: 90vh; overflow-y: auto; }}
-        .track-card {{ max-width: 800px; height: 60vh; padding: 0; }}
-        #track-map {{ flex: 1; width: 100%; min-height: 300px; }}
-        
-        .chat-modal {{ height: 80vh; }}
-        .chat-messages {{ flex: 1; overflow-y: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }}
-        .msg {{ max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; position: relative; line-height: 1.4; }}
-        .msg.me {{ align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 4px; }}
-        .msg.other {{ align-self: flex-start; background: #334155; color: white; border-bottom-left-radius: 4px; }}
-        .msg-time {{ font-size: 0.7rem; opacity: 0.7; text-align: right; margin-top: 4px; }}
-
-        .payment-options {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }}
-        .payment-option input {{ display: none; }}
-        .payment-option label {{ display: block; background: rgba(255,255,255,0.05); padding: 12px; text-align: center; border-radius: 10px; cursor: pointer; border: 1px solid transparent; font-size: 0.9rem; transition: 0.2s; }}
-        .payment-option input:checked + label {{ background: rgba(99, 102, 241, 0.2); border-color: var(--primary); color: white; font-weight: bold; }}
-        
-        .star-rating {{ display: flex; flex-direction: row-reverse; justify-content: center; gap: 5px; margin: 20px 0; }}
-        .star-rating input {{ display: none; }}
-        .star-rating label {{ cursor: pointer; font-size: 2.5rem; color: #444; transition: 0.2s; }}
-        .star-rating input:checked ~ label, .star-rating label:hover, .star-rating label:hover ~ label {{ color: #fbbf24; }}
-
-        #toast-container {{ position: fixed; top: 20px; right: 20px; z-index: 3000; pointer-events: none; }}
-        .toast {{ pointer-events: auto; background: #1e293b; color: white; padding: 15px 20px; border-left: 5px solid var(--primary); border-radius: 8px; margin-bottom: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 15px; animation: slideIn 0.3s ease-out; min-width: 300px; }}
-        @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
-        
-        /* Autocomplete & Loading */
-        .autocomplete-wrapper {{ position: relative; z-index: 1001; }}
-        .autocomplete-results {{ position: absolute; top: 100%; left: 0; right: 0; background: #1e293b; border: 1px solid rgba(255,255,255,0.1); border-top: none; border-radius: 0 0 10px 10px; max-height: 250px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
-        .autocomplete-item {{ padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.95rem; color: #cbd5e1; display:flex; flex-direction:column; }}
-        .autocomplete-item small {{ color: #64748b; font-size: 0.8rem; margin-top:2px; }}
-        .autocomplete-item:hover {{ background: var(--primary); color: white; }}
-        
-        /* Spinner */
-        .loading-input {{
-            background-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3E.spinner_P7sC%7Btransform-origin:center;animation:spinner_svv2 .75s infinite linear%7D@keyframes spinner_svv2%7B100%25%7Btransform:rotate(360deg)%7D%7D%3C/style%3E%3Cpath d='M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z' class='spinner_P7sC' fill='%236366f1'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 10px center;
-            background-size: 20px 20px;
-        }}
-
-        #picker-map {{ width: 100%; height: 250px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); z-index: 1; display:none; }}
-        #picker-map.visible {{ display: block; }}
-        .map-hint {{ font-size: 0.85rem; color: #facc15; margin-bottom: 10px; display:none; background: rgba(250, 204, 21, 0.1); padding: 8px; border-radius: 6px; }}
-    </style>
+    {DASHBOARD_CSS}
     </head>
     <body>
         <div id="toast-container"></div>
@@ -767,14 +1045,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         </div>
 
                         <div id="buyout-options" style="display:none; background:rgba(255,255,255,0.05); padding:12px; border-radius:10px; margin-bottom:15px; border:1px solid rgba(255,255,255,0.1);">
-                            <div style="display:flex; align-items:center; gap:10px; margin-bottom: 8px;">
-                                <input type="checkbox" id="return_check" name="is_return_required" value="true" style="width:20px; height:20px; margin:0;" onchange="toggleReturnFee()">
-                                <label for="return_check" style="margin:0; cursor:pointer; color:white;">
-                                    Кур'єр має повернути гроші в заклад після доставки? (+40 грн)
-                                </label>
-                            </div>
                             <div style="color:#f472b6; font-size:0.85rem;">
-                                <i class="fa-solid fa-circle-info"></i> Якщо галочка знята — кур'єр віддає вам свої гроші одразу при отриманні замовлення.
+                                <i class="fa-solid fa-circle-info"></i> <b>Увага:</b> Якщо ви не натиснете кнопку "Оплачено" під час передачі замовлення кур'єру, то після доставки клієнту автоматично увімкнеться логіка повернення грошей — кур'єр буде зобов'язаний повернутися і віддати вам гроші (статус "Повернення").
                             </div>
                         </div>
 
@@ -883,297 +1155,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             </div>
         </div>
 
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <script>
-            // --- ЛОГИКА ОПЛАТЫ ---
-            const baseFee = 80; 
-            const returnFee = 40; 
-            function updateFormLogic() {{
-                const type = document.querySelector('input[name="payment_type"]:checked').value;
-                const buyoutBlock = document.getElementById('buyout-options');
-                const returnCheck = document.getElementById('return_check');
-                
-                buyoutBlock.style.display = 'none';
-                
-                if (type === 'buyout') {{ 
-                    buyoutBlock.style.display = 'block'; 
-                }} else {{ 
-                    returnCheck.checked = false; 
-                }}
-                toggleReturnFee(); 
-            }}
-            function toggleReturnFee() {{
-                const returnCheck = document.getElementById('return_check');
-                const feeInput = document.getElementById('delivery_fee');
-                let currentFee = parseFloat(feeInput.value) || baseFee;
-                if (returnCheck.checked) {{
-                    if (currentFee < baseFee + returnFee) feeInput.value = baseFee + returnFee;
-                }}
-            }}
-            
-            // --- ЗВУК И TOAST ---
-            const alertSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-            function showToast(text) {{
-                const container = document.getElementById('toast-container');
-                const toast = document.createElement('div');
-                toast.className = 'toast';
-                toast.innerHTML = `<i class="fa-solid fa-bell" style="color:#6366f1"></i> <div>${{text}}</div>`;
-                container.appendChild(toast);
-                setTimeout(() => {{ toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }}, 5000);
-            }}
-
-            // --- BOOST ---
-            async function boostOrder(id) {{
-                if(!confirm("Підняти ціну доставки на 10 грн, щоб пришвидшити пошук?")) return;
-                const fd = new FormData(); fd.append('job_id', id); fd.append('amount', 10);
-                try {{
-                    const res = await fetch('/api/partner/boost_order', {{method:'POST', body:fd}});
-                    const data = await res.json();
-                    if(res.ok) {{ showToast(`💸 Ціну піднято! Нова сума: ${{data.new_fee}} грн`); setTimeout(() => location.reload(), 1500); }}
-                    else {{ alert(data.message || "Помилка"); }}
-                }} catch(e) {{ alert("Помилка з'єднання"); }}
-            }}
-
-            // ==========================================
-            // ПОИСК АДРЕСА: ОБНОВЛЕН (Одесса + Nominatim + БЕЗ РАЙОНА)
-            // ==========================================
-            const addrInput = document.getElementById('addr_input');
-            const addrResults = document.getElementById('addr_results');
-            const latInput = document.getElementById('form_lat');
-            const lonInput = document.getElementById('form_lon');
-            const pickerMapDiv = document.getElementById('picker-map');
-            const mapHint = document.getElementById('map-hint');
-            
-            let pickerMap, pickerMarker;
-            let searchTimeout = null;
-            let latestReqId = 0; // Счетчик запросов
-
-            // КООРДИНАТЫ ОДЕССЫ ПО УМОЛЧАНИЮ
-            const ODESA_LAT = 46.4825;
-            const ODESA_LON = 30.7233;
-
-            function initPickerMap(lat, lon) {{
-                if (pickerMap) return;
-                try {{
-                    pickerMapDiv.classList.add('visible');
-                    mapHint.style.display = 'block';
-                    const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
-                    
-                    pickerMap = L.map('picker-map').setView(startPos, 13);
-                    // Используем OpenStreetMap (Open Map)
-                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }}).addTo(pickerMap);
-
-                    pickerMarker = L.marker(startPos, {{draggable: true}}).addTo(pickerMap);
-                    
-                    pickerMarker.on('dragend', function(e) {{
-                        const pos = e.target.getLatLng();
-                        latInput.value = pos.lat; lonInput.value = pos.lng;
-                    }});
-                    pickerMap.on('click', function(e) {{
-                        pickerMarker.setLatLng(e.latlng);
-                        latInput.value = e.latlng.lat; lonInput.value = e.latlng.lng;
-                    }});
-                    setTimeout(() => pickerMap.invalidateSize(), 200);
-                }} catch(e) {{ console.error("Leaflet init error:", e); }}
-            }}
-
-            if(addrInput) {{
-                addrInput.addEventListener('input', function() {{
-                    clearTimeout(searchTimeout);
-                    const query = this.value.trim();
-                    
-                    if (!pickerMap) initPickerMap();
-                    
-                    if(query.length < 3) {{ 
-                        addrResults.style.display = 'none'; 
-                        addrInput.classList.remove('loading-input');
-                        return; 
-                    }}
-                    
-                    addrInput.classList.add('loading-input');
-                    
-                    // Дебаунс 800мс
-                    searchTimeout = setTimeout(async () => {{
-                        const reqId = ++latestReqId;
-                        
-                        try {{
-                            // Добавили addressdetails=1 чтобы разбить адрес на части
-                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(query)}}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
-                            
-                            const res = await fetch(url);
-                            
-                            if (reqId !== latestReqId) return; // Игнорируем устаревший ответ
-
-                            if (!res.ok) throw new Error("API Error");
-                            const data = await res.json();
-                            
-                            addrResults.innerHTML = '';
-                            if(data && data.length > 0) {{
-                                data.forEach(item => {{
-                                    const div = document.createElement('div');
-                                    div.className = 'autocomplete-item';
-                                    
-                                    const displayName = item.display_name;
-                                    const parts = displayName.split(',');
-                                    const mainName = parts[0];
-                                    const subName = parts.slice(1).join(',').trim();
-                                    
-                                    div.innerHTML = `<span>${{mainName}}</span><small>${{subName}}</small>`;
-                                    div.onclick = () => {{ 
-                                        // --- СБОРКА КОРОТКОГО АДРЕСА ---
-                                        const a = item.address;
-                                        const cleanParts = [];
-                                        
-                                        // 1. Улица / Место
-                                        if (a.road) cleanParts.push(a.road);
-                                        else if (a.pedestrian) cleanParts.push(a.pedestrian);
-                                        else if (a.hamlet) cleanParts.push(a.hamlet);
-                                        else cleanParts.push(mainName);
-                                        
-                                        // 2. Дом
-                                        if (a.house_number) cleanParts.push(a.house_number);
-                                        
-                                        // 3. Город (без района)
-                                        if (a.city) cleanParts.push(a.city);
-                                        else if (a.town) cleanParts.push(a.town);
-                                        else if (a.village) cleanParts.push(a.village);
-                                        
-                                        // Результат: "Улица, Номер, Город"
-                                        addrInput.value = cleanParts.join(', ');
-                                        addrResults.style.display = 'none';
-                                        
-                                        const lat = parseFloat(item.lat);
-                                        const lon = parseFloat(item.lon);
-                                        
-                                        latInput.value = lat; lonInput.value = lon;
-                                        if(pickerMap) {{ 
-                                            pickerMarker.setLatLng([lat, lon]); 
-                                            pickerMap.setView([lat, lon], 16); 
-                                        }} else {{ 
-                                            initPickerMap(lat, lon); 
-                                        }}
-                                    }};
-                                    addrResults.appendChild(div);
-                                }});
-                                addrResults.style.display = 'block';
-                            }} else {{ addrResults.style.display = 'none'; }}
-                        }} catch(e) {{ 
-                            console.error("Search error:", e); 
-                        }} finally {{ 
-                            if (reqId === latestReqId) {{
-                                addrInput.classList.remove('loading-input'); 
-                            }}
-                        }}
-                    }}, 800);
-                }});
-                document.addEventListener('click', (e) => {{ if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; }});
-            }}
-            
-            // --- WEBSOCKET ---
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/partner`);
-            socket.onmessage = (event) => {{
-                const data = JSON.parse(event.data);
-                if (data.type === 'order_update') {{
-                    alertSound.play().catch(e => {{}});
-                    showToast(data.message);
-                    setTimeout(() => location.reload(), 2000); 
-                }} 
-                else if (data.type === 'chat_message') {{
-                    const openJobId = document.getElementById('chat_job_id').value;
-                    const modalOpen = document.getElementById('chatModal').style.display === 'flex';
-                    if (modalOpen && openJobId == data.job_id) {{
-                        const container = document.getElementById('chat-messages');
-                        const div = document.createElement('div');
-                        div.className = 'msg other';
-                        div.innerHTML = `${{data.text}} <div class="msg-time">${{data.time}}</div>`;
-                        container.appendChild(div);
-                        container.scrollTop = container.scrollHeight;
-                    }} else {{ showToast(`💬 Нове повідомлення: ${{data.text}}`); }}
-                }}
-            }};
-
-            // --- CHAT LOGIC ---
-            async function openChat(jobId, title) {{
-                document.getElementById('chatModal').style.display = 'flex';
-                document.getElementById('chat-title').innerText = title;
-                document.getElementById('chat_job_id').value = jobId;
-                document.getElementById('chat-messages').innerHTML = '<div style="text-align:center; color:#888">Завантаження...</div>';
-                try {{
-                    const res = await fetch(`/api/chat/history/${{jobId}}`);
-                    const msgs = await res.json();
-                    renderMessages(msgs);
-                }} catch(e) {{}}
-            }}
-            function renderMessages(msgs) {{
-                const container = document.getElementById('chat-messages');
-                container.innerHTML = '';
-                msgs.forEach(m => {{
-                    const div = document.createElement('div');
-                    div.className = `msg ${{m.role === 'partner' ? 'me' : 'other'}}`;
-                    div.innerHTML = `${{m.text}} <div class="msg-time">${{m.time}}</div>`;
-                    container.appendChild(div);
-                }});
-                container.scrollTop = container.scrollHeight;
-            }}
-            async function sendChatMessage(e) {{
-                e.preventDefault();
-                const input = document.getElementById('chat_input');
-                const jobId = document.getElementById('chat_job_id').value;
-                const text = input.value.trim();
-                if(!text) return;
-                input.value = '';
-                const container = document.getElementById('chat-messages');
-                const div = document.createElement('div');
-                div.className = 'msg me';
-                // Локальное время бразуера (пользователя) - здесь конвертация не нужна
-                const time = new Date().toLocaleTimeString([], {{hour: '2-digit', minute:'2-digit'}});
-                div.innerHTML = `${{text}} <div class="msg-time">${{time}}</div>`;
-                container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
-                const fd = new FormData();
-                fd.append('job_id', jobId); fd.append('message', text); fd.append('role', 'partner');
-                await fetch('/api/chat/send', {{method: 'POST', body: fd}});
-            }}
-
-            // --- ACTIONS ---
-            async function cancelOrder(jobId) {{ if(!confirm("Скасувати це замовлення?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/cancel_order', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
-            async function markReady(jobId) {{ if(!confirm("Підтвердити готовність?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/order_ready', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
-            async function confirmReturn(jobId) {{ if(!confirm("Гроші отримано?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/confirm_return', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
-            async function confirmBuyoutPaid(jobId) {{ if(!confirm("Підтвердити, що кур'єр оплатив своє замовлення на касі?")) return; const fd = new FormData(); fd.append('job_id', jobId); try {{ await fetch('/api/partner/confirm_buyout_paid', {{method:'POST', body:fd}}); location.reload(); }} catch(e) {{}} }}
-
-            // --- RATING & TRACKING ---
-            function openRateModal(jobId) {{ document.getElementById('rate_job_id').value = jobId; document.getElementById('rateModal').style.display = 'flex'; }}
-            async function submitRating(e) {{ e.preventDefault(); const form = new FormData(e.target); try {{ await fetch('/api/partner/rate_courier', {{method:'POST', body:form}}); location.reload(); }} catch(e) {{}} }}
-
-            let map, courierMarker, trackInterval;
-            function openTrackModal(jobId) {{
-                document.getElementById('trackModal').style.display = 'flex';
-                if(!map) {{
-                    map = L.map('track-map').setView([46.4825, 30.7233], 13);
-                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }}).addTo(map);
-                }}
-                fetchLocation(jobId);
-                trackInterval = setInterval(() => fetchLocation(jobId), 5000);
-            }}
-            function closeTrackModal() {{ document.getElementById('trackModal').style.display = 'none'; clearInterval(trackInterval); }}
-            async function fetchLocation(jobId) {{
-                try {{
-                    const res = await fetch(`/api/partner/track_courier/${{jobId}}`);
-                    const data = await res.json();
-                    if(data.status === 'ok' && data.lat) {{
-                        document.getElementById('track-info').innerHTML = `🚴 <b>${{data.name}}</b> • ${{data.job_status}}`;
-                        const pos = [data.lat, data.lon];
-                        if(!courierMarker) courierMarker = L.marker(pos).addTo(map); else courierMarker.setLatLng(pos);
-                        map.setView(pos, 15);
-                    }}
-                }} catch(e) {{}}
-            }}
-        </script>
+        {DASHBOARD_SCRIPT}
     </body>
     </html>
     """

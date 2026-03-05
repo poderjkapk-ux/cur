@@ -595,7 +595,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }}
 
                 // Крок 3: Повернення (якщо є)
-                if (currentJob.is_return_required && currentJob.delivered_at) {{
+                if ((currentJob.is_return_required || currentJob.payment_type === 'buyout') && currentJob.delivered_at) {{
                     const start3 = new Date(currentJob.delivered_at);
                     const end3 = currentJob.completed_at ? new Date(currentJob.completed_at) : now;
                     const el3 = document.getElementById('timer-step-3');
@@ -1009,7 +1009,7 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                 }}
 
                 // Step 3 (Return)
-                if (currentJob.is_return_required && currentJob.delivered_at) {{
+                if ((currentJob.is_return_required || currentJob.payment_type === 'buyout') && currentJob.delivered_at) {{
                     stepsHtml += `<div style="display:flex; justify-content:space-between; align-items:center;">
                         <span style="font-size:0.8rem; font-weight:800; color: #fb923c">КРОК 3: ПОВЕРНЕННЯ</span>
                         <span id="timer-step-3" class="timer-badge warning">⏱ 00:00</span>
@@ -1067,20 +1067,20 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     document.getElementById('step-1').className = 'step done'; document.getElementById('step-2').className = 'step active';
                     
                     if (currentJob.payment_type === 'cash') statusDesc.innerHTML = `<div class="client-pay-box">💵 ОТРИМАЙТЕ ГОТІВКУ: ${{currentJob.order_price}} ₴</div>`;
-                    else if (currentJob.payment_type === 'buyout') statusDesc.innerHTML = `<div class="client-pay-box">💰 ЗАБЕРІТЬ СВОЇ: ${{currentJob.order_price}} ₴</div>`;
+                    else if (currentJob.payment_type === 'buyout') statusDesc.innerHTML = `<div class="client-pay-box">💰 ЗАБЕРІТЬ У КЛІЄНТА: ${{currentJob.order_price}} ₴ (Везіть у заклад)</div>`;
                     else if (currentJob.payment_type === 'buyout_paid') statusDesc.innerHTML = `<div class="client-pay-box success">💰 ВІЗЬМІТЬ У КЛІЄНТА: ${{currentJob.order_price}} ₴ (Свої гроші)</div>`;
                     else statusDesc.innerHTML = 'Везіть до клієнта';
 
-                    if (currentJob.is_return_required) {{
-                        btnAct.innerText = '💰 Забрав гроші (Везу назад)';
-                        btnAct.onclick = () => {{ if(confirm("Везти гроші в заклад?")) updateStatus('delivered'); }};
-                    }} else if (currentJob.status === 'returning') {{
-                         statusDesc.innerHTML = '<b style="color:red">↩️ ПОВЕРНІТЬ ГРОШІ!</b>';
+                    if (currentJob.status === 'returning') {{
+                         statusDesc.innerHTML = '<div class="client-pay-box" style="border-color:red; color:red;">↩️ ПОВЕРНІТЬ ГРОШІ В ЗАКЛАД!</div>';
                          document.getElementById('addr-label').innerText = 'ВЕЗТИ ГРОШІ СЮДИ:';
                          document.getElementById('current-target-addr').innerText = currentJob.partner_address;
                          btnAct.innerText = '💵 Гроші віддав';
                          btnAct.style.background = '#fb923c';
-                         btnAct.onclick = () => alert("Чекайте підтвердження від закладу.");
+                         btnAct.onclick = () => alert("Чекайте підтвердження від закладу. Заклад має натиснути кнопку у себе в кабінеті.");
+                    }} else if (currentJob.is_return_required || currentJob.payment_type === 'buyout') {{
+                        btnAct.innerText = '💰 Забрав гроші (Везу в заклад)';
+                        btnAct.onclick = () => {{ if(confirm("Везти гроші в заклад?")) updateStatus('delivered'); }};
                     }} else {{
                         btnAct.innerText = '✅ Доставив';
                         btnAct.onclick = () => updateStatus('delivered');

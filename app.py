@@ -1065,10 +1065,10 @@ async def update_job_status(
     if not job or job.courier_id != courier.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
-    if status == "delivered" and job.is_return_required:
+    if status == "delivered" and (job.is_return_required or job.payment_type == "buyout"):
         job.status = "returning"
         job.delivered_at = datetime.utcnow()
-        msg_text = f"💰 Кур'єр {courier.name} віддав замовлення і везе гроші назад!"
+        msg_text = f"💰 Кур'єр {courier.name} віддав замовлення клієнту і везе гроші назад у заклад!"
         color = "#fb923c" 
         
         await manager.notify_partner(job.partner_id, {
@@ -1307,7 +1307,7 @@ async def api_partner_register_native(
     password: str = Form(...), 
     verification_token: str = Form(...), 
     db: AsyncSession = Depends(get_db)
-):
+    ):
     verif = await db.get(PendingVerification, verification_token)
     if not verif or verif.status != "verified":
          return JSONResponse({"status": "error", "message": "Телефон не підтверджено в Telegram"}, status_code=400)
