@@ -126,7 +126,8 @@ class CourierTransaction(Base):
     type = Column(String(50), nullable=False) # 'deposit', 'commission', 'withdrawal'
     description = Column(String(255), nullable=True)
     
-    job_id = Column(Integer, ForeignKey("delivery_jobs.id"), nullable=True) # Якщо це комісія за конкретне замовлення
+    # --- ВИПРАВЛЕНО: додано ondelete="SET NULL", щоб уникнути помилки при видаленні замовлень/ресторанів ---
+    job_id = Column(Integer, ForeignKey("delivery_jobs.id", ondelete="SET NULL"), nullable=True) 
     
     # --- НОВОЕ ПОЛЕ: была ли получена наличка ---
     cash_received = Column(Boolean, default=True) 

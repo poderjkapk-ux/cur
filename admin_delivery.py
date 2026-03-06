@@ -1189,6 +1189,10 @@ async def partner_control(
     user: str = Depends(check_admin_auth),
     db: AsyncSession = Depends(get_db)
 ):
+    # Добавьте эти импорты, если их нет
+    from sqlalchemy import update, select
+    from models import DeliveryJob, CourierTransaction
+    
     partner = await db.get(DeliveryPartner, id)
     if not partner:
         return RedirectResponse("/admin/delivery?message=Партнера не знайдено", status_code=302)
@@ -1203,12 +1207,27 @@ async def partner_control(
         partner.is_active = True
         msg = f"Партнер {partner.name} розблокований."
     elif action == "delete":
+        # --- ИСПРАВЛЕНИЕ: Отвязываем транзакции перед удалением ---
+        # 1. Знаходимо всі ID замовлень цього партнера
+        partner_jobs_query = await db.execute(select(DeliveryJob.id).where(DeliveryJob.partner_id == partner.id))
+        job_ids = partner_jobs_query.scalars().all()
+        
+        # 2. Якщо є замовлення, відв'язуємо від них фінансові транзакції (ставимо NULL)
+        if job_ids:
+            await db.execute(
+                update(CourierTransaction)
+                .where(CourierTransaction.job_id.in_(job_ids))
+                .values(job_id=None)
+            )
+        # -----------------------------------------------------------
+        
+        # 3. Тепер безпечно видаляємо партнера (SQLAlchemy каскадно видалить замовлення,
+        # але вони вже не прив'язані до транзакцій)
         await db.delete(partner)
         msg = "Партнер видалений."
     
     await db.commit()
     return RedirectResponse(f"/admin/delivery?message={msg}", status_code=302)
-
 # --- ІСТОРІЯ ЗАМОВЛЕНЬ ---
 
 @router.get("/admin/delivery/courier/{courier_id}/history", response_class=HTMLResponse)

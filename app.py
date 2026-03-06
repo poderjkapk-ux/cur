@@ -73,6 +73,14 @@ class ConnectionManager:
     # --- Методи для КУР'ЄРІВ ---
     async def connect_courier(self, websocket: WebSocket, courier_id: int):
         await websocket.accept()
+        # ЗАКРИВАЄМО СТАРЕ З'ЄДНАННЯ, ЯКЩО ВОНО ІСНУЄ
+        if courier_id in self.active_couriers:
+            try:
+                await self.active_couriers[courier_id].close()
+                logging.info(f"Closed previous WS for Courier {courier_id}")
+            except Exception:
+                pass
+                
         self.active_couriers[courier_id] = websocket
         logging.info(f"Courier {courier_id} connected to WS")
 
@@ -92,12 +100,21 @@ class ConnectionManager:
     # --- Методи для ПАРТНЕРІВ (Ресторанів) ---
     async def connect_partner(self, websocket: WebSocket, partner_id: int):
         await websocket.accept()
+        # ЗАКРИВАЄМО СТАРЕ З'ЄДНАННЯ, ЯКЩО ВОНО ІСНУЄ
+        if partner_id in self.active_partners:
+            try:
+                await self.active_partners[partner_id].close()
+                logging.info(f"Closed previous WS for Partner {partner_id}")
+            except Exception:
+                pass
+                
         self.active_partners[partner_id] = websocket
         logging.info(f"Partner {partner_id} connected to WS")
 
     def disconnect_partner(self, partner_id: int):
         if partner_id in self.active_partners:
             del self.active_partners[partner_id]
+            logging.info(f"Partner {partner_id} disconnected from WS")
 
     async def notify_partner(self, partner_id: int, message: dict):
         if partner_id in self.active_partners:
@@ -106,8 +123,7 @@ class ConnectionManager:
             except Exception as e:
                 logging.error(f"WS Error (Partner {partner_id}): {e}")
                 self.disconnect_partner(partner_id)
-
-manager = ConnectionManager()
+manager = ConnectionManager()    
 
 # --- Налаштування за замовчуванням для Бази Даних ---
 DEFAULT_SETTINGS = {
