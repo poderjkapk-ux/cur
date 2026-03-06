@@ -1090,7 +1090,9 @@ async def update_job_status(
     if not job or job.courier_id != courier.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
-    if status == "delivered" and (job.is_return_required or job.payment_type == "buyout"):
+    # ВИПРАВЛЕНО: Прибрали `or job.payment_type == "buyout"`. 
+    # Тепер замовлення "Викуп" одразу закриваються після доставки, без повернення в заклад.
+    if status == "delivered" and job.is_return_required:
         job.status = "returning"
         job.delivered_at = datetime.utcnow()
         msg_text = f"💰 Кур'єр {courier.name} віддав замовлення клієнту і везе гроші назад у заклад!"
