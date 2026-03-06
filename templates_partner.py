@@ -660,28 +660,78 @@ DASHBOARD_SCRIPT = """
     }
     
     // --- WEBSOCKET ---
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/partner`);
-    socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'order_update') {
-            alertSound.play().catch(e => {});
-            showToast(data.message);
-            setTimeout(() => location.reload(), 2000); 
-        } 
-        else if (data.type === 'chat_message') {
-            const openJobId = document.getElementById('chat_job_id').value;
-            const modalOpen = document.getElementById('chatModal').style.display === 'flex';
-            if (modalOpen && openJobId == data.job_id) {
-                const container = document.getElementById('chat-messages');
-                const div = document.createElement('div');
-                div.className = 'msg other';
-                div.innerHTML = `${data.text} <div class="msg-time">${data.time}</div>`;
-                container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
-            } else { showToast(`💬 Нове повідомлення: ${data.text}`); }
+    let socket = null;
+    let pingInterval = null;
+
+    function connectWS() {
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+        
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        socket = new WebSocket(`${protocol}//${window.location.host}/ws/partner`);
+
+        socket.onopen = () => {
+            clearInterval(pingInterval);
+            // Шлемо пінг кожні 30 секунд (бо на сервері таймаут 120с)
+            pingInterval = setInterval(() => { 
+                if (socket.readyState === WebSocket.OPEN) socket.send("ping"); 
+            }, 30000);
+        };
+
+        socket.onmessage = (event) => {
+            if (event.data === "pong") return; // Ігноруємо відповідь на пінг
+            
+            const data = JSON.parse(event.data);
+            if (data.type === 'order_update') {
+                alertSound.play().catch(e => {});
+                showToast(data.message);
+                setTimeout(() => location.reload(), 2000); 
+            } 
+            else if (data.type === 'chat_message') {
+                const openJobId = document.getElementById('chat_job_id').value;
+                const modalOpen = document.getElementById('chatModal').style.display === 'flex';
+                if (modalOpen && openJobId == data.job_id) {
+                    const container = document.getElementById('chat-messages');
+                    const div = document.createElement('div');
+                    div.className = 'msg other';
+                    div.innerHTML = `${data.text} <div class="msg-time">${data.time}</div>`;
+                    container.appendChild(div);
+                    container.scrollTop = container.scrollHeight;
+                } else { showToast(`💬 Нове повідомлення: ${data.text}`); }
+            }
+        };
+
+        socket.onclose = (event) => {
+            clearInterval(pingInterval);
+            // Якщо сесія протухла
+            if (event.code === 1008) {
+                window.location.href = '/partner/login?message=Сесія закінчилась. Увійдіть знову.';
+                return;
+            }
+            // Автоматичний реконнект через 5 секунд
+            setTimeout(connectWS, 5000); 
+        };
+
+        socket.onerror = (error) => {
+            console.error("Partner WS Error:", error);
+            socket.close(); 
+        };
+    }
+
+    // Запускаємо підключення
+    connectWS();
+
+    // Відновлення зв'язку при розблокуванні екрану або поверненні на вкладку
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+                console.log("Tab focused: reconnecting WS");
+                connectWS();
+            } else if (socket.readyState === WebSocket.OPEN) {
+                // Відправляємо позачерговий пінг, щоб перевірити чи живий сокет
+                socket.send("ping");
+            }
         }
-    };
+    });
 
     // --- CHAT LOGIC ---
     async function openChat(jobId, title) {

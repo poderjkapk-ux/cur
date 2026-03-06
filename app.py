@@ -841,7 +841,8 @@ async def websocket_endpoint(
     
     try:
         while True:
-            data_text = await websocket.receive_text()
+            # Встановлюємо таймаут 60 секунд
+            data_text = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
             
             try:
                 data = json.loads(data_text)
@@ -876,6 +877,14 @@ async def websocket_endpoint(
             except json.JSONDecodeError:
                 if data_text == "ping":
                     await websocket.send_text("pong")
+
+    except asyncio.TimeoutError:
+        logging.warning(f"WS Timeout: Courier {courier_id} silently disconnected.")
+        manager.disconnect_courier(courier_id)
+        try: 
+            await websocket.close() 
+        except Exception: 
+            pass
 
     except WebSocketDisconnect:
         manager.disconnect_courier(courier_id) 
@@ -1855,7 +1864,20 @@ async def websocket_partner_endpoint(websocket: WebSocket, db: AsyncSession = De
         pid = int(auth.jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])["sub"].split(":")[1])
         await manager.connect_partner(websocket, pid)
         while True: 
-            await websocket.receive_text()
+            # Встановлюємо таймаут 120 секунд
+            data_text = await asyncio.wait_for(websocket.receive_text(), timeout=120.0)
+            if data_text == "ping":
+                await websocket.send_text("pong")
+                
+    except asyncio.TimeoutError:
+        logging.warning(f"WS Timeout: Partner {pid} silently disconnected.")
+        if pid: 
+            manager.disconnect_partner(pid)
+        try: 
+            await websocket.close() 
+        except Exception: 
+            pass
+        
     except Exception as e: 
         logging.error(f"Partner WS Disconnected: {e}")
         if pid: 

@@ -896,7 +896,27 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
                     }}
                     if (isOnline) setTimeout(connectWS, 3000);
                 }};
+                
+                // НОВИЙ БЛОК: Обробка помилок сокета
+                socket.onerror = (error) => {{
+                    console.error("WebSocket Error: ", error);
+                    socket.close(); 
+                }};
             }}
+            
+            // НОВИЙ БЛОК: Примусове відновлення зв'язку при розгортанні/розблокуванні PWA
+            document.addEventListener('visibilitychange', () => {{
+                if (document.visibilityState === 'visible' && isOnline) {{
+                    // Якщо сокет закритий або закривається — підключаємося заново
+                    if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {{
+                        console.log("App wakes up: reconnecting WS");
+                        connectWS();
+                    }} else if (socket.readyState === WebSocket.OPEN) {{
+                        // Якщо відкритий, відправляємо пінг, щоб переконатися, що він живий
+                        socket.send("ping");
+                    }}
+                }}
+            }});
             
             if (navigator.geolocation) {{
                 navigator.geolocation.watchPosition((pos) => {{
