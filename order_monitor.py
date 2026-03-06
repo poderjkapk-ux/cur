@@ -15,15 +15,7 @@ from firebase_admin import messaging
 # Получаем ID админа для тревожных уведомлений (берем из окружения, как в app.py)
 ADMIN_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
-async def auto_vacuum_couriers():
-    """Фонова очистка мертвих координат курьєрів без блокування таблиці"""
-    try:
-        async with engine.connect() as conn:
-            # Включаем AUTOCOMMIT, так как VACUUM нельзя запускать внутри транзакции
-            await conn.execution_options(isolation_level="AUTOCOMMIT").execute(text("VACUUM couriers;"))
-        logging.info("🧹 Автоматичний VACUUM таблиці couriers виконано успішно. Місце під координати оптимізовано.")
-    except Exception as e:
-        logging.error(f"Помилка при виконанні автоматичного VACUUM: {e}")
+
 
 async def monitor_stale_orders(ws_manager):
     """
