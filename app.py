@@ -1090,10 +1090,13 @@ async def update_job_status(
     if not job or job.courier_id != courier.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
-    # ВИПРАВЛЕНО: Прибрали `or job.payment_type == "buyout"`. 
-    # Тепер замовлення "Викуп" одразу закриваються після доставки, без повернення в заклад.
-    if status == "delivered" and job.is_return_required:
+    # ИСПРАВЛЕНО: Если это Выкуп, и ресторан НЕ нажал "Оплачено" (статус остался buyout),
+    # курьер обязан вернуть деньги в заклад (включается 3-й шаг).
+    needs_return = job.is_return_required or job.payment_type == "buyout"
+
+    if status == "delivered" and needs_return:
         job.status = "returning"
+        job.is_return_required = True # Принудительно включаем для фронтендов, чтобы появился 3-й шаг!
         job.delivered_at = datetime.utcnow()
         msg_text = f"💰 Кур'єр {courier.name} віддав замовлення клієнту і везе гроші назад у заклад!"
         color = "#fb923c" 
