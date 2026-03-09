@@ -1104,6 +1104,19 @@ async def courier_add_balance(
             ))
             
         await db.commit()
+
+        # --- НОВЕ: Сповіщення кур'єру про зміну балансу ---
+        if courier.telegram_chat_id:
+            sign = "+" if amount >= 0 else ""
+            tg_msg = (
+                f"💰 <b>Оновлення балансу</b>\n\n"
+                f"Сума: <b>{sign}{amount} ₴</b>\n"
+                f"Поточний баланс: <b>{courier.balance:.2f} ₴</b>\n\n"
+                f"📝 Коментар: <i>{desc}</i>"
+            )
+            asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_msg))
+        # --------------------------------------------------
+
     return RedirectResponse(f"/admin/delivery?message=Баланс кур'єра {courier.name} поповнено на {amount}₴", status_code=302)
 
 

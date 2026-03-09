@@ -618,6 +618,18 @@ async def api_courier_register(
     
     await db.delete(verif)
     await db.commit()
+
+    # --- НОВЕ: Сповіщення адмінам про нового кур'єра ---
+    if TG_CHAT_ID:
+        admin_msg = (
+            f"🆕 <b>Реєстрація нового кур'єра!</b>\n\n"
+            f"👤 <b>Ім'я:</b> {name}\n"
+            f"📱 <b>Телефон:</b> {verif.phone}\n"
+            f"⚠️ <i>Очікує на перевірку документів та активацію в адмін-панелі.</i>"
+        )
+        asyncio.create_task(bot_service.send_telegram_message(TG_CHAT_ID, admin_msg))
+    # ---------------------------------------------------
+    
     return JSONResponse({"status": "ok"})
 
 @app.post("/api/courier/login")
