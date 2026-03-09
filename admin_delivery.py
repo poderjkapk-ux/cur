@@ -1045,7 +1045,7 @@ async def check_app_update(app_type: str, request: Request):
 @router.get("/download-apk/{app_type}")
 async def download_apk(app_type: str):
     """
-    Пряме посилання на скачування APK-файлу.
+    Пряме посилання на скачування APK-файлу з унікальним іменем та антикешуванням.
     """
     if app_type not in ["courier", "partner"]:
         raise HTTPException(status_code=404, detail="App type not found")
@@ -1055,10 +1055,23 @@ async def download_apk(app_type: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="APK file not uploaded yet")
         
+    # Отримуємо поточну версію з конфігу для унікального імені файлу
+    config = load_apk_config()
+    app_data = config.get(app_type) or {"versionCode": 0, "versionName": "latest"}
+    v_name = app_data.get("versionName", "latest")
+    v_code = app_data.get("versionCode", 0)
+        
     return FileResponse(
         path=file_path,
         media_type='application/vnd.android.package-archive',
-        filename=f"restify_{app_type}_latest.apk"
+        # Додаємо версію в назву: restify_courier_v1.0.1_2.apk
+        filename=f"restify_{app_type}_v{v_name}_{v_code}.apk",
+        # Забороняємо браузерам та Android кэшувати цей файл
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
     )
 
 # ==============================================================================
