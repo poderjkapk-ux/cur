@@ -245,10 +245,59 @@ def get_courier_login_page(message="", msg_type="error"):
             <input type="password" name="password" placeholder="Пароль" required>
             <button type="submit" class="btn">Почати зміну</button>
         </form>
+        
+        <div style="margin-top: 15px; text-align: center;">
+            <a href="#" onclick="document.getElementById('resetModal').style.display='flex'; return false;" style="color: var(--text-muted); font-size: 0.9rem; text-decoration: underline;">Забули пароль?</a>
+        </div>
+        
         {f"<div class='message {msg_type}'>{message}</div>" if message else ""}
         <br>
         <a href="/courier/register" style="color: var(--primary); text-decoration: none;">Стати кур'єром</a>
-    </div></body></html>
+    </div>
+    
+    <div id="resetModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; padding: 20px;">
+        <div style="background:#1e293b; padding:25px; border-radius:16px; width:100%; max-width:350px; text-align:center; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+            <h3 style="margin-top:0; color:white;">Відновлення пароля</h3>
+            <p style="font-size:0.9rem; color:#94a3b8; margin-bottom:15px;">Введіть номер телефону. Новий пароль буде надіслано вам у Telegram.</p>
+            <form id="resetForm" onsubmit="resetPassword(event)">
+                <input type="tel" id="resetPhone" placeholder="Номер телефону" required style="width:100%; margin-bottom:15px; padding:12px; border-radius:8px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: white;">
+                <button type="submit" class="btn" style="width:100%; background: var(--primary); color: white;">Надіслати новий пароль</button>
+                <button type="button" onclick="document.getElementById('resetModal').style.display='none'" style="background:none; border:none; color:#94a3b8; margin-top:15px; width:100%; cursor: pointer;">Скасувати</button>
+            </form>
+            <div id="resetMsg" style="margin-top:15px; font-size:0.9rem; font-weight: bold;"></div>
+        </div>
+    </div>
+    
+    <script>
+    async function resetPassword(e) {{
+        e.preventDefault();
+        const phone = document.getElementById('resetPhone').value;
+        const msgEl = document.getElementById('resetMsg');
+        msgEl.style.color = '#fbbf24';
+        msgEl.innerText = 'Відправка...';
+        
+        try {{
+            const fd = new FormData();
+            fd.append('phone', phone);
+            
+            const res = await fetch('/api/courier/reset_password', {{method: 'POST', body: fd}});
+            const data = await res.json();
+            
+            if(res.ok) {{
+                msgEl.style.color = '#4ade80';
+                msgEl.innerText = '✅ Новий пароль надіслано в Telegram!';
+                setTimeout(() => document.getElementById('resetModal').style.display='none', 4000);
+            }} else {{
+                msgEl.style.color = '#ef4444';
+                msgEl.innerText = '❌ ' + (data.detail || 'Помилка');
+            }}
+        }} catch(err) {{
+            msgEl.style.color = '#ef4444';
+            msgEl.innerText = '❌ Помилка мережі';
+        }}
+    }}
+    </script>
+    </body></html>
     """
 
 def get_courier_register_page():

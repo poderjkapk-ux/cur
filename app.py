@@ -349,6 +349,7 @@ async def handle_registration(
     
     return JSONResponse(content={"detail": "User created successfully."})
 
+
 # ==============================================================================
 # 2. УПРАВЛІННЯ ІНСТАНСАМИ (SAAS LOGIC)
 # ==============================================================================
@@ -645,6 +646,41 @@ async def api_courier_login(
     is_secure = ROOT_DOMAIN.startswith("https") 
     resp.set_cookie(key="courier_token", value=token, httponly=True, max_age=604800, samesite="lax", secure=is_secure)
     return resp
+
+@app.post("/api/courier/reset_password")
+async def reset_courier_password(
+    phone: str = Form(...), 
+    db: AsyncSession = Depends(get_db)
+):
+    # Очищаем номер от плюсов и пробелов
+    clean_phone = phone.replace('+', '').strip()
+    
+    # Ищем курьера
+    courier = await auth.get_courier_by_phone(db, clean_phone)
+    if not courier:
+        return JSONResponse(status_code=404, content={"detail": "Кур'єра з таким номером не знайдено."})
+    
+    if not courier.telegram_chat_id:
+        return JSONResponse(status_code=400, content={"detail": "У цього акаунта не підключений Telegram. Скидання неможливе."})
+        
+    # Генерируем новый безопасный пароль (8 символов)
+    new_password = secrets.token_urlsafe(6)
+    
+    # Обновляем пароль в базе данных
+    courier.hashed_password = auth.get_password_hash(new_password)
+    await db.commit()
+    
+    # Отправляем сообщение в Telegram
+    tg_text = (
+        f"🔐 <b>Відновлення пароля</b>\n\n"
+        f"Ваш новий пароль для входу в додаток:\n"
+        f"👉 <code>{new_password}</code>\n\n"
+        f"<i>Тепер ви можете увійти в систему, використовуючи цей пароль.</i>"
+    )
+    asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_text))
+    
+    return JSONResponse({"status": "ok"})
+
 
 # --- НОВИЙ ЕНДПОІНТ ПРОФІЛЮ ДЛЯ PWA ТА ANDROID ---
 @app.get("/api/courier/profile")
@@ -1366,6 +1402,14 @@ async def api_partner_register_native(
     await db.commit()
     
     return JSONResponse({"status": "ok"})
+
+@app.get("/api/partner/profile_native")
+async def api_partner_profile_native(partner: DeliveryPartner = Depends(get_current_partner)):
+    """Ендпоінт для отримання профілю закладу в Android-додатку"""
+    return JSONResponse({
+        "name": partner.name,
+        "address": partner.address
+    })
 
 @app.get("/api/partner/orders_native")
 async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)):
