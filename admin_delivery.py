@@ -17,7 +17,7 @@ from sqlalchemy.orm import joinedload
 import bot_service
 
 # Імпортуємо auth замість app, щоб уникнути циклічного імпорту
-from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage
+from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage, Announcement
 from auth import check_admin_auth 
 from crud_settings import get_setting # Імпорт для отримання часового поясу
 
@@ -483,13 +483,15 @@ def get_admin_chat_html(job_id, messages, tz_string="Europe/Kiev"):
     """
 
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None):
+def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None, announcements=None):
     if cash_transactions is None:
         cash_transactions = []
     if non_cash_deposits is None:
         non_cash_deposits = []
     if active_jobs is None:
         active_jobs = []
+    if announcements is None:
+        announcements = []
         
     courier_rows = ""
     for c in couriers:
@@ -631,6 +633,26 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
     if not non_cash_rows_html:
         non_cash_rows_html = "<tr><td colspan='4' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає поповнень без готівки</td></tr>"
 
+    # ГЕНЕРАЦИЯ СТРОК ОБЪЯВЛЕНИЙ (ANNOUNCEMENTS)
+    ann_rows = ""
+    for a in announcements:
+        target_str = "Усім" if not a.target_courier_id else f"ID Кур'єра: {a.target_courier_id}"
+        badge_color = {"info": "#3b82f6", "warning": "#facc15", "danger": "#ef4444", "success": "#4ade80"}.get(a.style, "#3b82f6")
+        ann_rows += f"""
+        <tr>
+            <td><span style="color:{badge_color};">●</span> <b>{a.title}</b></td>
+            <td>{a.message}</td>
+            <td>{target_str}</td>
+            <td>
+                <form action="/admin/delivery/announcements/delete" method="post" onsubmit="return confirm('Видалити оголошення?');" style="margin:0;">
+                    <input type="hidden" name="id" value="{a.id}">
+                    <button class="btn-mini danger"><i class="fa-solid fa-trash"></i></button>
+                </form>
+            </td>
+        </tr>
+        """
+    if not ann_rows:
+        ann_rows = "<tr><td colspan='4' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає активних оголошень</td></tr>"
 
     return f"""
     <!DOCTYPE html><html><head><title>Delivery Admin</title>{GLOBAL_STYLES}
@@ -749,6 +771,38 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                         <thead><tr><th>ID / Час</th><th>Заклад</th><th>Кур'єр</th><th>Статус</th><th>Сума / Доставка</th><th>Дії (Чат / Відміна)</th></tr></thead>
                         <tbody>{active_jobs_rows}</tbody>
                     </table>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top: 20px; border-color: #8b5cf6;">
+                <h2 style="color: #c4b5fd;"><i class="fa-solid fa-bullhorn"></i> Дошка Оголошень (для Кур'єрів)</h2>
+                <div class="grid" style="grid-template-columns: 1fr 2fr;">
+                    <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
+                        <form action="/admin/delivery/announcements/create" method="post">
+                            <input type="text" name="title" placeholder="Заголовок (напр: Важливо!)" required style="width:100%; padding:8px; margin-bottom:10px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box;">
+                            <textarea name="message" placeholder="Текст повідомлення..." required style="width:100%; padding:8px; margin-bottom:10px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; min-height:80px; box-sizing: border-box; font-family: inherit;"></textarea>
+                            
+                            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                                <select name="style" style="width:50%; padding:8px; background:#334155; border:1px solid #475569; color:white; border-radius:6px;">
+                                    <option value="info">🔵 Інформація</option>
+                                    <option value="warning">🟡 Увага</option>
+                                    <option value="danger">🔴 Важливо</option>
+                                    <option value="success">🟢 Добре</option>
+                                </select>
+                                <select name="target_courier_id" style="width:50%; padding:8px; background:#334155; border:1px solid #475569; color:white; border-radius:6px;">
+                                    <option value="0">Усім кур'єрам</option>
+                                    {"".join([f'<option value="{c.id}">{c.name} (ID: {c.id})</option>' for c in couriers])}
+                                </select>
+                            </div>
+                            <button type="submit" class="btn" style="width:100%; background:#8b5cf6; padding:10px; border:none; border-radius:6px; color:white; cursor:pointer; font-weight:bold;">Опублікувати</button>
+                        </form>
+                    </div>
+                    <div style="max-height: 250px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                            <thead><tr><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Заголовок</th><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Текст</th><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Кому</th><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Дії</th></tr></thead>
+                            <tbody>{ann_rows}</tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -871,6 +925,9 @@ async def admin_delivery_page(
         .order_by(DeliveryJob.id.desc())
     )).scalars().all()
 
+    # Отримуємо оголошення
+    announcements = (await db.execute(select(Announcement).order_by(Announcement.id.desc()))).scalars().all()
+
     pwa_config = load_pwa_config()
     apk_config = load_apk_config() # ЗАВАНТАЖУЄМО КОНФІГ APK
     tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
@@ -896,7 +953,7 @@ async def admin_delivery_page(
     
     return get_delivery_admin_html(
         couriers, partners, pwa_config, apk_config, tz_string, message, 
-        cash_balance, cash_transactions, non_cash_deposits, active_jobs
+        cash_balance, cash_transactions, non_cash_deposits, active_jobs, announcements
     )
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
@@ -1076,7 +1133,47 @@ async def download_apk(app_type: str):
 
 # ==============================================================================
 
+# --- РОУТИ ОГОЛОШЕНЬ (ANNOUNCEMENTS) ---
 
+@router.post("/admin/delivery/announcements/create")
+async def create_announcement(
+    title: str = Form(...),
+    message: str = Form(...),
+    style: str = Form("info"),
+    target_courier_id: int = Form(0), 
+    user: str = Depends(check_admin_auth),
+    db: AsyncSession = Depends(get_db)
+):
+    target = target_courier_id if target_courier_id > 0 else None
+    new_ann = Announcement(title=title, message=message, style=style, target_courier_id=target)
+    db.add(new_ann)
+    await db.commit()
+    await db.refresh(new_ann)
+    
+    # Відправляємо WS повідомлення всім онлайн кур'єрам
+    try:
+        from app import manager
+        ws_data = {"type": "new_announcement", "data": {"id": new_ann.id, "title": title, "message": message, "style": style}}
+        
+        if target:
+            await manager.notify_courier(target, ws_data)
+        else:
+            for cid in manager.active_couriers.keys():
+                await manager.notify_courier(cid, ws_data)
+    except Exception as e:
+        logging.error(f"Failed to send WS for announcement: {e}")
+            
+    return RedirectResponse("/admin/delivery?message=Оголошення створено!", status_code=302)
+
+@router.post("/admin/delivery/announcements/delete")
+async def delete_announcement(
+    id: int = Form(...), user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)
+):
+    ann = await db.get(Announcement, id)
+    if ann:
+        await db.delete(ann)
+        await db.commit()
+    return RedirectResponse("/admin/delivery?message=Оголошення видалено", status_code=302)
 
 # --- УПРАВЛІННЯ КУР'ЄРАМИ ТА ПАРТНЕРАМИ ---
 

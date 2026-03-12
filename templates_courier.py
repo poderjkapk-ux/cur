@@ -1,603 +1,672 @@
-from templates_saas import GLOBAL_STYLES
+import json
 
-# Імпорт моделей для типізації
-try:
-    from models import Courier
-except ImportError:
-    class Courier: pass
-
-# --- Додаємо стилі спеціально для карти та PWA ---
-PWA_STYLES = """
-<style>
-    /* Глобальне скидання для PWA */
-    * { box-sizing: border-box; }
-
-    /* Вимикаємо скрол сторінки, щоб відчувалося як Native App */
-    body, html { 
-        height: 100%; 
-        overflow: hidden; 
-        overscroll-behavior: none;
-        padding: 0 !important; /* Скидаємо padding з GLOBAL_STYLES */
-        margin: 0 !important;
-    }
-    
-    /* Карта на весь фон */
-    #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-    #map.hidden { visibility: hidden; } /* Ховаємо карту, коли активна стрічка */
-
-    /* Верхня панель (Header) */
-    .app-header {
-        position: absolute; top: 0; left: 0; right: 0;
-        background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px);
-        padding: 15px 20px; z-index: 100;
-        display: flex; justify-content: space-between; align-items: center;
-        border-bottom: 1px solid var(--border);
-        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-        height: 60px; /* Фіксована висота для розрахунків */
-    }
-    .status-indicator { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.9rem; cursor: pointer; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; box-shadow: 0 0 10px currentColor; }
-    .dot.online { background: var(--status-active); color: var(--status-active); }
-    .dot.offline { background: var(--status-delete); color: var(--status-delete); }
-    .icon-btn { background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 5px; }
-
-    /* --- НИЖНЯ НАВІГАЦІЯ (TABS) --- */
-    .bottom-nav {
-        position: fixed; bottom: 0; left: 0; right: 0;
-        height: 70px; background: #1e293b;
-        display: flex; justify-content: space-around; align-items: center;
-        border-top: 1px solid var(--border);
-        z-index: 500; padding-bottom: env(safe-area-inset-bottom);
-        box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
-    }
-    .nav-item {
-        color: var(--text-muted); text-align: center;
-        font-size: 0.75rem; flex: 1; height: 100%;
-        display: flex; flex-direction: column; justify-content: center; align-items: center;
-        gap: 5px; transition: 0.3s; cursor: pointer;
-    }
-    .nav-item i { font-size: 1.4rem; transition: 0.3s; }
-    .nav-item.active { color: var(--primary); }
-    .nav-item.active i { transform: translateY(-2px); text-shadow: 0 0 10px var(--primary); }
-
-    /* Контейнери екранів */
-    .screen { 
-        display: none; 
-        height: 100%; 
-        width: 100%; 
-        position: relative; 
-    }
-    .screen.active { display: block; }
-
-    /* --- СТРІЧКА ЗАМОВЛЕНЬ ТА ПРОФІЛЬ --- */
-    .feed-container {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 70px; /* Відступ знизу (меню) */
-        
-        padding: 80px 15px 20px 15px; /* Відступ зверху для хедера */
-        
-        overflow-y: auto; 
-        -webkit-overflow-scrolling: touch; 
-        background: var(--bg-body);
-    }
-    
-    .feed-header {
-        margin-bottom: 20px; display: flex; justify-content: space-between; align-items: end;
-    }
-    .feed-title { font-size: 1.5rem; font-weight: 800; color: white; margin: 0; }
-    
-    .loading-indicator { font-size: 0.8rem; color: var(--text-muted); animation: pulse 1s infinite; }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-
-    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); margin-top: 50px; }
-    .empty-state i { font-size: 3rem; margin-bottom: 15px; opacity: 0.3; }
-
-    /* Картка замовлення в стрічці */
-    .order-card {
-        background: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 15px;
-        border: 1px solid rgba(255,255,255,0.05);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        position: relative; overflow: hidden;
-    }
-    .order-card::before {
-        content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
-        background: var(--primary);
-    }
-    .order-card.high-price::before { background: var(--status-active); } 
-
-    .oc-header { display: flex; justify-content: space-between; margin-bottom: 12px; }
-    .oc-dist-badge { 
-        background: rgba(99, 102, 241, 0.15); color: #818cf8; 
-        padding: 4px 10px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; 
-        display: flex; align-items: center; gap: 5px;
-    }
-    .oc-price { font-size: 1.4rem; font-weight: 800; color: white; }
-
-    .oc-route { display: flex; flex-direction: column; gap: 10px; position: relative; padding-left: 20px; margin-bottom: 15px; }
-    .oc-route::after {
-        content: ''; position: absolute; left: 6px; top: 5px; bottom: 5px; width: 2px;
-        background: #334155; z-index: 0;
-    }
-    .oc-point { position: relative; z-index: 1; font-size: 0.95rem; color: #cbd5e1; }
-    .oc-point::before {
-        content: ''; position: absolute; left: -20px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
-    }
-    .oc-point.rest::before { background: #facc15; border: 2px solid #1e293b; }
-    .oc-point.client::before { background: #22c55e; border: 2px solid #1e293b; }
-    
-    .route-meta {
-        position: absolute; left: -5px; top: 50%; transform: translateY(-50%);
-        background: var(--bg-card); color: var(--text-muted); font-size: 0.7rem;
-        padding: 2px 0; z-index: 2;
-    }
-
-    .oc-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 15px; }
-    .oc-tags { display: flex; gap: 5px; flex-wrap: wrap; }
-    .oc-tag { font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; background: #334155; color: #94a3b8; text-transform: uppercase; }
-
-    .btn-accept {
-        background: var(--primary); color: white; border: none; 
-        padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer;
-        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
-    }
-    .btn-accept:active { transform: scale(0.95); }
-
-    /* --- ШТОРКА АКТИВНОГО ЗАМОВЛЕННЯ (Bottom Sheet) --- */
-    .bottom-sheet {
-        position: absolute; bottom: 0; left: 0; right: 0;
-        background: var(--bg-card);
-        border-radius: 20px 20px 0 0;
-        padding: 25px;
-        z-index: 200;
-        box-shadow: 0 -5px 30px rgba(0,0,0,0.4);
-        transform: translateY(110%);
-        transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        max-height: 85vh;
-        overflow-y: auto;
-    }
-    .bottom-sheet.active { transform: translateY(0); }
-    
-    .drag-handle { width: 40px; height: 5px; background: rgba(255,255,255,0.2); border-radius: 5px; margin: 0 auto 20px; }
-    .stepper { display: flex; margin-bottom: 20px; }
-    .step { flex: 1; height: 4px; background: #334155; margin-right: 5px; border-radius: 2px; }
-    .step.active { background: var(--primary); }
-    .step.done { background: var(--status-active); }
-
-    .sheet-title { font-size: 1.4rem; font-weight: 800; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
-    .sheet-subtitle { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px; }
-    
-    .info-block { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid var(--border); }
-    .info-label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
-    .info-value { font-size: 1.1rem; font-weight: 600; color: #f8fafc; }
-    .info-value i { color: var(--primary); width: 20px; }
-
-    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-    .btn-nav { background: #3b82f6; color: white; border: none; padding: 15px; border-radius: 12px; font-weight: 600; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; font-size: 1rem; }
-    .btn-main { background: var(--status-active); color: #0f172a; border: none; padding: 15px; border-radius: 12px; font-weight: 700; width: 100%; font-size: 1.1rem; cursor: pointer; transition: 0.2s; }
-    
-    /* Модалки (Історія, Чат) */
-    .history-modal, .chat-sheet {
-        position: fixed; inset: 0; background: var(--bg-body); z-index: 600;
-        padding: 20px; transform: translateX(100%); transition: 0.3s; overflow-y: auto;
-    }
-    .history-modal.open, .chat-sheet.open { transform: translateX(0); }
-
-    /* Чат (стилі) */
-    .chat-header { padding-bottom: 15px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-    .chat-body { flex: 1; padding: 15px 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; height: calc(100% - 130px); }
-    .chat-footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 15px; background: var(--bg-card); display: flex; gap: 10px; }
-    .msg { max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; color: white; }
-    .msg.me { align-self: flex-end; background: var(--primary); border-bottom-right-radius: 4px; }
-    .msg.other { align-self: flex-start; background: #334155; border-bottom-left-radius: 4px; }
-    .chat-input { flex: 1; background: #1e293b; border: 1px solid var(--border); padding: 12px; border-radius: 25px; color: white; }
-
-    /* --- НОВІ СТИЛІ ДЛЯ ОПЛАТИ ТА ГОТОВНОСТІ --- */
-    .client-pay-box {
-        background: #fce7f3; color: #be185d; 
-        padding: 10px; border-radius: 8px; margin-bottom: 15px; 
-        font-weight: bold; text-align: center; border: 1px dashed #be185d;
-    }
-    .client-pay-box.success {
-        background: #d1fae5; color: #064e3b; border-color: #059669;
-    }
-    .ready-badge {
-        background: #4ade80; color: #064e3b; padding: 5px 10px; 
-        border-radius: 6px; font-weight: bold; display: inline-block; 
-        margin-bottom: 10px; animation: popIn 0.3s;
-    }
-    @keyframes popIn { from { transform: scale(0.5); opacity:0; } to { transform: scale(1); opacity:1; } }
-
-    /* --- СТИЛІ ДЛЯ ТАЙМЕРІВ --- */
-    .current-time {
-        font-weight: 800; color: var(--primary); font-size: 1.1rem;
-        background: rgba(99, 102, 241, 0.1); padding: 5px 10px;
-        border-radius: 8px; margin-right: 15px; letter-spacing: 1px;
-    }
-    .timer-badge {
-        background: rgba(255, 255, 255, 0.1); color: var(--text-muted);
-        padding: 4px 8px; border-radius: 6px; font-size: 0.85rem;
-        font-weight: bold; display: inline-flex; align-items: center; gap: 5px;
-    }
-    .timer-badge.active {
-        background: rgba(99, 102, 241, 0.2); color: #818cf8;
-        animation: pulse-timer 2s infinite;
-    }
-    .timer-badge.done { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
-    .timer-badge.warning { background: rgba(251, 146, 60, 0.2); color: #fb923c; animation: pulse-timer 2s infinite; }
-    @keyframes pulse-timer { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
-</style>
-"""
-
-def get_courier_login_page(message="", msg_type="error"):
-    """Сторінка входу для кур'єрів"""
-    pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
-    return f"""
-    <!DOCTYPE html><html lang="uk"><head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Вхід для кур'єрів</title>{GLOBAL_STYLES}{pwa_meta}</head>
-    <body><div class="container">
-        <h1>🚴 Courier App</h1>
-        <form method="post" action="/api/courier/login">
-            <input type="tel" name="phone" placeholder="Телефон" required>
-            <input type="password" name="password" placeholder="Пароль" required>
-            <button type="submit" class="btn">Почати зміну</button>
-        </form>
-        
-        <div style="margin-top: 15px; text-align: center;">
-            <a href="#" onclick="document.getElementById('resetModal').style.display='flex'; return false;" style="color: var(--text-muted); font-size: 0.9rem; text-decoration: underline;">Забули пароль?</a>
-        </div>
-        
-        {f"<div class='message {msg_type}'>{message}</div>" if message else ""}
-        <br>
-        <a href="/courier/register" style="color: var(--primary); text-decoration: none;">Стати кур'єром</a>
-    </div>
-    
-    <div id="resetModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; padding: 20px;">
-        <div style="background:#1e293b; padding:25px; border-radius:16px; width:100%; max-width:350px; text-align:center; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
-            <h3 style="margin-top:0; color:white;">Відновлення пароля</h3>
-            <p style="font-size:0.9rem; color:#94a3b8; margin-bottom:15px;">Введіть номер телефону. Новий пароль буде надіслано вам у Telegram.</p>
-            <form id="resetForm" onsubmit="resetPassword(event)">
-                <input type="tel" id="resetPhone" placeholder="Номер телефону" required style="width:100%; margin-bottom:15px; padding:12px; border-radius:8px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: white;">
-                <button type="submit" class="btn" style="width:100%; background: var(--primary); color: white;">Надіслати новий пароль</button>
-                <button type="button" onclick="document.getElementById('resetModal').style.display='none'" style="background:none; border:none; color:#94a3b8; margin-top:15px; width:100%; cursor: pointer;">Скасувати</button>
-            </form>
-            <div id="resetMsg" style="margin-top:15px; font-size:0.9rem; font-weight: bold;"></div>
-        </div>
-    </div>
-    
-    <script>
-    async function resetPassword(e) {{
-        e.preventDefault();
-        const phone = document.getElementById('resetPhone').value;
-        const msgEl = document.getElementById('resetMsg');
-        msgEl.style.color = '#fbbf24';
-        msgEl.innerText = 'Відправка...';
-        
-        try {{
-            const fd = new FormData();
-            fd.append('phone', phone);
-            
-            const res = await fetch('/api/courier/reset_password', {{method: 'POST', body: fd}});
-            const data = await res.json();
-            
-            if(res.ok) {{
-                msgEl.style.color = '#4ade80';
-                msgEl.innerText = '✅ Новий пароль надіслано в Telegram!';
-                setTimeout(() => document.getElementById('resetModal').style.display='none', 4000);
-            }} else {{
-                msgEl.style.color = '#ef4444';
-                msgEl.innerText = '❌ ' + (data.detail || 'Помилка');
-            }}
-        }} catch(err) {{
-            msgEl.style.color = '#ef4444';
-            msgEl.innerText = '❌ Помилка мережі';
-        }}
-    }}
-    </script>
-    </body></html>
-    """
-
-def get_courier_register_page():
-    """Сторінка реєстрації для кур'єрів з Telegram Verification та Завантаженням документів"""
-    return f"""
-    <!DOCTYPE html><html lang="uk"><head><title>Реєстрація кур'єра</title>{GLOBAL_STYLES}
-    <style>
-        .tg-verify-box {{ border: 2px dashed var(--border); padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center; background: rgba(255,255,255,0.02); }}
-        .tg-verify-box.verified {{ border-color: var(--status-active); background: rgba(74, 222, 128, 0.1); }}
-        .tg-btn {{ background: #24A1DE; color: white; padding: 12px 20px; border-radius: 8px; text-decoration: none; display: inline-flex; align-items: center; gap: 10px; font-weight: 600; margin-top: 10px; }}
-        .hidden {{ display: none; }}
-        .spinner {{ display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }}
-        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-    </style>
-    </head>
-    <body><div class="container">
-        <h1>Реєстрація Кур'єра</h1>
-        <form id="regForm" method="post" action="/api/courier/register" enctype="multipart/form-data">
-            <input type="text" name="name" placeholder="Ваше Ім'я" required>
-            <input type="password" name="password" placeholder="Пароль" required>
-            
-            <label style="color: var(--text-muted); text-align: left; display: block; margin-bottom: 5px; margin-top: 10px;">Фото документів (Паспорт / Водійське):</label>
-            <input type="file" name="document_photo" accept="image/*" required style="background: rgba(255,255,255,0.03); color: white; padding: 10px; border-radius: 8px; border: 1px dashed var(--border); margin-bottom: 15px; width: 100%; box-sizing: border-box;">
-            
-            <label style="color: var(--text-muted); text-align: left; display: block; margin-bottom: 5px;">Селфі (Фото вашого обличчя):</label>
-            <input type="file" name="selfie_photo" accept="image/*" capture="user" required style="background: rgba(255,255,255,0.03); color: white; padding: 10px; border-radius: 8px; border: 1px dashed var(--border); margin-bottom: 15px; width: 100%; box-sizing: border-box;">
-            
-            <div id="tg-step" class="tg-verify-box">
-                <div id="tg-initial">
-                    <p style="margin:0 0 10px 0; color:var(--text-muted);">Підтвердіть телефон через Telegram:</p>
-                    <a href="#" id="tg-link" target="_blank" class="tg-btn"><i class="fa-brands fa-telegram"></i> Підтвердити</a>
-                </div>
-                <div id="tg-waiting" class="hidden">
-                    <p style="margin:0; color:var(--text-muted);"><span class="spinner"></span> Очікуємо...</p>
-                    <small style="color:#666">Натисніть "Start" та "Share Contact"</small>
-                </div>
-                <div id="tg-success" class="hidden">
-                    <div style="color: var(--status-active); font-size: 1.2rem; margin-bottom: 5px;"><i class="fa-solid fa-circle-check"></i> Підтверджено!</div>
-                    <div id="user-phone-display" style="font-weight:bold; color:white;"></div>
-                </div>
-            </div>
-            <input type="hidden" name="phone" id="real_phone">
-            <input type="hidden" name="verification_token" id="verification_token">
-            <button type="submit" class="btn" id="submitBtn" disabled>Зареєструватися</button>
-        </form>
-        <div id="msg" class="message" style="display:none"></div>
-    </div>
-    <script>
-        let verificationToken = ""; let pollInterval = null;
-        async function initVerification() {{
-            try {{
-                const res = await fetch('/api/auth/init_verification', {{ method: 'POST' }});
-                const data = await res.json();
-                verificationToken = data.token;
-                document.getElementById('verification_token').value = verificationToken;
-                const linkBtn = document.getElementById('tg-link');
-                linkBtn.href = data.link;
-                linkBtn.addEventListener('click', () => {{
-                    document.getElementById('tg-initial').classList.add('hidden');
-                    document.getElementById('tg-waiting').classList.remove('hidden');
-                    pollInterval = setInterval(async () => {{
-                        try {{
-                            const res = await fetch(`/api/auth/check_verification/${{verificationToken}}`);
-                            const data = await res.json();
-                            if(data.status === 'verified') {{
-                                clearInterval(pollInterval);
-                                document.getElementById('tg-waiting').classList.add('hidden');
-                                document.getElementById('tg-success').classList.remove('hidden');
-                                document.querySelector('.tg-verify-box').classList.add('verified');
-                                document.getElementById('user-phone-display').innerText = data.phone;
-                                document.getElementById('real_phone').value = data.phone;
-                                document.getElementById('submitBtn').disabled = false;
-                            }}
-                        }} catch(e) {{ }}
-                    }}, 2000);
-                }});
-            }} catch(e) {{ console.error(e); }}
-        }}
-        initVerification();
-        document.getElementById('regForm').addEventListener('submit', async (e) => {{
-            e.preventDefault();
-            const btn = document.getElementById('submitBtn');
-            btn.disabled = true; btn.innerText = "Обробка...";
-            const form = new FormData(e.target);
-            const msgEl = document.getElementById('msg');
-            msgEl.style.display = 'none';
-            try {{
-                const resp = await fetch('/api/courier/register', {{ method: 'POST', body: form }});
-                const resData = await resp.json();
-                if(resp.ok) window.location.href='/courier/login?message=Ваша заявка прийнята! Після верифікації вам прийде повідомлення в Telegram.&type=success';
-                else {{ msgEl.style.display = 'block'; msgEl.className = 'message error'; msgEl.innerText = resData.detail || 'Помилка'; btn.disabled = false; btn.innerText = "Зареєструватися"; }}
-            }} catch (err) {{ msgEl.style.display = 'block'; msgEl.innerText = "Помилка мережі"; btn.disabled = false; btn.innerText = "Зареєструватися"; }}
-        }});
-    </script>
-    </body></html>
-    """
-
-def get_courier_pwa_html(courier: Courier, config: dict = None):
-    """
-    Оновлений PWA інтерфейс із вкладкою Профіль (Баланс, Комісія), Feed (Стрічка замовлень) + PUSH + WAKE LOCK + Onboarding + Timers.
-    """
-    if config is None:
-        config = {}
-        
-    status_class = "online" if courier.is_online else "offline"
-    status_text = "НА ЗМІНІ" if courier.is_online else "ОФЛАЙН"
-    pwa_meta = '<link rel="manifest" href="/courier/manifest.json">'
-
-    FIREBASE_CONFIG = f"""
-    {{
-        apiKey: "{config.get('firebase_api_key', '')}",
-        authDomain: "{config.get('firebase_project_id', '')}.firebaseapp.com",
-        projectId: "{config.get('firebase_project_id', '')}",
-        storageBucket: "{config.get('firebase_project_id', '')}.firebasestorage.app",
-        messagingSenderId: "{config.get('firebase_sender_id', '')}",
-        appId: "{config.get('firebase_app_id', '')}"
-    }}
-    """
-    VAPID_KEY = config.get('firebase_vapid_key', '')
-
+def get_courier_login_page(message=None):
+    msg_html = f"<div class='error-msg'>{message}</div>" if message else ""
     return f"""
     <!DOCTYPE html>
     <html lang="uk">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Courier App</title>
-        {GLOBAL_STYLES}
-        {PWA_STYLES}
-        {pwa_meta}
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Вхід для Кур'єрів | Restify</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        <style>
+            :root {{ --bg: #0f172a; --panel: #1e293b; --text: #f8fafc; --primary: #3b82f6; }}
+            body {{
+                margin: 0; padding: 0; background-color: var(--bg); color: var(--text);
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                display: flex; justify-content: center; align-items: center; min-height: 100vh;
+            }}
+            .login-container {{
+                background: var(--panel); padding: 30px; border-radius: 16px;
+                width: 90%; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                box-sizing: border-box;
+            }}
+            h1 {{ text-align: center; margin-top: 0; color: var(--primary); }}
+            p.subtitle {{ text-align: center; color: #94a3b8; margin-bottom: 25px; }}
+            .input-group {{ margin-bottom: 15px; }}
+            .input-group label {{ display: block; margin-bottom: 5px; color: #cbd5e1; font-size: 0.9rem; }}
+            .input-group input {{
+                width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155;
+                background: #0f172a; color: white; box-sizing: border-box; font-size: 1rem;
+            }}
+            .input-group input:focus {{ outline: none; border-color: var(--primary); }}
+            .btn {{
+                width: 100%; padding: 14px; background: var(--primary); color: white;
+                border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold;
+                cursor: pointer; margin-top: 10px; transition: background 0.3s;
+            }}
+            .btn:hover {{ background: #2563eb; }}
+            .error-msg {{
+                background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #ef4444;
+                padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center;
+                font-size: 0.9rem;
+            }}
+            .links {{ text-align: center; margin-top: 20px; font-size: 0.9rem; }}
+            .links a {{ color: var(--primary); text-decoration: none; }}
+            .links a:hover {{ text-decoration: underline; }}
+            
+            /* Скидання пароля */
+            .reset-btn {{
+                background: none; border: none; color: #94a3b8; cursor: pointer;
+                font-size: 0.85rem; padding: 0; text-decoration: underline; margin-top: 15px;
+                display: block; width: 100%; text-align: center;
+            }}
+        </style>
     </head>
     <body>
-        <div class="app-header">
-            <button class="icon-btn" onclick="toggleHistory(true)"><i class="fa-solid fa-clock-rotate-left"></i></button>
-            <div style="display: flex; align-items: center;">
-                <div id="global-clock" class="current-time">00:00:00</div>
-                <div class="status-indicator" onclick="toggleShift()" style="position: relative;">
-                    <div id="connection-dot" style="position: absolute; top:-2px; right:-2px; width:6px; height:6px; border-radius:50%; background:red; border:1px solid #0f172a;" title="Connection Status"></div>
-                    <div id="status-dot" class="dot {status_class}"></div>
-                    <span id="status-text">{status_text}</span>
+        <div class="login-container">
+            <h1><i class="fa-solid fa-motorcycle"></i> Restify Кур'єр</h1>
+            <p class="subtitle">Увійдіть, щоб почати доставку</p>
+            {msg_html}
+            <form action="/api/courier/login" method="post">
+                <div class="input-group">
+                    <label>Номер телефону</label>
+                    <input type="tel" name="phone" placeholder="+380..." required>
                 </div>
-            </div>
-            <a href="/courier/logout" class="icon-btn"><i class="fa-solid fa-right-from-bracket"></i></a>
-        </div>
-
-        <div id="offline-msg" style="display: {'none' if courier.is_online else 'flex'}; position: absolute; inset:0; background:rgba(15,23,42,0.8); z-index: 50; align-items:center; justify-content:center; flex-direction:column; backdrop-filter:blur(3px);">
-            <h2>Ви зараз офлайн</h2>
-            <button class="btn" style="width:200px" onclick="toggleShift()">Вийти на лінію</button>
-        </div>
-
-        <div id="screen-map" class="screen active">
-            <div id="map"></div>
+                <div class="input-group">
+                    <label>Пароль</label>
+                    <input type="password" name="password" placeholder="Ваш пароль" required>
+                </div>
+                <button type="submit" class="btn">Увійти</button>
+            </form>
             
-            <div id="job-sheet" class="bottom-sheet">
-                <div class="drag-handle"></div>
-                <div class="stepper"><div id="step-1" class="step"></div><div id="step-2" class="step"></div></div>
-                <div class="sheet-title">
-                    <span id="job-title">Замовлення #...</span>
-                    <span id="job-price" style="color: var(--status-active)">+0 ₴</span>
-                </div>
-                
-                <div class="sheet-subtitle" id="job-status-desc">Статус...</div>
-                
-                <div id="steps-container" style="margin-bottom: 15px; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 12px; border: 1px solid var(--border); display: none;"></div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
-                    <a href="#" id="btn-call" class="btn-nav" style="background: #334155; display:none;"><i class="fa-solid fa-phone"></i> Дзвінок</a>
-                    <button id="btn-chat" class="btn-nav" style="background: #334155; cursor: pointer;"><i class="fa-solid fa-comments"></i> Чат</button>
-                </div>
-                <div class="info-block">
-                    <div class="info-label" id="addr-label">Адреса:</div>
-                    <div class="info-value" id="current-target-addr">...</div>
-                    <div style="margin-top:5px; color:var(--text-muted); font-size:0.9rem;" id="current-target-name">...</div>
-                </div>
-                <div class="info-block" id="client-info-block" style="display:none;">
-                    <div class="info-label">Клієнт</div>
-                    <div class="info-value"><i class="fa-solid fa-user"></i> <span id="client-name"></span></div>
-                    <div class="info-value"><i class="fa-solid fa-phone"></i> <a href="#" id="client-phone" style="color:white; text-decoration:none;"></a></div>
-                    <div style="margin-top:5px; color:var(--accent);" id="job-comment"></div>
-                </div>
-                <div class="action-grid">
-                    <a href="#" id="btn-nav" target="_blank" class="btn-nav"><i class="fa-solid fa-location-arrow"></i> Навігація</a>
-                    <button id="btn-action" class="btn-main" onclick="advanceJobState()">Дія</button>
-                </div>
+            <button class="reset-btn" onclick="resetPassword()">Забули пароль? Відновити через Telegram</button>
+
+            <div class="links">
+                Ще немає акаунту? <a href="/courier/register">Зареєструватися</a>
             </div>
         </div>
 
-        <div id="screen-orders" class="screen">
-            <div class="feed-container">
-                <div class="feed-header">
-                    <h1 class="feed-title">Стрічка замовлень</h1>
-                    <div id="feed-loader" class="loading-indicator"><i class="fa-solid fa-satellite-dish"></i> Пошук...</div>
+        <script>
+            async function resetPassword() {{
+                const phone = prompt("Введіть ваш номер телефону (напр. 380...):");
+                if(!phone) return;
+                
+                try {{
+                    const fd = new FormData();
+                    fd.append('phone', phone);
+                    const res = await fetch('/api/courier/reset_password', {{
+                        method: 'POST', body: fd
+                    }});
+                    const data = await res.json();
+                    
+                    if(res.ok) {{
+                        alert("Новий пароль відправлено у ваш Telegram!");
+                    }} else {{
+                        alert("Помилка: " + (data.detail || "Невідома помилка"));
+                    }}
+                }} catch(e) {{
+                    alert("Помилка з'єднання з сервером.");
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+
+def get_courier_register_page():
+    return """
+    <!DOCTYPE html>
+    <html lang="uk">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Реєстрація Кур'єра | Restify</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        <style>
+            :root { --bg: #0f172a; --panel: #1e293b; --text: #f8fafc; --primary: #3b82f6; --success: #22c55e; }
+            body {
+                margin: 0; padding: 0; background-color: var(--bg); color: var(--text);
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                display: flex; justify-content: center; align-items: center; min-height: 100vh;
+            }
+            .register-container {
+                background: var(--panel); padding: 30px; border-radius: 16px;
+                width: 90%; max-width: 450px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                box-sizing: border-box; margin: 20px 0;
+            }
+            h1 { text-align: center; margin-top: 0; color: var(--primary); font-size: 1.5rem; }
+            p.subtitle { text-align: center; color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px; }
+            
+            .step { display: none; }
+            .step.active { display: block; animation: fadeIn 0.3s; }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+            
+            .input-group { margin-bottom: 15px; }
+            .input-group label { display: block; margin-bottom: 5px; color: #cbd5e1; font-size: 0.9rem; }
+            .input-group input {
+                width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155;
+                background: #0f172a; color: white; box-sizing: border-box; font-size: 1rem;
+            }
+            .input-group input:focus { outline: none; border-color: var(--primary); }
+            
+            .file-upload {
+                border: 2px dashed #334155; border-radius: 8px; padding: 20px;
+                text-align: center; cursor: pointer; margin-bottom: 15px;
+                background: rgba(0,0,0,0.2); transition: 0.3s;
+            }
+            .file-upload:hover { border-color: var(--primary); background: rgba(59, 130, 246, 0.1); }
+            .file-upload i { font-size: 2rem; color: var(--primary); margin-bottom: 10px; }
+            .file-upload input[type="file"] { display: none; }
+            .file-name { margin-top: 10px; font-size: 0.85rem; color: var(--success); word-break: break-all; }
+
+            .btn {
+                width: 100%; padding: 14px; background: var(--primary); color: white;
+                border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold;
+                cursor: pointer; margin-top: 10px; transition: background 0.3s;
+            }
+            .btn:hover { background: #2563eb; }
+            .btn:disabled { background: #475569; cursor: not-allowed; }
+            .btn-outline {
+                background: transparent; border: 1px solid var(--primary); color: var(--primary);
+            }
+            .btn-outline:hover { background: rgba(59, 130, 246, 0.1); }
+
+            .tg-btn {
+                background: #0088cc; display: flex; align-items: center; justify-content: center; gap: 10px;
+            }
+            .tg-btn:hover { background: #0077b3; }
+
+            .links { text-align: center; margin-top: 20px; font-size: 0.9rem; }
+            .links a { color: var(--primary); text-decoration: none; }
+            
+            #errorMsg { color: #ef4444; font-size: 0.9rem; text-align: center; margin-bottom: 15px; display: none; }
+        </style>
+    </head>
+    <body>
+        <div class="register-container">
+            <h1>Реєстрація Кур'єра</h1>
+            <p class="subtitle">Пройдіть 3 кроки для початку роботи</p>
+            
+            <div id="errorMsg"></div>
+
+            <div id="step1" class="step active">
+                <div style="text-align:center; margin-bottom: 20px;">
+                    <i class="fa-brands fa-telegram" style="font-size: 4rem; color: #0088cc;"></i>
+                    <p>Для зв'язку та безпеки нам потрібен ваш Telegram та номер телефону.</p>
                 </div>
-                <div id="orders-list"></div>
+                <button class="btn tg-btn" onclick="startTelegramAuth()">
+                    <i class="fa-brands fa-telegram"></i> Підтвердити через Telegram
+                </button>
+            </div>
+
+            <div id="step2" class="step">
+                <p style="text-align:center;">Завантажте фото для верифікації</p>
+                
+                <label class="file-upload" onclick="document.getElementById('docFile').click()">
+                    <i class="fa-solid fa-id-card"></i>
+                    <div>Натисніть, щоб завантажити фото паспорта або прав</div>
+                    <input type="file" id="docFile" accept="image/*" onchange="showFileName(this, 'docName')">
+                    <div id="docName" class="file-name"></div>
+                </label>
+
+                <label class="file-upload" onclick="document.getElementById('selfieFile').click()">
+                    <i class="fa-solid fa-camera-retro"></i>
+                    <div>Натисніть, щоб зробити селфі з документом</div>
+                    <input type="file" id="selfieFile" accept="image/*" capture="user" onchange="showFileName(this, 'selfieName')">
+                    <div id="selfieName" class="file-name"></div>
+                </label>
+
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-outline" onclick="showStep(1)">Назад</button>
+                    <button class="btn" onclick="goToStep3()">Далі</button>
+                </div>
+            </div>
+
+            <div id="step3" class="step">
+                <form id="registerForm" onsubmit="submitRegistration(event)">
+                    <div class="input-group">
+                        <label>Ваше ПІБ</label>
+                        <input type="text" id="regName" required placeholder="Іванов Іван">
+                    </div>
+                    <div class="input-group">
+                        <label>Придумайте пароль для входу</label>
+                        <input type="password" id="regPassword" required minlength="6" placeholder="Мінімум 6 символів">
+                    </div>
+                    
+                    <div style="display:flex; gap:10px;">
+                        <button type="button" class="btn btn-outline" onclick="showStep(2)">Назад</button>
+                        <button type="submit" class="btn" id="submitBtn">Завершити реєстрацію</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="links" id="loginLink">
+                Вже є акаунт? <a href="/courier/login">Увійти</a>
             </div>
         </div>
 
-        <div id="screen-profile" class="screen">
-            <div class="feed-container">
-                <div class="feed-header">
-                    <h1 class="feed-title">Мій Профіль</h1>
-                </div>
-                
-                <div style="background: #1e293b; padding: 25px; border-radius: 16px; text-align: center; border: 1px solid var(--border); box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-bottom: 20px;">
-                    <div style="width: 80px; height: 80px; border-radius: 50%; background: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; margin: 0 auto 15px;">
-                        <i class="fa-solid fa-motorcycle"></i>
-                    </div>
-                    <h2 id="prof-name" style="margin: 0 0 5px 0; color: white;">Завантаження...</h2>
-                    <p id="prof-phone" style="color: var(--text-muted); margin: 0;"></p>
-                    <div style="margin-top: 15px; display: inline-block; background: rgba(255,255,255,0.05); padding: 5px 15px; border-radius: 20px; color: #facc15;">
-                        <i class="fa-solid fa-star"></i> <span id="prof-rating">5.0</span> (<span id="prof-rating-count">0</span>)
-                    </div>
-                </div>
+        <script>
+            let verificationToken = "";
+            let checkInterval = null;
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                    <div style="background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid var(--border);">
-                        <div style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 5px; text-transform: uppercase;">Поточний Баланс</div>
-                        <div id="prof-balance" style="font-size: 1.8rem; font-weight: 800; color: #4ade80;">0.00 ₴</div>
+            function showStep(num) {
+                document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+                document.getElementById('step' + num).classList.add('active');
+                if(num === 3) document.getElementById('loginLink').style.display = 'none';
+                else document.getElementById('loginLink').style.display = 'block';
+            }
+
+            function showError(msg) {
+                const el = document.getElementById('errorMsg');
+                el.innerText = msg;
+                el.style.display = 'block';
+                setTimeout(() => el.style.display = 'none', 5000);
+            }
+
+            async function startTelegramAuth() {
+                try {
+                    const res = await fetch('/api/auth/init_verification', { method: 'POST' });
+                    const data = await res.json();
+                    verificationToken = data.token;
+                    window.open(data.link, '_blank');
+                    
+                    const btn = document.querySelector('.tg-btn');
+                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Очікування підтвердження...';
+                    btn.disabled = true;
+
+                    checkInterval = setInterval(checkVerification, 2000);
+                } catch(e) {
+                    showError("Помилка з'єднання з сервером");
+                }
+            }
+
+            async function checkVerification() {
+                if(!verificationToken) return;
+                try {
+                    const res = await fetch('/api/auth/check_verification/' + verificationToken);
+                    const data = await res.json();
+                    if(data.status === 'verified') {
+                        clearInterval(checkInterval);
+                        showStep(2); // Переходимо до документів
+                    }
+                } catch(e) {}
+            }
+
+            function showFileName(input, targetId) {
+                const target = document.getElementById(targetId);
+                if(input.files && input.files[0]) {
+                    target.innerText = "✅ " + input.files[0].name;
+                } else {
+                    target.innerText = "";
+                }
+            }
+
+            function goToStep3() {
+                const doc = document.getElementById('docFile').files[0];
+                const selfie = document.getElementById('selfieFile').files[0];
+                if(!doc || !selfie) {
+                    showError("Будь ласка, завантажте обидва фото!");
+                    return;
+                }
+                showStep(3);
+            }
+
+            async function submitRegistration(e) {
+                e.preventDefault();
+                const name = document.getElementById('regName').value;
+                const pwd = document.getElementById('regPassword').value;
+                const doc = document.getElementById('docFile').files[0];
+                const selfie = document.getElementById('selfieFile').files[0];
+                const btn = document.getElementById('submitBtn');
+
+                if(!verificationToken || !name || !pwd || !doc || !selfie) {
+                    showError("Заповніть всі поля!"); return;
+                }
+
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Реєстрація...';
+
+                const fd = new FormData();
+                fd.append('name', name);
+                fd.append('password', pwd);
+                fd.append('verification_token', verificationToken);
+                fd.append('document_photo', doc);
+                fd.append('selfie_photo', selfie);
+
+                try {
+                    const res = await fetch('/api/courier/register', {
+                        method: 'POST', body: fd
+                    });
+                    
+                    if(res.ok) {
+                        document.querySelector('.register-container').innerHTML = `
+                            <div style="text-align:center;">
+                                <i class="fa-solid fa-circle-check" style="font-size: 5rem; color: var(--success); margin-bottom:20px;"></i>
+                                <h2>Реєстрація успішна!</h2>
+                                <p style="color:#94a3b8;">Ваші дані відправлені на перевірку адміністратору. Ми повідомимо вас у Telegram, коли акаунт буде активовано.</p>
+                                <a href="/courier/login" class="btn" style="display:inline-block; text-decoration:none; margin-top:20px;">Перейти до входу</a>
+                            </div>
+                        `;
+                    } else {
+                        const data = await res.json();
+                        showError(data.detail || "Помилка реєстрації");
+                        btn.disabled = false;
+                        btn.innerText = "Завершити реєстрацію";
+                    }
+                } catch(e) {
+                    showError("Помилка з'єднання з сервером");
+                    btn.disabled = false;
+                    btn.innerText = "Завершити реєстрацію";
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+
+def get_courier_pwa_html(courier, config):
+    PWA_STYLES = """
+    :root {
+        --bg: #0f172a; --panel: #1e293b; --text: #f8fafc;
+        --primary: #3b82f6; --success: #22c55e; --danger: #ef4444; --warning: #facc15;
+        --border: #334155; --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body, html {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: var(--bg); color: var(--text); overflow: hidden;
+    }
+    
+    .app-header {
+        position: absolute; top: 0; left: 0; right: 0; height: 60px;
+        background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px);
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 0 15px; z-index: 100; border-bottom: 1px solid var(--border);
+    }
+    .header-title { font-size: 1.1rem; font-weight: bold; color: white; display:flex; align-items:center; gap:8px; }
+    
+    .status-toggle {
+        display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.1);
+        padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9rem;
+    }
+    .toggle-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); transition: 0.3s; }
+    .status-toggle.online .toggle-dot { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    
+    /* --- СИСТЕМА ОГОЛОШЕНЬ (АККУРАТНІ ПЛАШКИ ПІД ХЕДЕРОМ) --- */
+    #announcements-wrapper {
+        position: absolute;
+        top: 60px; /* Одразу під хедером */
+        left: 0;
+        right: 0;
+        z-index: 95; /* Поверх карти, але під модалками */
+        display: flex;
+        flex-direction: column;
+    }
+    .announcement-bar {
+        padding: 10px 15px;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        animation: slideDownAnn 0.3s ease-out;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .ann-info { background: rgba(30, 64, 175, 0.95); backdrop-filter: blur(5px); }
+    .ann-warning { background: rgba(161, 98, 7, 0.95); backdrop-filter: blur(5px); }
+    .ann-danger { background: rgba(153, 27, 27, 0.95); backdrop-filter: blur(5px); }
+    .ann-success { background: rgba(22, 101, 52, 0.95); backdrop-filter: blur(5px); }
+    
+    .ann-content { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .ann-title { font-weight: 800; font-size: 0.95rem; display: flex; align-items: center; gap: 6px; }
+    .ann-text { font-size: 0.85rem; line-height: 1.3; opacity: 0.9; }
+    
+    .ann-close { 
+        background: rgba(255,255,255,0.2); border: none; width: 30px; height: 30px; 
+        border-radius: 50%; color: white; display: flex; align-items: center; 
+        justify-content: center; cursor: pointer; flex-shrink: 0; transition: 0.2s;
+    }
+    .ann-close:active { background: rgba(255,255,255,0.4); transform: scale(0.9); }
+    
+    @keyframes slideDownAnn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    #map {
+        position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 1;
+        background-color: #0f172a;
+    }
+    /* Темна тема для Leaflet */
+    .leaflet-layer, .leaflet-control-zoom-in, .leaflet-control-zoom-out, .leaflet-control-attribution {
+        filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+    }
+    
+    .bottom-sheet {
+        position: absolute; bottom: 0; left: 0; right: 0;
+        background: var(--panel); border-radius: 20px 20px 0 0;
+        z-index: 100; display: flex; flex-direction: column;
+        box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+        transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+        max-height: 85vh;
+    }
+    
+    .drag-handle {
+        width: 100%; height: 25px; display: flex; justify-content: center; align-items: center; cursor: grab;
+    }
+    .drag-pill { width: 40px; height: 5px; background: #475569; border-radius: 3px; }
+    
+    .tabs-nav {
+        display: flex; border-bottom: 1px solid var(--border); padding: 0 10px;
+    }
+    .tab-btn {
+        flex: 1; background: none; border: none; color: var(--text-muted);
+        padding: 12px 0; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+        border-bottom: 3px solid transparent; transition: 0.2s;
+    }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+    
+    .tab-content {
+        flex: 1; overflow-y: auto; padding: 15px; display: none;
+    }
+    .tab-content.active { display: block; }
+    
+    /* Картки замовлень */
+    .job-card {
+        background: rgba(0,0,0,0.2); border: 1px solid var(--border);
+        border-radius: 12px; padding: 15px; margin-bottom: 15px;
+    }
+    .job-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .job-price { font-size: 1.2rem; font-weight: bold; color: var(--success); }
+    .job-dist { font-size: 0.85rem; color: var(--text-muted); background: var(--bg); padding: 3px 8px; border-radius: 12px;}
+    
+    .job-route { position: relative; padding-left: 20px; margin: 10px 0; }
+    .job-route::before {
+        content: ''; position: absolute; left: 6px; top: 10px; bottom: 10px;
+        width: 2px; background: #334155;
+    }
+    .route-point { position: relative; margin-bottom: 10px; font-size: 0.9rem; }
+    .route-point i {
+        position: absolute; left: -20px; top: 2px; font-size: 14px;
+        background: var(--panel); padding: 2px; border-radius: 50%;
+    }
+    .point-rest i { color: var(--warning); }
+    .point-client i { color: var(--primary); }
+    
+    .job-comment { background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--warning); padding: 8px; font-size: 0.85rem; margin-bottom: 10px; border-radius: 0 4px 4px 0;}
+    
+    .btn {
+        width: 100%; padding: 14px; background: var(--primary); color: white;
+        border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold;
+        cursor: pointer; transition: 0.2s; display: flex; justify-content: center; align-items: center; gap: 8px;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn.success { background: var(--success); }
+    .btn.warning { background: var(--warning); color: #000; }
+    .btn.danger { background: var(--danger); }
+    .btn.outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+    .empty-state i { font-size: 3rem; margin-bottom: 15px; opacity: 0.5; }
+    
+    /* Профіль */
+    .profile-header { text-align: center; margin-bottom: 20px; }
+    .avatar-circle {
+        width: 80px; height: 80px; background: var(--border); border-radius: 50%;
+        display: flex; justify-content: center; align-items: center; font-size: 2rem;
+        margin: 0 auto 10px; color: var(--primary);
+    }
+    .profile-stat {
+        background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 12px;
+        padding: 15px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+    }
+    .stat-val { font-size: 1.2rem; font-weight: bold; color: var(--success); }
+    
+    /* History */
+    .history-item {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;
+    }
+    .history-item:last-child { border: none; }
+    
+    /* ЧАТ */
+    #chat-container { display: flex; flex-direction: column; height: 300px; background: #0f172a; border-radius: 8px; margin-bottom: 15px; overflow: hidden; border: 1px solid var(--border);}
+    #chat-messages { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .msg-bubble { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.9rem; position: relative; }
+    .msg-courier { align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px; }
+    .msg-partner { align-self: flex-start; background: #334155; color: white; border-bottom-left-radius: 2px; }
+    .msg-time { font-size: 0.65rem; opacity: 0.7; display: block; text-align: right; margin-top: 4px; }
+    .chat-input-area { display: flex; padding: 8px; background: var(--panel); border-top: 1px solid var(--border); }
+    .chat-input-area input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #334155; background: #0f172a; color: white; outline: none; }
+    .chat-input-area button { background: var(--primary); color: white; border: none; width: 40px; height: 40px; border-radius: 50%; margin-left: 8px; display: flex; justify-content: center; align-items: center; cursor: pointer; }
+    
+    .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: spin 1s ease-in-out infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    /* Модалка на весь екран */
+    .full-modal {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg);
+        z-index: 200; display: none; flex-direction: column;
+    }
+    .full-modal.active { display: flex; animation: slideUp 0.3s forwards; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .modal-header {
+        padding: 15px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 15px;
+    }
+    .modal-back { background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; }
+    .modal-body { flex: 1; overflow-y: auto; padding: 15px; }
+
+    /* FAB Recenter */
+    .fab-recenter {
+        position: absolute; right: 15px; bottom: calc(85vh + 15px); z-index: 90;
+        width: 45px; height: 45px; background: var(--panel); border: 2px solid var(--border);
+        border-radius: 50%; display: flex; justify-content: center; align-items: center;
+        color: var(--primary); font-size: 1.2rem; box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer;
+        transition: bottom 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="uk">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <meta name="theme-color" content="#0f172a">
+        <link rel="manifest" href="/courier/manifest.json">
+        <title>Кур'єр | Restify</title>
+        
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        
+        <style>
+            {PWA_STYLES}
+        </style>
+    </head>
+    <body>
+
+        <div class="app-header">
+            <div class="header-title"><i class="fa-solid fa-motorcycle"></i> Restify</div>
+            <div class="status-toggle {'online' if courier.is_online else ''}" id="statusBtn" onclick="toggleStatus()">
+                <div class="toggle-dot"></div>
+                <span id="statusText">{'На зміні' if courier.is_online else 'Офлайн'}</span>
+            </div>
+        </div>
+
+        <div id="announcements-wrapper"></div>
+
+        <div id="map"></div>
+        <button class="fab-recenter" id="fabRecenter" onclick="recenterMap()"><i class="fa-solid fa-location-crosshairs"></i></button>
+
+        <div class="bottom-sheet" id="bottomSheet">
+            <div class="drag-handle" id="dragHandle">
+                <div class="drag-pill"></div>
+            </div>
+            
+            <div class="tabs-nav">
+                <button class="tab-btn active" onclick="switchTab('orders')" id="tab-orders">Вільні</button>
+                <button class="tab-btn" onclick="switchTab('active')" id="tab-active" style="display:none;">Активне <i class="fa-solid fa-circle-exclamation" style="color:var(--warning);font-size:10px;"></i></button>
+                <button class="tab-btn" onclick="switchTab('history')" id="tab-history">Історія</button>
+                <button class="tab-btn" onclick="switchTab('profile')" id="tab-profile"><i class="fa-solid fa-user"></i></button>
+            </div>
+            
+            <div class="tab-content active" id="content-orders">
+                <div id="ordersList">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-satellite-dish"></i>
+                        <h3>Шукаємо замовлення...</h3>
+                        <p>Щойно з'явиться нове замовлення, воно відобразиться тут.</p>
                     </div>
-                    <div style="background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid var(--border);">
-                        <div style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 5px; text-transform: uppercase;">Моя Комісія</div>
-                        <div id="prof-commission" style="font-size: 1.8rem; font-weight: 800; color: #3b82f6;">10%</div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="content-active">
+                <div id="activeJobContent"></div>
+            </div>
+            
+            <div class="tab-content" id="content-history">
+                <h3 style="margin-top:0;">Останні доставки</h3>
+                <div id="historyList"></div>
+            </div>
+            
+            <div class="tab-content" id="content-profile">
+                <div class="profile-header">
+                    <div class="avatar-circle"><i class="fa-solid fa-user-ninja"></i></div>
+                    <h2 style="margin:0;">{courier.name}</h2>
+                    <p style="color:var(--text-muted); margin:5px 0 0;">{courier.phone}</p>
+                    <div style="margin-top:10px; font-weight:bold; color:var(--warning);">
+                        <i class="fa-solid fa-star"></i> {getattr(courier, 'avg_rating', 5.0):.1f} ({getattr(courier, 'rating_count', 0)} відгуків)
                     </div>
                 </div>
                 
-                <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 12px; padding: 15px; color: #fca5a5; font-size: 0.85rem; margin-bottom: 20px;">
-                    <i class="fa-solid fa-circle-info"></i> Комісія автоматично списується з вашого балансу за кожне успішно виконане замовлення. Слідкуйте за тим, щоб баланс не був від'ємним.
+                <div class="profile-stat">
+                    <div>
+                        <div style="color:var(--text-muted); font-size:0.9rem;">Ваш Баланс</div>
+                        <div style="font-size:0.8rem; color:#ef4444;">Комісія: {getattr(courier, 'commission_rate', 10.0)}%</div>
+                    </div>
+                    <div class="stat-val">{getattr(courier, 'balance', 0.0):.2f} ₴</div>
                 </div>
                 
-                <button class="btn" style="width: 100%; background: #334155; color: white;" onclick="toggleHistory(true)">
-                    <i class="fa-solid fa-list-check"></i> Історія замовлень
+                <button class="btn outline" style="margin-top:20px; color:var(--danger); border-color:var(--danger);" onclick="window.location.href='/courier/logout'">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i> Вийти з акаунту
                 </button>
             </div>
         </div>
 
-        <div class="bottom-nav">
-            <div class="nav-item active" onclick="switchTab('map')" id="nav-map">
-                <i class="fa-solid fa-map-location-dot"></i>
-                <span>Карта</span>
+        <div class="full-modal" id="jobDetailModal">
+            <div class="modal-header">
+                <button class="modal-back" onclick="closeJobDetail()"><i class="fa-solid fa-arrow-left"></i></button>
+                <h3 style="margin:0;">Деталі Замовлення</h3>
             </div>
-            <div class="nav-item" onclick="switchTab('orders')" id="nav-orders">
-                <div style="position:relative;">
-                    <i class="fa-solid fa-list-ul"></i>
-                    <div id="orders-badge" style="display:none; position:absolute; top:-2px; right:-8px; width:10px; height:10px; background:var(--accent); border-radius:50%; border:2px solid #1e293b;"></div>
+            <div class="modal-body" id="jobDetailBody"></div>
+        </div>
+
+        <div class="full-modal" id="chatModal">
+            <div class="modal-header">
+                <button class="modal-back" onclick="closeChat()"><i class="fa-solid fa-arrow-left"></i></button>
+                <h3 style="margin:0;">Чат із Закладом</h3>
+            </div>
+            <div class="modal-body" style="display:flex; flex-direction:column; padding:0;">
+                <div id="chat-messages" style="flex:1;"></div>
+                <div class="chat-input-area">
+                    <input type="text" id="chatInput" placeholder="Написати повідомлення...">
+                    <button onclick="sendChatMessage()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
-                <span>Замовлення</span>
-            </div>
-            <div class="nav-item" onclick="switchTab('profile')" id="nav-profile">
-                <i class="fa-solid fa-user"></i>
-                <span>Профіль</span>
             </div>
         </div>
 
-        <div id="chat-sheet" class="chat-sheet">
-             <div class="chat-header">
-                <button class="icon-btn" onclick="document.getElementById('chat-sheet').classList.remove('open')" style="color:white;"><i class="fa-solid fa-arrow-left"></i></button>
-                <div style="font-weight:bold;">Чат</div><div style="width:24px"></div>
-            </div>
-            <div id="chat-body" class="chat-body"></div>
-            <form class="chat-footer" onsubmit="sendChatMessage(event)">
-                <input type="text" id="chat-input" class="chat-input" placeholder="..." autocomplete="off" required>
-                <button type="submit" class="icon-btn" style="background:var(--primary); border-radius:50%; width:40px; height:40px;"><i class="fa-solid fa-paper-plane"></i></button>
-            </form>
-        </div>
-
-        <div id="history-modal" class="history-modal">
-            <div style="display:flex; justify-content:space-between; margin-bottom:20px;"><h2>Історія</h2><button class="icon-btn" onclick="toggleHistory(false)">×</button></div>
-            <div id="history-list"></div>
-        </div>
-
-        <div id="orderModal" class="order-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(5px);">
-             <div style="background:white; color:black; padding:25px; border-radius:20px; width:90%; max-width:350px; text-align:center;">
-                <h2 style="margin-top:0; margin-bottom:10px;">🔥 Нове замовлення!</h2>
-                <div style="font-size:2.5rem; font-weight:800; color:var(--primary); margin-bottom:10px;" id="modal-fee">50 ₴</div>
-                <div id="warning-placeholder"></div>
-                
-                <div id="modal-route" style="margin:15px 0;"></div>
-                
-                <input type="hidden" id="modal-job-id">
-                <button onclick="acceptOrder()" class="btn" style="background:var(--status-active); color:black; margin-bottom:10px;">ПРИЙНЯТИ</button>
-                <button onclick="closeOrderModal()" style="background:none; border:none; color:#777; text-decoration:underline; font-size:0.9rem;">Закрити</button>
-             </div>
-        </div>
-
-        <div id="install-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:3000; align-items:center; justify-content:center; flex-direction:column; padding:20px; text-align:center; backdrop-filter:blur(5px);">
-            <i class="fa-solid fa-download" style="font-size:4rem; color:var(--primary); margin-bottom:20px;"></i>
-            <h2 style="color:white; margin-bottom:10px;">Встановіть додаток</h2>
-            <p style="color:var(--text-muted); margin-bottom:20px;">Для стабільної роботи, геолокації та швидкого прийому замовлень встановіть додаток на телефон.</p>
-            <button onclick="installPWA()" class="btn" style="width:100%; margin-bottom:10px; background:var(--primary); font-size:1.1rem; padding:15px;">Встановити</button>
-            <button onclick="skipInstall()" style="background:none; border:none; color:#94a3b8; font-size:1rem; padding:10px;">Пізніше</button>
-        </div>
-
-        <div id="notify-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:3000; align-items:center; justify-content:center; flex-direction:column; padding:20px; text-align:center; backdrop-filter:blur(5px);">
-            <i class="fa-solid fa-bell" style="font-size:4rem; color:#facc15; margin-bottom:20px;"></i>
-            <h2 style="color:white; margin-bottom:10px;">Увімкніть сповіщення</h2>
-            <p style="color:var(--text-muted); margin-bottom:20px;">Без цього ви не почуєте сигнал про нові замовлення та повідомлення від закладів.</p>
-            <button onclick="enableNotifications()" class="btn" style="width:100%; margin-bottom:10px; background:#facc15; color:#0f172a; font-size:1.1rem; padding:15px; font-weight:bold;">Дозволити сповіщення</button>
-            <button onclick="skipNotifications()" style="background:none; border:none; color:#94a3b8; font-size:1rem; padding:10px;">Закрити</button>
-        </div>
+        <audio id="notifySound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         
@@ -605,645 +674,779 @@ def get_courier_pwa_html(courier: Courier, config: dict = None):
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
         <script>
-            // --- ТАЙМЕРЫ И ЧАСЫ ---
-            setInterval(() => {{
-                const now = new Date();
-                document.getElementById('global-clock').innerText = now.toLocaleTimeString('uk-UA', {{ hour12: false }});
-            }}, 1000);
-
-            let jobTimerInterval = null;
-
-            function formatDuration(ms) {{
-                if (ms < 0) ms = 0;
-                const totalSeconds = Math.floor(ms / 1000);
-                const h = Math.floor(totalSeconds / 3600);
-                const m = Math.floor((totalSeconds % 3600) / 60);
-                const s = totalSeconds % 60;
-                if (h > 0) return `${{h.toString().padStart(2, '0')}}:${{m.toString().padStart(2, '0')}}:${{s.toString().padStart(2, '0')}}`;
-                return `${{m.toString().padStart(2, '0')}}:${{s.toString().padStart(2, '0')}}`;
-            }}
-
-            function updateJobTimers() {{
-                if (!currentJob) return;
-                const now = new Date();
-                
-                // Крок 1: Заклад
-                if (currentJob.assigned_at) {{
-                    const start1 = new Date(currentJob.assigned_at);
-                    const end1 = currentJob.picked_up_at ? new Date(currentJob.picked_up_at) : now;
-                    const el1 = document.getElementById('timer-step-1');
-                    if (el1) el1.innerText = "⏱ " + formatDuration(end1 - start1);
-                }}
-
-                // Крок 2: Клієнт
-                if (currentJob.picked_up_at) {{
-                    const start2 = new Date(currentJob.picked_up_at);
-                    const end2 = currentJob.delivered_at ? new Date(currentJob.delivered_at) : now;
-                    const el2 = document.getElementById('timer-step-2');
-                    if (el2) el2.innerText = "⏱ " + formatDuration(end2 - start2);
-                }}
-
-                // Крок 3: Повернення (якщо є)
-                if ((currentJob.is_return_required || currentJob.payment_type === 'buyout') && currentJob.delivered_at) {{
-                    const start3 = new Date(currentJob.delivered_at);
-                    const end3 = currentJob.completed_at ? new Date(currentJob.completed_at) : now;
-                    const el3 = document.getElementById('timer-step-3');
-                    if (el3) el3.innerText = "⏱ " + formatDuration(end3 - start3);
-                }}
-            }}
-
-
-            // --- ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК 401 (РЕДИРЕКТ НА LOGIN ПРИ ИСТЕЧЕНИИ СЕССИИ) ---
-            const originalFetch = window.fetch;
-            window.fetch = async function() {{
-                const response = await originalFetch.apply(this, arguments);
-                if (response.status === 401) {{
-                    window.location.href = '/courier/login?message=Сесія закінчилась. Увійдіть знову.';
-                }}
-                return response;
+            // --- FIREBASE PUSH ---
+            const firebaseConfig = {{
+                apiKey: "{config.get('firebase_api_key', '')}",
+                projectId: "{config.get('firebase_project_id', '')}",
+                messagingSenderId: "{config.get('firebase_sender_id', '')}",
+                appId: "{config.get('firebase_app_id', '')}"
             }};
 
-            // --- FIREBASE INIT ---
-            const firebaseConfig = {FIREBASE_CONFIG};
-            try {{
-                firebase.initializeApp(firebaseConfig);
-            }} catch(e) {{ console.error("Firebase init error", e); }}
-
-            const messaging = firebase.messaging();
-            const VAPID_KEY = "{VAPID_KEY}";
-
-            // --- PUSH & WAKE LOCK ---
-            async function initPushNotifications() {{
+            if(firebaseConfig.apiKey) {{
                 try {{
-                    const permission = await Notification.requestPermission();
-                    if (permission === 'granted') {{
-                        console.log('Push permission granted.');
-                        const token = await messaging.getToken({{ vapidKey: VAPID_KEY }});
-                        if (token) {{
-                            console.log('FCM Token:', token);
-                            await sendTokenToServer(token);
-                        }} else {{
-                            console.log('No registration token available.');
+                    firebase.initializeApp(firebaseConfig);
+                    const messaging = firebase.messaging();
+                    
+                    async function requestPushPermission() {{
+                        try {{
+                            const currentToken = await messaging.getToken();
+                            if (currentToken) {{
+                                sendTokenToServer(currentToken);
+                            }} else {{
+                                console.log('No registration token available.');
+                            }}
+                        }} catch (err) {{
+                            console.log('An error occurred while retrieving token. ', err);
                         }}
                     }}
-                }} catch (err) {{
-                    console.error('Push Token Error:', err);
-                }}
+                    
+                    messaging.onMessage((payload) => {{
+                        console.log('Message received. ', payload);
+                        playNotifySound();
+                        if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                    }});
+
+                    function sendTokenToServer(token) {{
+                        const fd = new FormData();
+                        fd.append('token', token);
+                        fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
+                    }}
+                    
+                    if ('serviceWorker' in navigator) {{
+                        navigator.serviceWorker.register('/firebase-messaging-sw.js')
+                        .then(function(registration) {{
+                            messaging.useServiceWorker(registration);
+                            requestPushPermission();
+                        }});
+                    }}
+                }} catch(e) {{ console.error("Firebase init error", e); }}
             }}
 
-            messaging.onTokenRefresh(() => {{
-                messaging.getToken().then((refreshedToken) => {{
-                    console.log('Token refreshed.');
-                    sendTokenToServer(refreshedToken);
-                }}).catch((err) => {{
-                    console.log('Unable to retrieve refreshed token ', err);
-                }});
+            // --- ОСНОВНІ ЗМІННІ ---
+            let map, userMarker, ws;
+            let currentLat = null, currentLon = null;
+            let activeJobId = null;
+            let activeJobData = null; // Зберігаємо повні дані про активне замовлення
+            let isOnline = {'true' if courier.is_online else 'false'} === 'true';
+            
+            // Маркери на карті
+            let restMarker = null, clientMarker = null, routeLine = null;
+
+            // Іконки
+            const courierIcon = L.divIcon({{ html: '<div style="font-size:24px; color:#3b82f6; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));"><i class="fa-solid fa-motorcycle"></i></div>', className: '', iconSize: [24,24], iconAnchor: [12,12] }});
+            const restIcon = L.divIcon({{ html: '<div style="font-size:24px; color:#facc15; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));"><i class="fa-solid fa-store"></i></div>', className: '', iconSize: [24,24], iconAnchor: [12,24] }});
+            const clientIcon = L.divIcon({{ html: '<div style="font-size:24px; color:#ef4444; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));"><i class="fa-solid fa-location-dot"></i></div>', className: '', iconSize: [24,24], iconAnchor: [12,24] }});
+
+            // --- ІНІЦІАЛІЗАЦІЯ ---
+            document.addEventListener('DOMContentLoaded', () => {{
+                initMap();
+                initBottomSheet();
+                initWebSocket();
+                startLocationTracking();
+                checkActiveJob();
+                fetchHistory();
+                fetchAnnouncements(); // Виклик системи оголошень
             }});
 
-            async function sendTokenToServer(token) {{
-                const fd = new FormData();
-                fd.append('token', token);
+            function initMap() {{
+                map = L.map('map', {{ zoomControl: false }}).setView([48.4647, 35.0461], 13);
+                L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                    attribution: '&copy; OpenStreetMap &copy; CARTO'
+                }}).addTo(map);
+            }}
+
+            // --- BOTTOM SHEET ЛОГІКА ---
+            const sheet = document.getElementById('bottomSheet');
+            const handle = document.getElementById('dragHandle');
+            const fab = document.getElementById('fabRecenter');
+            let startY, startHeight;
+
+            function initBottomSheet() {{
+                sheet.style.height = '40vh';
+                updateFabPosition('40vh');
+
+                handle.addEventListener('touchstart', (e) => {{
+                    startY = e.touches[0].clientY;
+                    startHeight = sheet.getBoundingClientRect().height;
+                    sheet.style.transition = 'none';
+                    fab.style.transition = 'none';
+                }});
+
+                handle.addEventListener('touchmove', (e) => {{
+                    const deltaY = startY - e.touches[0].clientY;
+                    let newHeight = startHeight + deltaY;
+                    const vh = window.innerHeight;
+                    if(newHeight < vh * 0.15) newHeight = vh * 0.15;
+                    if(newHeight > vh * 0.85) newHeight = vh * 0.85;
+                    sheet.style.height = newHeight + 'px';
+                    updateFabPosition(newHeight + 'px');
+                }});
+
+                handle.addEventListener('touchend', () => {{
+                    sheet.style.transition = 'height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                    fab.style.transition = 'bottom 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                    const currentHeight = sheet.getBoundingClientRect().height;
+                    const vh = window.innerHeight;
+                    
+                    let snapHeight = '40vh';
+                    if (currentHeight > vh * 0.6) snapHeight = '85vh';
+                    else if (currentHeight < vh * 0.25) snapHeight = '15vh';
+                    
+                    sheet.style.height = snapHeight;
+                    updateFabPosition(snapHeight);
+                }});
+            }}
+
+            function updateFabPosition(sheetHeightStr) {{
+                // Якщо sheetHeightStr = '40vh', робимо calc(40vh + 15px)
+                fab.style.bottom = `calc(${{sheetHeightStr}} + 15px)`;
+            }}
+
+            function switchTab(tabId) {{
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                document.getElementById('tab-' + tabId).classList.add('active');
+                document.getElementById('content-' + tabId).classList.add('active');
+                
+                // Розгортаємо sheet трохи більше при перемиканні
+                sheet.style.height = '60vh';
+                updateFabPosition('60vh');
+
+                if(tabId === 'orders' && !activeJobId) fetchOpenOrders();
+                if(tabId === 'history') fetchHistory();
+            }}
+
+            // --- СИСТЕМА ОГОЛОШЕНЬ (ANNOUNCEMENTS) ---
+            async function fetchAnnouncements() {{
                 try {{
-                    await fetch('/api/courier/fcm_token', {{ method: 'POST', body: fd }});
+                    const res = await fetch('/api/courier/announcements');
+                    if(res.ok) {{
+                        const data = await res.json();
+                        data.forEach(renderAnnouncement);
+                    }}
+                }} catch(e) {{ console.error("Announcements fetch error", e); }}
+            }}
+
+            function renderAnnouncement(ann) {{
+                // Уникаємо дублювання
+                if(document.getElementById(`ann-${{ann.id}}`)) return;
+                
+                const container = document.getElementById('announcements-wrapper');
+                const div = document.createElement('div');
+                div.id = `ann-${{ann.id}}`;
+                div.className = `announcement-bar ann-${{ann.style}}`;
+                
+                let icon = 'fa-circle-info';
+                if(ann.style === 'warning') icon = 'fa-triangle-exclamation';
+                if(ann.style === 'danger') icon = 'fa-radiation';
+                if(ann.style === 'success') icon = 'fa-check';
+                
+                div.innerHTML = `
+                    <div class="ann-content">
+                        <div class="ann-title"><i class="fa-solid ${{icon}}"></i> ${{ann.title}}</div>
+                        <div class="ann-text">${{ann.message}}</div>
+                    </div>
+                    <button class="ann-close" onclick="dismissAnnouncement(${{ann.id}})">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                `;
+                container.appendChild(div);
+            }}
+
+            async function dismissAnnouncement(id) {{
+                const el = document.getElementById(`ann-${{id}}`);
+                if(el) {{
+                    el.style.opacity = '0';
+                    el.style.transform = 'translateY(-20px)';
+                    el.style.transition = '0.3s';
+                    setTimeout(() => el.remove(), 300);
+                }}
+                // Відправляємо на сервер
+                try {{
+                    await fetch(`/api/courier/announcements/${{id}}/dismiss`, {{ method: 'POST' }});
                 }} catch(e) {{}}
             }}
 
-            messaging.onMessage((payload) => {{
-                console.log('Message received.', payload);
-                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-                audio.play().catch(e => {{}});
-                if (payload.data && payload.data.job_id) {{
-                    if(activeTab === 'orders') fetchOrders();
-                }}
-            }});
+            // --- WEBSOCKET ТА ОНОВЛЕННЯ ДАНИХ ---
+            let pingInterval;
 
-            let wakeLock = null;
-            async function requestWakeLock() {{
-                if ('wakeLock' in navigator) {{
-                    try {{
-                        wakeLock = await navigator.wakeLock.request('screen');
-                        console.log('Wake Lock active');
-                        document.addEventListener('visibilitychange', async () => {{
-                            if (wakeLock !== null && document.visibilityState === 'visible') {{
-                                wakeLock = await navigator.wakeLock.request('screen');
-                            }}
-                        }});
-                    }} catch (err) {{ console.log('Wake Lock error:', err); }}
-                }}
-            }}
-
-            // --- ONBOARDING FLOW ---
-            let deferredPrompt;
-
-            window.addEventListener('beforeinstallprompt', (e) => {{
-                e.preventDefault();
-                deferredPrompt = e;
-                document.getElementById('install-modal').style.display = 'flex';
-            }});
-
-            function installPWA() {{
-                if (deferredPrompt) {{
-                    deferredPrompt.prompt();
-                    deferredPrompt.userChoice.then((choiceResult) => {{
-                        if (choiceResult.outcome === 'accepted') {{
-                            console.log('Користувач встановив PWA');
-                        }}
-                        deferredPrompt = null;
-                        document.getElementById('install-modal').style.display = 'none';
-                        checkAndAskNotifications();
-                    }});
-                }}
-            }}
-
-            function skipInstall() {{
-                document.getElementById('install-modal').style.display = 'none';
-                checkAndAskNotifications();
-            }}
-
-            function checkAndAskNotifications() {{
-                if (Notification.permission === 'default') {{
-                    document.getElementById('notify-modal').style.display = 'flex';
-                }} else if (Notification.permission === 'granted') {{
-                    initPushNotifications();
-                    requestWakeLock();
-                }}
-            }}
-
-            function enableNotifications() {{
-                document.getElementById('notify-modal').style.display = 'none';
-                initPushNotifications();
-                requestWakeLock();
-            }}
-            
-            function skipNotifications() {{
-                document.getElementById('notify-modal').style.display = 'none';
-            }}
-
-            window.addEventListener('load', () => {{
-                const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-                
-                if (isStandalone) {{
-                    setTimeout(checkAndAskNotifications, 1000);
-                }} else {{
-                    setTimeout(() => {{
-                        if (!deferredPrompt && document.getElementById('install-modal').style.display !== 'flex') {{
-                            checkAndAskNotifications();
-                        }}
-                    }}, 2000);
-                }}
-            }});
-
-            // --- APP LOGIC ---
-            let currentLat = null, currentLon = null;
-            let isOnline = {str(courier.is_online).lower()};
-            let currentJob = null;
-            let activeTab = 'map';
-            let socket = null, pingInterval = null;
-
-            const map = L.map('map', {{ zoomControl: false }}).setView([50.45, 30.52], 13);
-            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(map);
-            let marker = null, targetMarker = null, routeLine = null;
-
-            function switchTab(tab) {{
-                activeTab = tab;
-                document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
-                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-                
-                document.getElementById(`screen-${{tab}}`).classList.add('active');
-                document.getElementById(`nav-${{tab}}`).classList.add('active');
-                
-                if(tab === 'map') {{
-                    document.getElementById('map').classList.remove('hidden');
-                    setTimeout(() => map.invalidateSize(), 100);
-                }} else {{
-                    document.getElementById('map').classList.add('hidden');
-                    if(tab === 'orders' && currentLat && currentLon) fetchOrders();
-                    if(tab === 'profile') fetchProfileData();
-                }}
-            }}
-
-            async function fetchProfileData() {{
-                try {{
-                    const res = await fetch('/api/courier/profile');
-                    const data = await res.json();
-                    
-                    document.getElementById('prof-name').innerText = data.name;
-                    document.getElementById('prof-phone').innerText = data.phone;
-                    
-                    const balanceEl = document.getElementById('prof-balance');
-                    balanceEl.innerText = data.balance.toFixed(2) + ' ₴';
-                    balanceEl.style.color = data.balance < 0 ? '#ef4444' : '#4ade80';
-                    
-                    document.getElementById('prof-commission').innerText = data.commission_rate + '%';
-                    
-                    document.getElementById('prof-rating').innerText = data.rating ? data.rating.toFixed(1) : '5.0';
-                    document.getElementById('prof-rating-count').innerText = data.rating_count || '0';
-                    
-                }} catch(e) {{ console.error("Помилка завантаження профілю", e); }}
-            }}
-
-            async function fetchOrders() {{
-                if (!isOnline || !currentLat) return;
-                const loader = document.getElementById('feed-loader');
-                loader.style.opacity = '1';
-                try {{
-                    const res = await fetch(`/api/courier/open_orders?lat=${{currentLat}}&lon=${{currentLon}}`);
-                    const orders = await res.json();
-                    renderOrders(orders);
-                }} catch(e) {{ console.error(e); }} finally {{ loader.style.opacity = '0.5'; }}
-            }}
-
-            function renderOrders(orders) {{
-                const container = document.getElementById('orders-list');
-                const badge = document.getElementById('orders-badge');
-                
-                if (orders.length === 0) {{
-                    container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-mug-hot"></i><h3>Поки тихо...</h3><p>Немає доступних замовлень поблизу.</p></div>`;
-                    badge.style.display = 'none';
-                    return;
-                }}
-
-                badge.style.display = 'block';
-                container.innerHTML = orders.map(o => {{
-                    const isHighPrice = o.fee > 100;
-                    const cardClass = isHighPrice ? 'order-card high-price' : 'order-card';
-                    let badgesHtml = '';
-                    if (o.payment_type === 'cash') badgesHtml += '<span class="oc-tag" style="color:#facc15">Готівка</span>';
-                    if (o.payment_type === 'buyout') badgesHtml += '<span class="oc-tag" style="color:#ec4899">Викуп</span>';
-                    if (o.payment_type === 'buyout_paid') badgesHtml += '<span class="oc-tag" style="color:#4ade80">Оплачено</span>';
-                    if (o.is_return) badgesHtml += '<span class="oc-tag" style="color:#f97316">Повернення</span>';
-                    
-                    let distText = o.dist_to_rest !== null ? o.dist_to_rest.toFixed(1) + ' км' : '?';
-                    let tripText = o.dist_trip ? `🏁 ${{parseFloat(o.dist_trip).toFixed(1)}} км` : '';
-
-                    return `
-                    <div class="${{cardClass}}">
-                        <div class="oc-header">
-                            <div class="oc-dist-badge"><i class="fa-solid fa-person-walking"></i> ${{distText}}</div>
-                            <div class="oc-price">+${{o.fee}} ₴</div>
-                        </div>
-                        <div class="oc-route">
-                            <div class="oc-point rest"><div style="font-weight:600; color:white;">${{o.restaurant_name}}</div><div style="font-size:0.8rem;">${{o.restaurant_address}}</div></div>
-                            <div class="oc-point client"><div style="font-weight:600; color:white;">${{o.customer_name || 'Клієнт'}}</div><div style="font-size:0.8rem;">${{o.dropoff_address}}</div></div>
-                            ${{tripText ? `<div style="position:absolute; left:0; top:50%; transform:translateY(-50%); font-size:0.75rem; background:var(--bg-card); color:#94a3b8; padding:2px 0; z-index:2;">${{tripText}}</div>` : ''}}
-                        </div>
-                        ${{o.comment ? `<div style="font-size:0.85rem; color:#94a3b8; margin-bottom:10px; background:rgba(255,255,255,0.03); padding:8px; border-radius:8px;">💬 ${{o.comment}}</div>` : ''}}
-                        <div class="oc-footer">
-                            <div class="oc-tags">${{badgesHtml}}</div>
-                            <button class="btn-accept" onclick="acceptOrderFromFeed(${{o.id}})">ПРИЙНЯТИ</button>
-                        </div>
-                    </div>`;
-                }}).join('');
-            }}
-            
-            async function acceptOrderFromFeed(id) {{
-                if(!confirm("Прийняти це замовлення?")) return;
-                document.getElementById('modal-job-id').value = id;
-                await acceptOrder();
-                switchTab('map');
-            }}
-
-            function connectWS() {{
-                if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+            function initWebSocket() {{
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                socket = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/courier`);
-
-                socket.onopen = () => {{
-                    document.getElementById('connection-dot').style.background = '#4ade80';
-                    clearInterval(pingInterval);
-                    pingInterval = setInterval(() => {{ if (socket.readyState === WebSocket.OPEN) socket.send("ping"); }}, 15000);
-                }};
-                socket.onmessage = (e) => {{
-                    if (e.data === "pong") return; 
-                    const msg = JSON.parse(e.data);
+                ws = new WebSocket(`${{protocol}}//${{window.location.host}}/ws/courier`);
+                
+                ws.onopen = () => {{
+                    console.log("WS Connected");
+                    if(currentLat && currentLon) sendLocationToWS();
                     
-                    if(msg.type === 'new_order') {{
-                        if (activeTab === 'orders') fetchOrders(); 
-                        else showNewOrderModal(msg.data); 
+                    // При відновленні з'єднання одразу підтягуємо нові замовлення
+                    if(isOnline && !activeJobId) {{
+                        fetchOpenOrders();
+                    }} else if (activeJobId) {{
+                        checkActiveJob();
                     }}
-                    else if (msg.type === 'job_update') checkActiveJob();
-                    else if (msg.type === 'job_ready') {{
-                        if (currentJob) {{
-                            currentJob.is_ready = true;
-                            renderJobSheet();
-                            if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
-                            alert(msg.message);
-                        }}
-                    }}
-                    else if (msg.type === 'chat_message') {{
-                        const sheetOpen = document.getElementById('chat-sheet').classList.contains('open');
-                        if (sheetOpen && currentJob && currentJob.id == msg.job_id) renderSingleMsg(msg);
-                        else alert(`💬 Повідомлення: ${{msg.text}}`);
-                    }}
-                }};
-                socket.onclose = (event) => {{
-                    document.getElementById('connection-dot').style.background = 'red';
-                    // Якщо сервер розірвав з'єднання через протухший токен
-                    if (event.code === 1008) {{
-                        window.location.href = '/courier/login?message=Сесія закінчилась. Увійдіть знову.';
-                        return;
-                    }}
-                    if (isOnline) setTimeout(connectWS, 3000);
+                    
+                    if(pingInterval) clearInterval(pingInterval);
+                    pingInterval = setInterval(() => {{ if(ws.readyState === WebSocket.OPEN) ws.send("ping"); }}, 30000);
                 }};
                 
-                // НОВИЙ БЛОК: Обробка помилок сокета
-                socket.onerror = (error) => {{
-                    console.error("WebSocket Error: ", error);
-                    socket.close(); 
+                ws.onmessage = (e) => {{
+                    if(e.data === "pong") return;
+                    try {{
+                        const msg = JSON.parse(e.data);
+                        console.log("WS MSG:", msg);
+                        
+                        if(msg.type === 'new_announcement') {{
+                            renderAnnouncement(msg.data);
+                            playNotifySound();
+                            if(navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                        }}
+                        else if(msg.type === 'new_order') {{
+                            if(!activeJobId) {{
+                                fetchOpenOrders();
+                                playNotifySound();
+                                if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                            }}
+                        }}
+                        else if(msg.type === 'order_removed') {{
+                            if(!activeJobId) fetchOpenOrders();
+                        }}
+                        else if(msg.type === 'job_ready') {{
+                            playNotifySound();
+                            if(navigator.vibrate) navigator.vibrate([300, 100, 300]);
+                            checkActiveJob(); 
+                        }}
+                        else if(msg.type === 'job_update') {{
+                            playNotifySound();
+                            if(msg.status === 'cancelled' || msg.status === 'delivered') {{
+                                alert(msg.message);
+                                activeJobId = null;
+                                activeJobData = null;
+                                clearMap();
+                                document.getElementById('tab-active').style.display = 'none';
+                                switchTab('orders');
+                            }} else {{
+                                checkActiveJob();
+                            }}
+                        }}
+                        else if(msg.type === 'chat_message') {{
+                            if(document.getElementById('chatModal').classList.contains('active')) {{
+                                appendChatMessage(msg.text, msg.role, msg.time);
+                            }} else {{
+                                playNotifySound();
+                                if(navigator.vibrate) navigator.vibrate([100]);
+                            }}
+                        }}
+                        else if(msg.type === 'balance_update') {{
+                            // Оновлюємо відображення балансу, якщо треба
+                        }}
+                    }} catch(err) {{}}
                 }};
+                
+                ws.onclose = () => {{ setTimeout(initWebSocket, 3000); }};
             }}
-            
-            // НОВИЙ БЛОК: Примусове відновлення зв'язку при розгортанні/розблокуванні PWA
-            document.addEventListener('visibilitychange', () => {{
-                if (document.visibilityState === 'visible' && isOnline) {{
-                    // Якщо сокет закритий або закривається — підключаємося заново
-                    if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {{
-                        console.log("App wakes up: reconnecting WS");
-                        connectWS();
-                    }} else if (socket.readyState === WebSocket.OPEN) {{
-                        // Якщо відкритий, відправляємо пінг, щоб переконатися, що він живий
-                        socket.send("ping");
-                    }}
+
+            // Відстежуємо, коли кур'єр розгортає згорнутий додаток
+            document.addEventListener("visibilitychange", () => {{
+                if (document.visibilityState === "visible") {{
+                    console.log("App became visible, updating data...");
+                    if(isOnline && !activeJobId) fetchOpenOrders();
+                    if(activeJobId) checkActiveJob();
                 }}
             }});
-            
-            if (navigator.geolocation) {{
-                navigator.geolocation.watchPosition((pos) => {{
-                    const {{ latitude, longitude }} = pos.coords;
-                    currentLat = latitude; currentLon = longitude;
 
-                    if (!marker) {{ marker = L.marker([latitude, longitude]).addTo(map); map.setView([latitude, longitude], 15); }}
-                    else marker.setLatLng([latitude, longitude]);
-                    
-                    if (activeTab === 'orders' && isOnline) fetchOrders();
+            function playNotifySound() {{
+                const audio = document.getElementById('notifySound');
+                audio.play().catch(e => console.log("Audio play blocked", e));
+            }}
 
-                    if (isOnline) {{
-                        const fd = new FormData(); 
-                        fd.append('lat', latitude); 
-                        fd.append('lon', longitude);
-                        navigator.sendBeacon('/api/courier/location', fd);
-                        
-                        if (socket && socket.readyState === WebSocket.OPEN) {{
-                            socket.send(JSON.stringify({{type: 'init_location', lat: latitude, lon: longitude}}));
-                        }}
-                    }}
-                    
-                }}, console.error, {{ enableHighAccuracy: true }});
+            // --- ГЕОЛОКАЦІЯ ---
+            function startLocationTracking() {{
+                if ("geolocation" in navigator) {{
+                    navigator.geolocation.watchPosition(
+                        (position) => {{
+                            currentLat = position.coords.latitude;
+                            currentLon = position.coords.longitude;
+                            
+                            if(!userMarker) {{
+                                userMarker = L.marker([currentLat, currentLon], {{icon: courierIcon}}).addTo(map);
+                                map.setView([currentLat, currentLon], 15);
+                            }} else {{
+                                userMarker.setLatLng([currentLat, currentLon]);
+                            }}
+                            
+                            sendLocationToWS();
+                            updateLocationViaHttp();
+                        }},
+                        (err) => console.error(err),
+                        {{ enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }}
+                    );
+                }}
+            }}
+
+            function recenterMap() {{
+                if(currentLat && currentLon) {{
+                    map.setView([currentLat, currentLon], 15);
+                }}
+            }}
+
+            function sendLocationToWS() {{
+                if(ws && ws.readyState === WebSocket.OPEN && currentLat && currentLon) {{
+                    ws.send(JSON.stringify({{ type: "init_location", lat: currentLat, lon: currentLon }}));
+                }}
             }}
             
-            setInterval(() => {{
-                if (activeTab === 'orders' && isOnline && currentLat) fetchOrders();
-            }}, 15000);
+            let lastHttpUpdate = 0;
+            function updateLocationViaHttp() {{
+                const now = Date.now();
+                if(now - lastHttpUpdate < 30000) return; // Раз на 30 сек
+                if(!currentLat || !currentLon) return;
+                
+                const fd = new FormData();
+                fd.append('lat', currentLat);
+                fd.append('lon', currentLon);
+                fetch('/api/courier/location', {{ method: 'POST', body: fd }});
+                lastHttpUpdate = now;
+            }}
 
-            async function toggleShift() {{
+            async function toggleStatus() {{
                 try {{
-                    const res = await fetch('/api/courier/toggle_status', {{method:'POST'}});
+                    const res = await fetch('/api/courier/toggle_status', {{method: 'POST'}});
                     const data = await res.json();
                     isOnline = data.is_online;
                     
-                    document.getElementById('offline-msg').style.display = isOnline ? 'none' : 'flex';
-                    document.getElementById('status-dot').className = isOnline ? 'dot online' : 'dot offline';
-                    document.getElementById('status-text').innerText = isOnline ? 'НА ЗМІНІ' : 'ОФЛАЙН';
-                    
-                    if(isOnline) connectWS(); else if(socket) socket.close();
-                }} catch(e) {{ alert("Помилка з'єднання"); }}
+                    const btn = document.getElementById('statusBtn');
+                    const txt = document.getElementById('statusText');
+                    if(isOnline) {{
+                        btn.classList.add('online');
+                        txt.innerText = 'На зміні';
+                        fetchOpenOrders();
+                    }} else {{
+                        btn.classList.remove('online');
+                        txt.innerText = 'Офлайн';
+                        document.getElementById('ordersList').innerHTML = `
+                            <div class="empty-state">
+                                <i class="fa-solid fa-power-off"></i>
+                                <h3>Ви офлайн</h3>
+                                <p>Увімкніть статус "На зміні", щоб отримувати замовлення.</p>
+                            </div>
+                        `;
+                    }}
+                }} catch(e) {{ alert("Помилка"); }}
             }}
-            if(isOnline) connectWS();
 
+            // --- ЛОГІКА ЗАМОВЛЕНЬ ---
+            async function fetchOpenOrders() {{
+                if(activeJobId || !isOnline) return;
+                try {{
+                    const url = currentLat ? `/api/courier/open_orders?lat=${{currentLat}}&lon=${{currentLon}}` : '/api/courier/open_orders?lat=0&lon=0';
+                    const res = await fetch(url);
+                    const jobs = await res.json();
+                    
+                    const container = document.getElementById('ordersList');
+                    if(jobs.length === 0) {{
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fa-solid fa-mug-hot"></i>
+                                <h3>Немає вільних замовлень</h3>
+                                <p>Випийте кави, ми повідомимо коли щось з'явиться.</p>
+                            </div>
+                        `;
+                        return;
+                    }}
+                    
+                    let html = '';
+                    jobs.forEach(j => {{
+                        const distStr = j.dist_to_rest !== null && j.dist_to_rest !== "?" ? `${{j.dist_to_rest}} км до закладу` : 'Відстань невідома';
+                        html += `
+                            <div class="job-card" onclick='openJobDetail(${{JSON.stringify(j)}})'>
+                                <div class="job-header">
+                                    <div class="job-price">${{j.fee}} ₴</div>
+                                    <div class="job-dist"><i class="fa-solid fa-route"></i> ${{distStr}}</div>
+                                </div>
+                                <div class="job-route">
+                                    <div class="route-point point-rest">
+                                        <i class="fa-solid fa-store"></i> <b>${{j.restaurant_name}}</b><br>
+                                        <small>${{j.restaurant_address}}</small>
+                                    </div>
+                                    <div class="route-point point-client">
+                                        <i class="fa-solid fa-location-dot"></i> <b>${{j.customer_name || 'Клієнт'}}</b><br>
+                                        <small>${{j.dropoff_address}}</small>
+                                    </div>
+                                </div>
+                                <div class="job-comment">${{j.comment}}</div>
+                                <button class="btn outline" style="padding: 8px;">Деталі</button>
+                            </div>
+                        `;
+                    }});
+                    container.innerHTML = html;
+                }} catch(e) {{ console.error(e); }}
+            }}
+
+            function openJobDetail(job) {{
+                const body = document.getElementById('jobDetailBody');
+                const distStr = job.dist_to_rest !== null && job.dist_to_rest !== "?" ? `${{job.dist_to_rest}} км` : '?';
+                
+                body.innerHTML = `
+                    <div style="text-align:center; margin-bottom: 20px;">
+                        <div style="font-size: 2.5rem; font-weight: 800; color: var(--success);">${{job.fee}} ₴</div>
+                        <div style="color: var(--text-muted);">Заробіток за доставку</div>
+                    </div>
+                    
+                    <div class="job-route" style="background: var(--panel); padding: 15px 15px 15px 35px; border-radius: 12px; margin-bottom:20px;">
+                        <div class="route-point point-rest">
+                            <i class="fa-solid fa-store"></i> 
+                            <div style="color:var(--text-muted); font-size:0.8rem;">Забрати (${{distStr}})</div>
+                            <b>${{job.restaurant_name}}</b><br>
+                            ${{job.restaurant_address}}
+                        </div>
+                        <div class="route-point point-client">
+                            <i class="fa-solid fa-location-dot"></i>
+                            <div style="color:var(--text-muted); font-size:0.8rem;">Доставити (${{job.dist_trip}} км)</div>
+                            <b>${{job.customer_name || 'Клієнт'}}</b><br>
+                            ${{job.dropoff_address}}
+                        </div>
+                    </div>
+                    
+                    <div class="job-comment" style="font-size: 1rem; padding: 15px;">
+                        <i class="fa-solid fa-circle-info"></i> <b>Коментар:</b><br>
+                        ${{job.comment}}
+                    </div>
+                    
+                    <div style="background: var(--panel); padding: 15px; border-radius: 12px; margin-bottom:20px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <span style="color:var(--text-muted);">Тип оплати:</span>
+                            <b>${{job.payment_type}}</b>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <span style="color:var(--text-muted);">Сума чеку:</span>
+                            <b>${{job.price}} ₴</b>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:var(--text-muted);">Повернення в заклад:</span>
+                            <b style="color:${{job.is_return ? 'var(--danger)' : 'var(--success)'}}">${{job.is_return ? 'ТАК' : 'НІ'}}</b>
+                        </div>
+                    </div>
+
+                    <button class="btn" style="height: 55px; font-size: 1.2rem;" onclick="acceptJob(${{job.id}})" id="acceptBtn">
+                        Прийняти замовлення
+                    </button>
+                `;
+                document.getElementById('jobDetailModal').classList.add('active');
+            }}
+
+            function closeJobDetail() {{
+                document.getElementById('jobDetailModal').classList.remove('active');
+            }}
+
+            async function acceptJob(id) {{
+                const btn = document.getElementById('acceptBtn');
+                btn.innerHTML = '<span class="spinner"></span>';
+                btn.disabled = true;
+                
+                try {{
+                    const fd = new FormData();
+                    fd.append('job_id', id);
+                    const res = await fetch('/api/courier/accept_order', {{method: 'POST', body: fd}});
+                    const data = await res.json();
+                    
+                    if(res.ok) {{
+                        closeJobDetail();
+                        checkActiveJob();
+                    }} else {{
+                        alert(data.message || "Помилка");
+                        btn.innerHTML = 'Прийняти замовлення';
+                        btn.disabled = false;
+                        fetchOpenOrders();
+                    }}
+                }} catch(e) {{
+                    alert("Мережева помилка");
+                    btn.innerHTML = 'Прийняти замовлення';
+                    btn.disabled = false;
+                }}
+            }}
+
+            // --- АКТИВНЕ ЗАМОВЛЕННЯ ---
             async function checkActiveJob() {{
                 try {{
                     const res = await fetch('/api/courier/active_job');
                     const data = await res.json();
+                    
+                    const tabActive = document.getElementById('tab-active');
+                    const tabOrders = document.getElementById('tab-orders');
+                    
                     if(data.active) {{
-                        currentJob = data.job;
-                        renderJobSheet();
-                        switchTab('map');
-                        document.querySelector('.bottom-nav').style.display = 'none';
+                        activeJobId = data.job.id;
+                        activeJobData = data.job; // Зберігаємо повні дані
+                        tabActive.style.display = 'block';
+                        tabOrders.style.display = 'none';
+                        renderActiveJob(data.job);
+                        switchTab('active');
+                        drawRoute(data.job);
                     }} else {{
-                        document.getElementById('job-sheet').classList.remove('active');
-                        currentJob = null;
-                        if (jobTimerInterval) {{ clearInterval(jobTimerInterval); jobTimerInterval = null; }}
-                        document.querySelector('.bottom-nav').style.display = 'flex';
-                        if(targetMarker) {{ map.removeLayer(targetMarker); targetMarker = null; }}
-                        if(routeLine) {{ map.removeLayer(routeLine); routeLine = null; }}
-                    }}
-                }} catch(e) {{}}
-            }}
-            checkActiveJob();
-
-            function renderJobSheet() {{
-                const sheet = document.getElementById('job-sheet');
-                sheet.classList.add('active');
-                
-                document.getElementById('job-title').innerText = `Замовлення #${{currentJob.id}}`;
-                document.getElementById('job-price').innerText = `+${{currentJob.delivery_fee}} ₴`;
-                
-                const statusDesc = document.getElementById('job-status-desc');
-                statusDesc.innerHTML = '';
-                
-                if (currentJob.is_ready) {{
-                    statusDesc.innerHTML += '<div class="ready-badge">🍳 ЗАМОВЛЕННЯ ГОТОВЕ!</div><br>';
-                }}
-                
-                if (currentJob.payment_type === 'cash' || currentJob.payment_type === 'buyout' || currentJob.payment_type === 'buyout_paid') {{
-                     let label = '💵 ВІЗЬМІТЬ ГОТІВКУ:';
-                     let boxClass = 'client-pay-box';
-                     if (currentJob.payment_type === 'buyout') label = '💰 ВИКУП (Свої гроші):';
-                     else if (currentJob.payment_type === 'buyout_paid') {{
-                         label = '✅ ОПЛАЧЕНО ЗАКЛАДОМ (Візьміть у клієнта):';
-                         boxClass += ' success';
-                     }}
-                     statusDesc.innerHTML += `<div class="${{boxClass}}">${{label}} ${{currentJob.order_price}} ₴</div>`;
-                }}
-
-                // --- ГЕНЕРАЦІЯ ТАЙМЕРІВ ---
-                let stepsHtml = '';
-                
-                // Step 1
-                let s1Class = currentJob.picked_up_at ? 'done' : 'active';
-                let s1Color = currentJob.picked_up_at ? '#4ade80' : '#818cf8';
-                stepsHtml += `<div style="display:flex; justify-content:space-between; margin-bottom:8px; align-items:center;">
-                    <span style="font-size:0.8rem; font-weight:800; color: ${{s1Color}}">КРОК 1: ЗАКЛАД</span>
-                    <span id="timer-step-1" class="timer-badge ${{s1Class}}">⏱ 00:00</span>
-                </div>`;
-
-                // Step 2
-                if (currentJob.picked_up_at) {{
-                    let s2Class = currentJob.delivered_at ? 'done' : 'active';
-                    let s2Color = currentJob.delivered_at ? '#4ade80' : '#818cf8';
-                    stepsHtml += `<div style="display:flex; justify-content:space-between; margin-bottom:8px; align-items:center;">
-                        <span style="font-size:0.8rem; font-weight:800; color: ${{s2Color}}">КРОК 2: КЛІЄНТ</span>
-                        <span id="timer-step-2" class="timer-badge ${{s2Class}}">⏱ 00:00</span>
-                    </div>`;
-                }}
-
-                // Step 3 (Return)
-                if ((currentJob.is_return_required || currentJob.payment_type === 'buyout') && currentJob.delivered_at) {{
-                    stepsHtml += `<div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-size:0.8rem; font-weight:800; color: #fb923c">КРОК 3: ПОВЕРНЕННЯ</span>
-                        <span id="timer-step-3" class="timer-badge warning">⏱ 00:00</span>
-                    </div>`;
-                }}
-
-                document.getElementById('steps-container').innerHTML = stepsHtml;
-                document.getElementById('steps-container').style.display = 'block';
-
-                updateJobTimers();
-                if (!jobTimerInterval) jobTimerInterval = setInterval(updateJobTimers, 1000);
-                // --------------------------------------
-
-                document.getElementById('current-target-name').innerText = currentJob.partner_name;
-                document.getElementById('client-name').innerText = currentJob.customer_name || 'Гість';
-                document.getElementById('client-phone').innerText = currentJob.customer_phone;
-                document.getElementById('client-phone').href = `tel:${{currentJob.customer_phone}}`;
-                
-                const btnNav = document.getElementById('btn-nav');
-                const btnAct = document.getElementById('btn-action');
-                const btnCall = document.getElementById('btn-call');
-                
-                if (currentJob.partner_phone) {{ btnCall.href = `tel:${{currentJob.partner_phone}}`; btnCall.style.display = 'flex'; }} 
-                else btnCall.style.display = 'none';
-                
-                document.getElementById('btn-chat').onclick = openChat;
-
-                let destAddr = "";
-                if (['assigned', 'ready', 'arrived_pickup'].includes(currentJob.status)) {{
-                    destAddr = currentJob.partner_address;
-                    document.getElementById('addr-label').innerText = 'ЗАБРАТИ ТУТ:';
-                    document.getElementById('current-target-addr').innerText = destAddr;
-                    document.getElementById('client-info-block').style.display = 'none';
-                    document.getElementById('step-1').className = 'step active'; document.getElementById('step-2').className = 'step';
-                    
-                    if (currentJob.status === 'arrived_pickup') {{
-                        btnAct.innerText = '📦 Забрав замовлення';
-                        btnAct.style.background = 'var(--status-active)';
-                        btnAct.onclick = () => updateStatus('picked_up');
-                        if (!currentJob.is_ready) statusDesc.innerHTML += '<span style="color:#aaa">Очікуйте видачі...</span>';
-                    }} else {{
-                        btnAct.innerText = '👋 Я на місці';
-                        btnAct.style.background = 'var(--status-active)';
-                        btnAct.onclick = async () => {{
-                             await fetch('/api/courier/arrived_pickup', {{method:'POST', body: new URLSearchParams({{job_id: currentJob.id}})}});
-                             currentJob.status = 'arrived_pickup'; renderJobSheet();
-                        }};
-                        if (!currentJob.is_ready) statusDesc.innerHTML += '<span style="color:#aaa">Прямуйте до закладу</span>';
-                    }}
-                }} else {{
-                    destAddr = currentJob.customer_address;
-                    document.getElementById('addr-label').innerText = 'ВЕЗТИ СЮДИ:';
-                    document.getElementById('current-target-addr').innerText = destAddr;
-                    document.getElementById('client-info-block').style.display = 'block';
-                    document.getElementById('step-1').className = 'step done'; document.getElementById('step-2').className = 'step active';
-                    
-                    if (currentJob.payment_type === 'cash') statusDesc.innerHTML = `<div class="client-pay-box">💵 ОТРИМАЙТЕ ГОТІВКУ: ${{currentJob.order_price}} ₴</div>`;
-                    else if (currentJob.payment_type === 'buyout') statusDesc.innerHTML = `<div class="client-pay-box">💰 ЗАБЕРІТЬ У КЛІЄНТА: ${{currentJob.order_price}} ₴ (Везіть у заклад)</div>`;
-                    else if (currentJob.payment_type === 'buyout_paid') statusDesc.innerHTML = `<div class="client-pay-box success">💰 ВІЗЬМІТЬ У КЛІЄНТА: ${{currentJob.order_price}} ₴ (Свої гроші)</div>`;
-                    else statusDesc.innerHTML = 'Везіть до клієнта';
-
-                    if (currentJob.status === 'returning') {{
-                         statusDesc.innerHTML = '<div class="client-pay-box" style="border-color:red; color:red;">↩️ ПОВЕРНІТЬ ГРОШІ В ЗАКЛАД!</div>';
-                         document.getElementById('addr-label').innerText = 'ВЕЗТИ ГРОШІ СЮДИ:';
-                         document.getElementById('current-target-addr').innerText = currentJob.partner_address;
-                         btnAct.innerText = '💵 Гроші віддав';
-                         btnAct.style.background = '#fb923c';
-                         btnAct.onclick = () => alert("Чекайте підтвердження від закладу. Заклад має натиснути кнопку у себе в кабінеті.");
-                    }} else if (currentJob.is_return_required || currentJob.payment_type === 'buyout') {{
-                        btnAct.innerText = '💰 Забрав гроші (Везу в заклад)';
-                        btnAct.onclick = () => {{ if(confirm("Везти гроші в заклад?")) updateStatus('delivered'); }};
-                    }} else {{
-                        btnAct.innerText = '✅ Доставив';
-                        btnAct.onclick = () => updateStatus('delivered');
-                    }}
-                    
-                    if (currentJob.customer_lat && currentJob.customer_lon && !targetMarker) {{
-                        const pos = [currentJob.customer_lat, currentJob.customer_lon];
-                        targetMarker = L.marker(pos).addTo(map);
-                        if(marker) {{
-                             routeLine = L.polyline([marker.getLatLng(), pos], {{color: '#6366f1', weight: 4, dashArray: '10, 10'}}).addTo(map);
-                             map.fitBounds(routeLine.getBounds(), {{padding:[50,50]}});
+                        activeJobId = null;
+                        activeJobData = null;
+                        tabActive.style.display = 'none';
+                        tabOrders.style.display = 'block';
+                        clearMap();
+                        if(document.getElementById('content-active').classList.contains('active')) {{
+                            switchTab('orders');
                         }}
                     }}
-                }}
-                btnNav.href = `https://www.google.com/maps/dir/?api=1&destination=${{encodeURIComponent(destAddr)}}`;
+                }} catch(e) {{ console.error(e); }}
             }}
 
-            async function updateStatus(newStatus) {{
-                const fd = new FormData(); fd.append('job_id', currentJob.id); fd.append('status', newStatus);
-                await fetch('/api/courier/update_job_status', {{method:'POST', body:fd}});
-                checkActiveJob();
-            }}
-
-            async function acceptOrder() {{
-                const jobId = document.getElementById('modal-job-id').value;
-                const fd = new FormData(); fd.append('job_id', jobId);
-                try {{
-                    const res = await fetch('/api/courier/accept_order', {{method:'POST', body:fd}});
-                    const data = await res.json();
-                    closeOrderModal();
-                    if(data.status === 'ok') checkActiveJob(); else alert(data.message);
-                }} catch(e) {{ alert("Помилка"); }}
-            }}
-
-            function showNewOrderModal(data) {{
-                document.getElementById('modal-fee').innerText = data.fee + ' ₴';
-                let warning = "";
-                if (data.payment_type === 'buyout') warning = `<div style="background:#fce7f3; color:#db2777; padding:10px; border-radius:8px; margin-bottom:10px; font-weight:bold;">💰 ПОТРІБЕН ВИКУП: ${{data.price}} грн</div>`;
-                document.getElementById('warning-placeholder').innerHTML = warning;
+            function renderActiveJob(job) {{
+                const container = document.getElementById('activeJobContent');
                 
-                document.getElementById('modal-route').innerHTML = `
-                    <div style="text-align:left; background:rgba(0,0,0,0.05); padding:10px; border-radius:8px; font-size:0.9rem;">
-                        <div style="margin-bottom:8px;"><i class="fa-solid fa-shop" style="color:#f59e0b"></i> <b>${{data.restaurant}}</b><br><span style="color:#555; font-size:0.8rem">${{data.restaurant_address}}</span></div>
-                        <div><i class="fa-solid fa-location-dot" style="color:#ef4444"></i> <b>${{data.customer_name || 'Клієнт'}}</b><br><span style="color:#555; font-size:0.8rem">${{data.address}}</span></div>
-                    </div>
+                // Визначаємо КРОК
+                let stepNum = 1;
+                if(job.server_status === 'picked_up') stepNum = 2;
+                if(job.server_status === 'returning') stepNum = 3;
+
+                let progressHtml = `
+                    <div style="display:flex; justify-content:space-between; margin-bottom:20px; position:relative;">
+                        <div style="position:absolute; top:15px; left:10%; right:10%; height:3px; background:#334155; z-index:0;"></div>
+                        
+                        <div style="z-index:1; text-align:center; width:33%;">
+                            <div style="width:32px; height:32px; border-radius:50%; background:${{stepNum >= 1 ? 'var(--primary)' : '#1e293b'}}; color:white; display:flex; justify-content:center; align-items:center; margin:0 auto 5px; font-weight:bold; border:2px solid var(--bg);">1</div>
+                            <div style="font-size:0.75rem; color:${{stepNum >= 1 ? 'white' : 'var(--text-muted)'}};">В заклад</div>
+                        </div>
+                        
+                        <div style="z-index:1; text-align:center; width:33%;">
+                            <div style="width:32px; height:32px; border-radius:50%; background:${{stepNum >= 2 ? 'var(--primary)' : '#1e293b'}}; color:white; display:flex; justify-content:center; align-items:center; margin:0 auto 5px; font-weight:bold; border:2px solid var(--bg);">2</div>
+                            <div style="font-size:0.75rem; color:${{stepNum >= 2 ? 'white' : 'var(--text-muted)'}};">Клієнту</div>
+                        </div>
                 `;
-                
-                document.getElementById('modal-job-id').value = data.id;
-                document.getElementById('orderModal').style.display = 'flex';
-            }}
-            function closeOrderModal() {{ document.getElementById('orderModal').style.display = 'none'; }}
 
-            async function toggleHistory(show) {{
-                const modal = document.getElementById('history-modal');
-                if(show) {{
+                if (job.is_return_required) {{
+                    progressHtml += `
+                        <div style="z-index:1; text-align:center; width:33%;">
+                            <div style="width:32px; height:32px; border-radius:50%; background:${{stepNum >= 3 ? 'var(--warning)' : '#1e293b'}}; color:${{stepNum >= 3 ? 'black' : 'white'}}; display:flex; justify-content:center; align-items:center; margin:0 auto 5px; font-weight:bold; border:2px solid var(--bg);">3</div>
+                            <div style="font-size:0.75rem; color:${{stepNum >= 3 ? 'var(--warning)' : 'var(--text-muted)'}};">Повернення</div>
+                        </div>
+                    `;
+                }} else {{
+                    progressHtml += `
+                        <div style="z-index:1; text-align:center; width:33%; opacity:0;"></div>
+                    `;
+                }}
+                progressHtml += `</div>`;
+
+                // КОНТЕНТ ЗАЛЕЖНО ВІД КРОКУ ТА СТАТУСУ
+                let actionHtml = '';
+
+                if (stepNum === 1) {{
+                    // КРОК 1: Їдемо в заклад
+                    actionHtml = `
+                        <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px;">
+                            <h3 style="margin:0 0 10px; color:var(--warning);"><i class="fa-solid fa-store"></i> ${{job.partner_name}}</h3>
+                            <p style="margin:0 0 10px;"><i class="fa-solid fa-map-pin"></i> ${{job.partner_address}}</p>
+                            <a href="tel:${{job.partner_phone}}" class="btn outline" style="margin-bottom:15px; padding:10px;"><i class="fa-solid fa-phone"></i> Зателефонувати в заклад</a>
+                            
+                            <div class="job-comment" style="margin-bottom:15px;">${{job.comment}}</div>
+                            
+                            ${{job.server_status === 'assigned' ? `
+                                <button class="btn" onclick="updateStatus('arrived_pickup', this)"><i class="fa-solid fa-location-crosshairs"></i> Я на місці (Заклад)</button>
+                            ` : ''}}
+                            
+                            ${{job.server_status === 'arrived_pickup' ? `
+                                <div style="text-align:center; padding:15px; background:rgba(250,204,21,0.1); border-radius:8px; margin-bottom:15px; color:var(--warning);">
+                                    ${{job.is_ready ? '<i class="fa-solid fa-check-circle" style="font-size:2rem;margin-bottom:10px;"></i><br><b>Замовлення готове!</b><br>Забирайте пакунок.' : '<i class="fa-solid fa-clock" style="font-size:2rem;margin-bottom:10px;"></i><br><b>Очікуємо приготування...</b><br>Заклад натисне кнопку, коли буде готово.'}}
+                                </div>
+                                <button class="btn success" onclick="updateStatus('picked_up', this)"><i class="fa-solid fa-box-open"></i> Я забрав замовлення</button>
+                            ` : ''}}
+                        </div>
+                    `;
+                }} 
+                else if (stepNum === 2) {{
+                    // КРОК 2: Їдемо до клієнта
+                    actionHtml = `
+                        <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid var(--primary);">
+                            <h3 style="margin:0 0 10px; color:var(--primary);"><i class="fa-solid fa-user"></i> Клієнт: ${{job.customer_name || 'Не вказано'}}</h3>
+                            <p style="margin:0 0 10px; font-size:1.1rem;"><i class="fa-solid fa-map-pin"></i> <b>${{job.customer_address}}</b></p>
+                            <a href="tel:${{job.customer_phone}}" class="btn outline" style="margin-bottom:15px; padding:10px; border-color:var(--primary); color:var(--primary);"><i class="fa-solid fa-phone"></i> Зателефонувати клієнту</a>
+                            
+                            <div style="background:#0f172a; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center;">
+                                <div style="color:var(--text-muted); font-size:0.9rem;">До сплати:</div>
+                                <div style="font-size:2rem; font-weight:800; color:var(--success); margin:5px 0;">${{job.price}} ₴</div>
+                                <div style="font-size:0.9rem;">Спосіб: <b>${{job.payment_type}}</b></div>
+                            </div>
+
+                            <button class="btn success" style="height:60px; font-size:1.2rem;" onclick="updateStatus('delivered', this)"><i class="fa-solid fa-check-double"></i> Замовлення доставлено</button>
+                        </div>
+                    `;
+                }}
+                else if (stepNum === 3) {{
+                    // КРОК 3: Повернення
+                    actionHtml = `
+                        <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px; border:2px solid var(--warning);">
+                            <div style="text-align:center; margin-bottom:15px;">
+                                <i class="fa-solid fa-sack-dollar" style="font-size:3rem; color:var(--warning); margin-bottom:10px;"></i>
+                                <h3 style="margin:0; color:var(--warning);">Поверніть готівку в заклад!</h3>
+                            </div>
+                            <p style="text-align:center; margin-bottom:20px;">Поверніться в <b>${{job.partner_name}}</b> (${{job.partner_address}}) та віддайте гроші адміністратору.</p>
+                            
+                            <div style="text-align:center; padding:15px; background:rgba(255,255,255,0.05); border-radius:8px; color:var(--text-muted);">
+                                <i class="fa-solid fa-spinner fa-spin" style="font-size:1.5rem; margin-bottom:10px;"></i><br>
+                                Очікуємо підтвердження від закладу...<br>
+                                Як тільки вони підтвердять отримання грошей, замовлення автоматично закриється.
+                            </div>
+                        </div>
+                    `;
+                }}
+
+                // Кнопка Чату (доступна завжди, крім 3 кроку)
+                const chatBtn = stepNum < 3 ? `
+                    <button class="btn outline" style="margin-bottom:15px;" onclick="openChat()">
+                        <i class="fa-solid fa-comments"></i> Чат із закладом
+                    </button>
+                ` : '';
+
+                container.innerHTML = progressHtml + chatBtn + actionHtml;
+            }}
+
+            async function updateStatus(status, btnEl) {{
+                if(btnEl) {{
+                    btnEl.disabled = true;
+                    btnEl.innerHTML = '<span class="spinner"></span>';
+                }}
+                try {{
+                    if(status === 'arrived_pickup') {{
+                        const fd = new FormData();
+                        fd.append('job_id', activeJobId);
+                        await fetch('/api/courier/arrived_pickup', {{method: 'POST', body: fd}});
+                    }} else {{
+                        const fd = new FormData();
+                        fd.append('job_id', activeJobId);
+                        fd.append('status', status);
+                        await fetch('/api/courier/update_job_status', {{method: 'POST', body: fd}});
+                    }}
+                    checkActiveJob();
+                }} catch(e) {{
+                    alert("Помилка оновлення статусу");
+                    checkActiveJob(); // Відновлюємо
+                }}
+            }}
+
+            // --- MAP DRAWING ---
+            function drawRoute(job) {{
+                clearMap();
+                
+                // Якщо є координати закладу та клієнта (в ідеалі брати з API, але тут використовуємо те, що є)
+                // Оскільки в /active_job ми віддаємо customer_lat/lon, а partner_lat/lon немає напряму, 
+                // просто малюємо клієнта, якщо є.
+                
+                const bounds = [];
+                if(currentLat && currentLon) bounds.push([currentLat, currentLon]);
+
+                if(job.customer_lat && job.customer_lon) {{
+                    clientMarker = L.marker([job.customer_lat, job.customer_lon], {{icon: clientIcon}}).addTo(map);
+                    clientMarker.bindPopup(`<b>Клієнт</b><br>${{job.customer_address}}`);
+                    bounds.push([job.customer_lat, job.customer_lon]);
+                }}
+
+                if(bounds.length > 0) {{
+                    map.fitBounds(bounds, {{padding: [50, 50]}});
+                }}
+            }}
+
+            function clearMap() {{
+                if(restMarker) map.removeLayer(restMarker);
+                if(clientMarker) map.removeLayer(clientMarker);
+                if(routeLine) map.removeLayer(routeLine);
+                restMarker = clientMarker = routeLine = null;
+                recenterMap();
+            }}
+
+            // --- HISTORY ---
+            async function fetchHistory() {{
+                try {{
                     const res = await fetch('/api/courier/history');
-                    const jobs = await res.json();
-                    document.getElementById('history-list').innerHTML = jobs.map(j => `
-                        <div style="padding:15px; border-bottom:1px solid #333; display:flex; justify-content:space-between">
-                            <div><b>#${{j.id}}</b> ${{j.address}}<br><small style="color:#888">${{j.date}}</small></div>
-                            <div style="color:#4ade80">+${{j.price}}₴</div>
-                        </div>`).join('');
-                    modal.classList.add('open');
-                }} else modal.classList.remove('open');
+                    const data = await res.json();
+                    
+                    const container = document.getElementById('historyList');
+                    if(data.length === 0) {{
+                        container.innerHTML = '<div class="empty-state"><p>Історія порожня</p></div>';
+                        return;
+                    }}
+                    
+                    let html = '';
+                    data.forEach(h => {{
+                        const color = h.status === 'delivered' ? 'var(--success)' : 'var(--danger)';
+                        const icon = h.status === 'delivered' ? 'fa-check' : 'fa-xmark';
+                        html += `
+                            <div class="history-item">
+                                <div>
+                                    <b>${{h.date}}</b><br>
+                                    <small>${{h.address}}</small>
+                                </div>
+                                <div style="text-align:right;">
+                                    <b style="color:${{color}};">${{h.price}} ₴</b><br>
+                                    <small style="color:${{color}}"><i class="fa-solid ${{icon}}"></i> ${{h.status === 'delivered' ? 'Доставлено' : 'Скасовано'}}</small>
+                                </div>
+                            </div>
+                        `;
+                    }});
+                    container.innerHTML = html;
+                }} catch(e) {{}}
             }}
-            
+
+            // --- CHAT LOGIC ---
             async function openChat() {{
-                if(!currentJob) return;
-                document.getElementById('chat-sheet').classList.add('open');
-                const res = await fetch(`/api/chat/history/${{currentJob.id}}`);
-                const msgs = await res.json();
-                const container = document.getElementById('chat-body');
-                container.innerHTML = '';
-                msgs.forEach(renderSingleMsg);
+                if(!activeJobId) return;
+                document.getElementById('chatModal').classList.add('active');
+                await loadChatHistory();
             }}
-            function renderSingleMsg(m) {{
-                const container = document.getElementById('chat-body');
+
+            function closeChat() {{
+                document.getElementById('chatModal').classList.remove('active');
+            }}
+
+            async function loadChatHistory() {{
+                try {{
+                    const res = await fetch(`/api/chat/history/${{activeJobId}}`);
+                    const msgs = await res.json();
+                    const container = document.getElementById('chat-messages');
+                    container.innerHTML = '';
+                    msgs.forEach(m => appendChatMessage(m.text, m.role, m.time, false));
+                    scrollToBottom();
+                }} catch(e) {{}}
+            }}
+
+            function appendChatMessage(text, role, time, scroll=true) {{
+                const container = document.getElementById('chat-messages');
                 const div = document.createElement('div');
-                div.className = `msg ${{m.role === 'courier' ? 'me' : 'other'}}`;
-                div.innerText = m.text;
+                div.className = `msg-bubble ${{role === 'courier' ? 'msg-courier' : 'msg-partner'}}`;
+                div.innerHTML = `${{text}} <span class="msg-time">${{time}}</span>`;
                 container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
+                if(scroll) scrollToBottom();
             }}
-            async function sendChatMessage(e) {{
-                e.preventDefault();
-                const input = document.getElementById('chat-input');
-                const text = input.value.trim();
-                if(!text || !currentJob) return;
-                input.value = '';
-                renderSingleMsg({{role:'courier', text:text}}); 
-                const fd = new FormData(); fd.append('job_id', currentJob.id); fd.append('message', text); fd.append('role', 'courier');
-                await fetch('/api/chat/send', {{method: 'POST', body: fd}});
+
+            function scrollToBottom() {{
+                const c = document.getElementById('chat-messages');
+                c.scrollTop = c.scrollHeight;
+            }}
+
+            async function sendChatMessage() {{
+                const inp = document.getElementById('chatInput');
+                const text = inp.value.trim();
+                if(!text || !activeJobId) return;
+                
+                inp.value = '';
+                const now = new Date();
+                const timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                appendChatMessage(text, 'courier', timeStr);
+                
+                const fd = new FormData();
+                fd.append('job_id', activeJobId);
+                fd.append('message', text);
+                fd.append('role', 'courier');
+                
+                try {{ await fetch('/api/chat/send', {{method:'POST', body: fd}}); }} catch(e) {{}}
             }}
         </script>
     </body>
     </html>
     """
+    return html

@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, File
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta
 
@@ -33,7 +33,7 @@ import order_monitor
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, CourierTransaction,
     DeliveryPartner, DeliveryJob, PendingVerification, ChatMessage, 
-    create_db_tables, get_db
+    create_db_tables, get_db, Announcement, AnnouncementDismissal
 )
 from auth import check_admin_auth
 
@@ -736,6 +736,45 @@ async def update_fcm_token(
     courier.fcm_token = token
     await db.commit()
     return JSONResponse({"status": "updated"})
+
+# --- ДОДАНО ЕНДПОІНТИ ДЛЯ СИСТЕМИ ОГОЛОШЕНЬ ---
+@app.get("/api/courier/announcements")
+async def get_courier_announcements(
+    courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)
+):
+    """Повертає активні оголошення, які кур'єр ще не закрив"""
+    # Шукаємо оголошення: активні AND (для всіх OR персонально для нього)
+    query = select(Announcement).where(
+        Announcement.is_active == True,
+        or_(Announcement.target_courier_id == None, Announcement.target_courier_id == courier.id)
+    )
+    all_active = (await db.execute(query)).scalars().all()
+    
+    # Шукаємо ID закритих цим кур'єром
+    dismissed_query = select(AnnouncementDismissal.announcement_id).where(AnnouncementDismissal.courier_id == courier.id)
+    dismissed_ids = set((await db.execute(dismissed_query)).scalars().all())
+    
+    # Відфільтровуємо
+    result = [
+        {"id": a.id, "title": a.title, "message": a.message, "style": a.style} 
+        for a in all_active if a.id not in dismissed_ids
+    ]
+    return JSONResponse(result)
+
+@app.post("/api/courier/announcements/{ann_id}/dismiss")
+async def dismiss_announcement(
+    ann_id: int, courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)
+):
+    """Позначає оголошення як прочитане/закрите"""
+    existing = await db.execute(select(AnnouncementDismissal).where(
+        AnnouncementDismissal.announcement_id == ann_id,
+        AnnouncementDismissal.courier_id == courier.id
+    ))
+    if not existing.scalar_one_or_none():
+        db.add(AnnouncementDismissal(announcement_id=ann_id, courier_id=courier.id))
+        await db.commit()
+    return JSONResponse({"status": "ok"})
+# ----------------------------------------------
 
 # --- Helper for Push Couriers ---
 async def send_push_to_couriers(courier_tokens: List[str], title: str, body: str, job_id: int = None, fee: float = None):

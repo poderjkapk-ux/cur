@@ -273,6 +273,36 @@ class CashRegisterTransaction(Base):
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class Announcement(Base):
+    """
+    Глобальні або персональні оголошення для кур'єрів.
+    """
+    __tablename__ = "announcements"
+    
+    id = Column(Integer, primary_key=True)
+    title = Column(String(100), nullable=False)
+    message = Column(String(1000), nullable=False)
+    
+    # Стилі: 'info' (синій), 'warning' (жовтий), 'danger' (червоний), 'success' (зелений)
+    style = Column(String(20), default="info") 
+    
+    # Якщо NULL - значить для всіх. Якщо є ID - персонально.
+    target_courier_id = Column(Integer, ForeignKey("couriers.id", ondelete="CASCADE"), nullable=True) 
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AnnouncementDismissal(Base):
+    """
+    Таблиця для фіксації того, що кур'єр закрив (прочитав) оголошення.
+    """
+    __tablename__ = "announcement_dismissals"
+    
+    id = Column(Integer, primary_key=True)
+    announcement_id = Column(Integer, ForeignKey("announcements.id", ondelete="CASCADE"), nullable=False)
+    courier_id = Column(Integer, ForeignKey("couriers.id", ondelete="CASCADE"), nullable=False)
+    dismissed_at = Column(DateTime, default=datetime.utcnow)
+
 # --- 3. Функції для роботи з БД ---
 
 async def create_db_tables():
