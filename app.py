@@ -700,7 +700,15 @@ async def get_courier_profile(
     })
 
 @app.get("/courier/app", response_class=HTMLResponse)
-async def courier_pwa_main(courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)):
+async def courier_pwa_main(request: Request, db: AsyncSession = Depends(get_db)):
+    token = request.cookies.get("courier_token")
+    try:
+        # Пытаемся получить курьера по токену
+        courier = await auth.get_current_courier(token, db)
+    except HTTPException:
+        # Если токена нет, он недействителен или курьер заблокирован — редирект на логин
+        return RedirectResponse(url="/courier/login", status_code=302)
+        
     config = await get_all_settings(db)
     return templates_courier.get_courier_pwa_html(courier, config)
 
