@@ -62,7 +62,7 @@ def get_courier_login_page(message=None):
             <form action="/api/courier/login" method="post">
                 <div class="input-group">
                     <label>Номер телефону</label>
-                    <input type="tel" name="phone" placeholder="+380..." required>
+                    <input type="tel" name="phone" placeholder="380..." required>
                 </div>
                 <div class="input-group">
                     <label>Пароль</label>
@@ -727,7 +727,7 @@ def get_courier_pwa_html(courier, config):
             let currentLat = null, currentLon = null;
             let activeJobId = null;
             let activeJobData = null; // Зберігаємо повні дані про активне замовлення
-            let isOnline = {'true' if courier.is_online else 'false'} === 'true';
+            let isOnline = {'true' if courier.is_online else 'false'};
             
             // Маркери на карті
             let restMarker = null, clientMarker = null, routeLine = null;
@@ -1269,7 +1269,7 @@ def get_courier_pwa_html(courier, config):
                             
                             <div style="background:#0f172a; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center;">
                                 <div style="color:var(--text-muted); font-size:0.9rem;">До сплати:</div>
-                                <div style="font-size:2rem; font-weight:800; color:var(--success); margin:5px 0;">${{job.price}} ₴</div>
+                                <div style="font-size:2rem; font-weight:800; color:var(--success); margin:5px 0;">${{job.order_price}} ₴</div>
                                 <div style="font-size:0.9rem;">Спосіб: <b>${{job.payment_type}}</b></div>
                             </div>
 
