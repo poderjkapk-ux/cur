@@ -214,7 +214,7 @@ def get_partner_auth_html(is_register=False, message=""):
                         const reqId = ++latestReqId;
                         
                         try {
-                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
+                            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&countrycodes=ua&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
                             
                             const res = await fetch(url);
                             
@@ -592,7 +592,7 @@ DASHBOARD_SCRIPT = """
                 const reqId = ++latestReqId;
                 
                 try {
-                    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
+                    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&addressdetails=1&countrycodes=ua&viewbox=30.6,46.6,30.8,46.3&bounded=0&limit=5`;
                     
                     const res = await fetch(url);
                     
