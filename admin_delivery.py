@@ -687,6 +687,16 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
             
             {f'<div class="message success" style="background:#064e3b; color:#4ade80; padding:15px; border-radius:8px; margin-bottom:20px; border:1px solid #047857;">{message}</div>' if message else ''}
 
+            <div class="panel" style="margin-bottom: 20px; border-color: var(--primary);">
+                <h2>🚀 Активні замовлення в роботі</h2>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table>
+                        <thead><tr><th>ID / Час</th><th>Заклад</th><th>Кур'єр</th><th>Статус</th><th>Сума / Доставка</th><th>Дії (Чат / Відміна)</th></tr></thead>
+                        <tbody>{active_jobs_rows}</tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="panel" style="margin-bottom: 20px; border: 1px dashed #3b82f6;">
                 <h2 style="color: #60a5fa;"><i class="fa-brands fa-android"></i> Сервер оновлень Android APK (In-App Updates)</h2>
                 <div class="grid" style="grid-template-columns: 1fr 1fr;">
@@ -761,16 +771,6 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                             <tbody>{partner_rows}</tbody>
                         </table>
                     </div>
-                </div>
-            </div>
-
-            <div class="panel" style="margin-top: 20px; border-color: var(--primary);">
-                <h2>🚀 Активні замовлення в роботі</h2>
-                <div style="max-height: 400px; overflow-y: auto;">
-                    <table>
-                        <thead><tr><th>ID / Час</th><th>Заклад</th><th>Кур'єр</th><th>Статус</th><th>Сума / Доставка</th><th>Дії (Чат / Відміна)</th></tr></thead>
-                        <tbody>{active_jobs_rows}</tbody>
-                    </table>
                 </div>
             </div>
 
