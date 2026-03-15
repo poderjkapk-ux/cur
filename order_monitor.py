@@ -16,30 +16,20 @@ from firebase_admin import messaging
 ADMIN_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
 
-
 async def monitor_stale_orders(ws_manager):
     """
     Фоновая задача (Background Task).
     Периодически проверяет базу на наличие заказов, которые долго висят в статусе 'pending'.
-    А также раз в 3 часа запускает очистку мусора от координат курьеров.
     
     Аргументы:
     ws_manager -- экземпляр ConnectionManager из app.py (для рассылки WebSocket, если понадобится)
     """
     logging.info("🕵️ Запуск моніторингу завислих замовлень (Order Monitor)...")
     
-    minutes_passed = 0  # Таймер для очистки координат
-    
     while True:
         try:
             # Проверяем каждую минуту
             await asyncio.sleep(60)
-            minutes_passed += 1
-            
-            # Если прошло 3 часа (180 минут), запускаем очистку (VACUUM)
-            if minutes_passed >= 180:
-                await auto_vacuum_couriers()
-                minutes_passed = 0  # Сбрасываем таймер
             
             async with async_session_maker() as db:
                 now = datetime.utcnow()
