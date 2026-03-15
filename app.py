@@ -29,6 +29,7 @@ import templates_courier
 import admin_delivery
 import bot_service
 import order_monitor
+import admin_reports
 
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, CourierTransaction,
@@ -164,6 +165,7 @@ async def lifespan(app: FastAPI):
     logging.info("Shutdown.")
 
 app = FastAPI(title="Restify SaaS Control Plane", lifespan=lifespan)
+app.include_router(admin_reports.router)
 
 # Підключення роутера адмінки доставки
 app.include_router(admin_delivery.router)
