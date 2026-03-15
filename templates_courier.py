@@ -142,6 +142,7 @@ def get_courier_register_page():
             .input-group input:focus { outline: none; border-color: var(--primary); }
             
             .file-upload {
+                display: block; /* ИСПРАВЛЕНИЕ: Делаем элемент блочным, чтобы не рвался интерфейс */
                 border: 2px dashed #334155; border-radius: 8px; padding: 20px;
                 text-align: center; cursor: pointer; margin-bottom: 15px;
                 background: rgba(0,0,0,0.2); transition: 0.3s;
@@ -186,7 +187,7 @@ def get_courier_register_page():
                     <i class="fa-brands fa-telegram" style="font-size: 4rem; color: #0088cc;"></i>
                     <p>Для зв'язку та безпеки нам потрібен ваш Telegram та номер телефону.</p>
                 </div>
-                <button class="btn tg-btn" onclick="startTelegramAuth()">
+                <button type="button" class="btn tg-btn" onclick="startTelegramAuth()">
                     <i class="fa-brands fa-telegram"></i> Підтвердити через Telegram
                 </button>
             </div>
@@ -194,31 +195,31 @@ def get_courier_register_page():
             <div id="step2" class="step">
                 <p style="text-align:center;">Завантажте фото для верифікації</p>
                 
-                <label class="file-upload" onclick="document.getElementById('docFile').click()">
+                <label class="file-upload">
                     <i class="fa-solid fa-id-card"></i>
                     <div>Натисніть, щоб завантажити фото паспорта або прав</div>
                     <input type="file" id="docFile" accept="image/*" onchange="showFileName(this, 'docName')">
                     <div id="docName" class="file-name"></div>
                 </label>
 
-                <label class="file-upload" onclick="document.getElementById('selfieFile').click()">
+                <label class="file-upload">
                     <i class="fa-solid fa-camera-retro"></i>
-                    <div>Натисніть, щоб зробити селфі з документом</div>
+                    <div>Натисніть, щоб зробити селфі </div>
                     <input type="file" id="selfieFile" accept="image/*" capture="user" onchange="showFileName(this, 'selfieName')">
                     <div id="selfieName" class="file-name"></div>
                 </label>
 
                 <div style="display:flex; gap:10px;">
-                    <button class="btn btn-outline" onclick="showStep(1)">Назад</button>
-                    <button class="btn" onclick="goToStep3()">Далі</button>
+                    <button type="button" class="btn btn-outline" onclick="showStep(1)">Назад</button>
+                    <button type="button" class="btn" onclick="goToStep3()">Далі</button>
                 </div>
             </div>
 
             <div id="step3" class="step">
                 <form id="registerForm" onsubmit="submitRegistration(event)">
                     <div class="input-group">
-                        <label>Ваше ПІБ</label>
-                        <input type="text" id="regName" required placeholder="Іванов Іван">
+                        <label>Ваше Ім'я</label>
+                        <input type="text" id="regName" required placeholder="Ім'я">
                     </div>
                     <div class="input-group">
                         <label>Придумайте пароль для входу</label>
