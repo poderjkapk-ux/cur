@@ -5,7 +5,7 @@ import httpx
 import pytz
 import asyncio
 import shutil
-from datetime import datetime
+from datetime import datetime, time
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
@@ -367,7 +367,7 @@ def get_ops_map_html(message=""):
     """
 
 # --- HTML TEMPLATE: Історія замовлень ---
-def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kiev"):
+def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kiev", selected_date_str=""):
     rows = ""
     status_colors = {
         "pending": "#facc15", "assigned": "#facc15", "arrived_pickup": "#facc15",
@@ -377,7 +377,6 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
     
     for j in jobs:
         color = status_colors.get(j.status, "#ffffff")
-        # Застосовуємо часовий пояс
         date_str = format_local_time(j.created_at, tz_string, '%d.%m.%Y %H:%M') if j.created_at else "-"
         
         rating = f"⭐ {j.courier_rating}" if j.courier_rating else "-"
@@ -385,6 +384,9 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
         
         partner_name = j.partner.name if j.partner else "Видалений заклад"
         courier_name = j.courier.name if j.courier else "Не призначено"
+
+        # Кнопка для чату
+        chat_btn = f'<a href="/admin/delivery/job/{j.id}/chat" class="btn-mini info" title="Чат"><i class="fa-regular fa-comments"></i></a>'
 
         rows += f"""
         <tr>
@@ -397,6 +399,7 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
             <td><span style="color:{color}; font-weight:bold;">{j.status}</span></td>
             <td style="color:#facc15; font-weight:bold;">{rating}</td>
             <td><small>{review}</small></td>
+            <td>{chat_btn}</td>
         </tr>
         """
 
@@ -417,6 +420,15 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
                 <a href="/admin/delivery" class="btn" style="width:auto; padding: 10px 20px;">← Назад в Delivery Control</a>
             </div>
             
+            <div class="panel">
+                <form method="get" style="display:flex; gap:10px; align-items:center;">
+                    <label style="color:#94a3b8;">Фільтр по даті:</label>
+                    <input type="date" name="date" value="{selected_date_str}" style="padding:8px; border-radius:6px; background:#334155; border:1px solid #475569; color:white;">
+                    <button type="submit" class="btn" style="width:auto; padding:8px 15px; background:#8b5cf6;">Застосувати</button>
+                    <a href="?" class="btn" style="width:auto; padding:8px 15px; background:#475569;">Скинути</a>
+                </form>
+            </div>
+            
             <div class="panel" style="overflow-x: auto;">
                 <table>
                     <thead>
@@ -430,6 +442,7 @@ def get_history_admin_html(entity_name, entity_type, jobs, tz_string="Europe/Kie
                             <th>Статус</th>
                             <th>Оцінка</th>
                             <th>Відгук</th>
+                            <th>Чат</th>
                         </tr>
                     </thead>
                     <tbody>{rows}</tbody>
@@ -483,7 +496,7 @@ def get_admin_chat_html(job_id, messages, tz_string="Europe/Kiev"):
     """
 
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None, announcements=None):
+def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None, announcements=None, selected_date_str=""):
     if cash_transactions is None:
         cash_transactions = []
     if non_cash_deposits is None:
@@ -629,9 +642,10 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
     non_cash_rows_html = ""
     for ct, courier_name in non_cash_deposits:
         date_str = format_local_time(ct.created_at, tz_string, '%d.%m %H:%M')
-        non_cash_rows_html += f"<tr><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{date_str}</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'><b>{courier_name}</b></td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05); color:#facc15; font-weight:bold; white-space:nowrap;'>+{ct.amount:.2f} ₴</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{ct.description}</td></tr>"
+        chat_btn = f'<a href="/admin/delivery/job/{ct.job_id}/chat" class="btn-mini info" title="Відкрити чат" style="display:inline-block;"><i class="fa-regular fa-comments"></i></a>' if ct.job_id else '-'
+        non_cash_rows_html += f"<tr><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{date_str}</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'><b>{courier_name}</b></td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05); color:#facc15; font-weight:bold; white-space:nowrap;'>+{ct.amount:.2f} ₴</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{ct.description}</td><td style='padding:8px; border-bottom:1px solid rgba(255,255,255,0.05);'>{chat_btn}</td></tr>"
     if not non_cash_rows_html:
-        non_cash_rows_html = "<tr><td colspan='4' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає поповнень без готівки</td></tr>"
+        non_cash_rows_html = "<tr><td colspan='5' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає поповнень без готівки</td></tr>"
 
     # ГЕНЕРАЦИЯ СТРОК ОБЪЯВЛЕНИЙ (ANNOUNCEMENTS)
     ann_rows = ""
@@ -808,7 +822,15 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
             </div>
 
             <div class="panel" style="margin-top: 20px;">
-                <h2>💰 Бухгалтерія (Каса)</h2>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                    <h2 style="margin:0;">💰 Бухгалтерія (Каса)</h2>
+                    <form method="get" action="/admin/delivery" style="display:flex; gap:10px; align-items:center; margin:0;">
+                        <label style="color:#94a3b8; font-size:0.9rem;">Фільтр по даті:</label>
+                        <input type="date" name="date" value="{selected_date_str}" style="padding:6px 10px; border-radius:6px; background:#334155; border:1px solid #475569; color:white;">
+                        <button type="submit" class="btn" style="width:auto; padding:6px 15px; background:#8b5cf6;">Застосувати</button>
+                        <a href="/admin/delivery" class="btn" style="width:auto; padding:6px 15px; background:#475569;">Скинути</a>
+                    </form>
+                </div>
                 <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                     
                     <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; flex: 1; min-width: 300px;">
@@ -860,6 +882,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                                         <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Кур'єр</th>
                                         <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Сума</th>
                                         <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Коментар</th>
+                                        <th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Чат</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -912,13 +935,13 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
 @router.get("/admin/delivery", response_class=HTMLResponse)
 async def admin_delivery_page(
     message: str = "",
+    date: str = None,
     user: str = Depends(check_admin_auth),
     db: AsyncSession = Depends(get_db)
 ):
     couriers = (await db.execute(select(Courier).order_by(Courier.id.desc()))).scalars().all()
     partners = (await db.execute(select(DeliveryPartner).order_by(DeliveryPartner.id.desc()))).scalars().all()
     
-    # Отримуємо активні замовлення
     active_jobs = (await db.execute(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
@@ -926,35 +949,41 @@ async def admin_delivery_page(
         .order_by(DeliveryJob.id.desc())
     )).scalars().all()
 
-    # Отримуємо оголошення
     announcements = (await db.execute(select(Announcement).order_by(Announcement.id.desc()))).scalars().all()
 
     pwa_config = load_pwa_config()
-    apk_config = load_apk_config() # ЗАВАНТАЖУЄМО КОНФІГ APK
+    apk_config = load_apk_config()
     tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
     
-    # --- БУХГАЛТЕРИЯ: Расчет баланса и получение истории ---
     cash_balance_result = await db.execute(select(func.sum(CashRegisterTransaction.amount)))
     cash_balance = cash_balance_result.scalar() or 0.0
     
-    cash_transactions = (await db.execute(
-        select(CashRegisterTransaction).order_by(CashRegisterTransaction.id.desc()).limit(50)
-    )).scalars().all()
-
-    # --- НОВЕ: Отчет по пополнениям без налички ---
-    non_cash_query = await db.execute(
+    cash_query = select(CashRegisterTransaction)
+    non_cash_query = (
         select(CourierTransaction, Courier.name)
         .join(Courier, CourierTransaction.courier_id == Courier.id)
         .where(CourierTransaction.cash_received == False)
         .where(CourierTransaction.type == 'deposit')
-        .order_by(CourierTransaction.id.desc())
-        .limit(50)
     )
-    non_cash_deposits = non_cash_query.all()
+
+    # ФІЛЬТРАЦІЯ ПО ДАТІ
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            start_of_day = datetime.combine(target_date, time.min)
+            end_of_day = datetime.combine(target_date, time.max)
+            
+            cash_query = cash_query.where(CashRegisterTransaction.created_at >= start_of_day, CashRegisterTransaction.created_at <= end_of_day)
+            non_cash_query = non_cash_query.where(CourierTransaction.created_at >= start_of_day, CourierTransaction.created_at <= end_of_day)
+        except ValueError:
+            pass
+
+    cash_transactions = (await db.execute(cash_query.order_by(CashRegisterTransaction.id.desc()).limit(50))).scalars().all()
+    non_cash_deposits = (await db.execute(non_cash_query.order_by(CourierTransaction.id.desc()).limit(50))).all()
     
     return get_delivery_admin_html(
         couriers, partners, pwa_config, apk_config, tz_string, message, 
-        cash_balance, cash_transactions, non_cash_deposits, active_jobs, announcements
+        cash_balance, cash_transactions, non_cash_deposits, active_jobs, announcements, date or ""
     )
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
@@ -1352,11 +1381,13 @@ async def partner_control(
     
     await db.commit()
     return RedirectResponse(f"/admin/delivery?message={msg}", status_code=302)
+
 # --- ІСТОРІЯ ЗАМОВЛЕНЬ ---
 
 @router.get("/admin/delivery/courier/{courier_id}/history", response_class=HTMLResponse)
 async def admin_courier_history(
     courier_id: int,
+    date: str = None,
     user: str = Depends(check_admin_auth),
     db: AsyncSession = Depends(get_db)
 ):
@@ -1364,19 +1395,26 @@ async def admin_courier_history(
     if not courier:
         return RedirectResponse("/admin/delivery?message=Кур'єра не знайдено", status_code=302)
         
-    jobs = (await db.execute(
-        select(DeliveryJob)
-        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
-        .where(DeliveryJob.courier_id == courier_id)
-        .order_by(DeliveryJob.id.desc())
-    )).scalars().all()
+    query = select(DeliveryJob).options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier)).where(DeliveryJob.courier_id == courier_id)
     
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            start_of_day = datetime.combine(target_date, time.min)
+            end_of_day = datetime.combine(target_date, time.max)
+            query = query.where(DeliveryJob.created_at >= start_of_day, DeliveryJob.created_at <= end_of_day)
+        except ValueError:
+            pass
+
+    jobs = (await db.execute(query.order_by(DeliveryJob.id.desc()))).scalars().all()
     tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
-    return get_history_admin_html(courier.name, "Кур'єр", jobs, tz_string)
+    
+    return get_history_admin_html(courier.name, "Кур'єр", jobs, tz_string, date or "")
 
 @router.get("/admin/delivery/partner/{partner_id}/history", response_class=HTMLResponse)
 async def admin_partner_history(
     partner_id: int,
+    date: str = None,
     user: str = Depends(check_admin_auth),
     db: AsyncSession = Depends(get_db)
 ):
@@ -1384,15 +1422,21 @@ async def admin_partner_history(
     if not partner:
         return RedirectResponse("/admin/delivery?message=Партнера не знайдено", status_code=302)
         
-    jobs = (await db.execute(
-        select(DeliveryJob)
-        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
-        .where(DeliveryJob.partner_id == partner_id)
-        .order_by(DeliveryJob.id.desc())
-    )).scalars().all()
+    query = select(DeliveryJob).options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier)).where(DeliveryJob.partner_id == partner_id)
     
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            start_of_day = datetime.combine(target_date, time.min)
+            end_of_day = datetime.combine(target_date, time.max)
+            query = query.where(DeliveryJob.created_at >= start_of_day, DeliveryJob.created_at <= end_of_day)
+        except ValueError:
+            pass
+
+    jobs = (await db.execute(query.order_by(DeliveryJob.id.desc()))).scalars().all()
     tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
-    return get_history_admin_html(partner.name, "Заклад", jobs, tz_string)
+    
+    return get_history_admin_html(partner.name, "Заклад", jobs, tz_string, date or "")
 
 
 # --- НАЛАШТУВАННЯ PWA ТА МАНІФЕСТИ ---
