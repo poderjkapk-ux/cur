@@ -1,4 +1,3 @@
-
 import os
 import logging
 import secrets
@@ -8,7 +7,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
-from sqlalchemy import select
+from sqlalchemy import select, update
 from models import Courier, DeliveryPartner, PendingVerification, async_session_maker
 from auth import get_password_hash
 
@@ -209,10 +208,29 @@ async def send_telegram_message(chat_id: str, text: str):
     Функція для відправки повідомлень із інших частин програми.
     """
     if bot and chat_id:
+        # Якщо вже позначено як заблокований, не намагаємось відправляти
+        if str(chat_id).startswith("BLOCKED_"):
+            return
+            
         try:
             await bot.send_message(chat_id, text, parse_mode="HTML")
         except Exception as e:
-            logging.error(f"Помилка відправки в Telegram ({chat_id}): {e}")
+            err_msg = str(e)
+            logging.error(f"Помилка відправки в Telegram ({chat_id}): {err_msg}")
+            
+            # Якщо користувач заблокував бота — помічаємо це в базі даних
+            if "bot was blocked" in err_msg.lower():
+                try:
+                    async with async_session_maker() as db:
+                        blocked_id = f"BLOCKED_{chat_id}"
+                        # Оновлюємо у кур'єрів
+                        await db.execute(update(Courier).where(Courier.telegram_chat_id == str(chat_id)).values(telegram_chat_id=blocked_id))
+                        # Оновлюємо у закладів (на всякий випадок)
+                        await db.execute(update(DeliveryPartner).where(DeliveryPartner.telegram_chat_id == str(chat_id)).values(telegram_chat_id=blocked_id))
+                        await db.commit()
+                        logging.info(f"Статус Telegram для {chat_id} змінено на 'Заблокований' у БД.")
+                except Exception as db_err:
+                    logging.error(f"Помилка оновлення статусу блокування в БД: {db_err}")
 
 async def start_bot():
     """Запуск поллінгу бота"""

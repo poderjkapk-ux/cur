@@ -515,6 +515,17 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         
         last_seen_str = format_local_time(c.last_seen, tz_string, '%d.%m %H:%M') if c.last_seen else '-'
         
+        # --- НОВЕ: Перевірка статусу Telegram ---
+        tg_status = ""
+        if getattr(c, 'telegram_chat_id', None):
+            if c.telegram_chat_id.startswith("BLOCKED_"):
+                tg_status = '<br><span style="color:#ef4444; font-size:0.8rem;"><i class="fa-solid fa-user-slash"></i> Бот заблоковано</span>'
+            else:
+                tg_status = '<br><span style="color:#3b82f6; font-size:0.8rem;"><i class="fa-brands fa-telegram"></i> Бот підключено</span>'
+        else:
+            tg_status = '<br><span style="color:#94a3b8; font-size:0.8rem;"><i class="fa-brands fa-telegram"></i> Не підключено</span>'
+        # ----------------------------------------
+        
         # Посилання на документ
         doc_link = f"<a href='{c.document_photo}' target='_blank' style='color:#3b82f6; font-size:0.8rem; text-decoration:none; display:inline-block; margin-right: 10px;'><i class='fa-solid fa-id-card'></i> Документ</a>" if getattr(c, 'document_photo', None) else "<span style='color:#94a3b8; font-size:0.8rem; margin-right: 10px;'>Немає документа</span>"
         
@@ -528,7 +539,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         courier_rows += f"""
         <tr>
             <td>{c.id}</td>
-            <td><b>{c.name}</b><br><small>{c.phone}</small><br><div style="margin-top:5px;">{doc_link}{selfie_link}</div></td>
+            <td><b>{c.name}</b><br><small>{c.phone}</small>{tg_status}<br><div style="margin-top:5px;">{doc_link}{selfie_link}</div></td>
             <td>
                 <span style="color:{balance_color}; font-weight:bold; font-size: 1.1rem;">{balance_val:.2f} ₴</span><br>
                 <small style="color:#94a3b8">Комісія: {commission_val}%</small>
@@ -1246,7 +1257,7 @@ async def courier_add_balance(
         await db.commit()
 
         # --- НОВЕ: Сповіщення кур'єру про зміну балансу ---
-        if courier.telegram_chat_id:
+        if courier.telegram_chat_id and not courier.telegram_chat_id.startswith("BLOCKED_"):
             sign = "+" if amount >= 0 else ""
             tg_msg = (
                 f"💰 <b>Оновлення балансу</b>\n\n"
@@ -1305,6 +1316,8 @@ async def courier_control(
     user: str = Depends(check_admin_auth),
     db: AsyncSession = Depends(get_db)
 ):
+    from models import AnnouncementDismissal # Імпортуємо додаткову модель
+    
     courier = await db.get(Courier, id)
     if not courier:
         return RedirectResponse("/admin/delivery?message=Кур'єра не знайдено", status_code=302)
@@ -1316,8 +1329,7 @@ async def courier_control(
         courier.is_active = True
         msg = f"Кур'єр {courier.name} верифікований та розблокований."
         
-        # --- ВІДПРАВКА ПОВІДОМЛЕННЯ В TELEGRAM ПРО ВЕРИФІКАЦІЮ ---
-        if courier.telegram_chat_id:
+        if courier.telegram_chat_id and not courier.telegram_chat_id.startswith("BLOCKED_"):
             tg_text = f"✅ <b>Ваш профіль успішно верифіковано!</b>\n\nТепер ви можете увійти в додаток і почати отримувати замовлення."
             asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_text))
             
@@ -1328,7 +1340,17 @@ async def courier_control(
             .where(DeliveryJob.courier_id == courier.id)
             .values(courier_id=None)
         )
-        # 2. Видаляємо самого кур'єра
+        # 2. Видаляємо всі фінансові транзакції кур'єра
+        await db.execute(
+            delete(CourierTransaction)
+            .where(CourierTransaction.courier_id == courier.id)
+        )
+        # 3. Видаляємо інформацію про прочитані оголошення
+        await db.execute(
+            delete(AnnouncementDismissal)
+            .where(AnnouncementDismissal.courier_id == courier.id)
+        )
+        # 4. Видаляємо самого кур'єра
         await db.delete(courier)
         msg = "Кур'єр видалений."
     
