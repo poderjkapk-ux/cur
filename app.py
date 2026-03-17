@@ -1059,6 +1059,7 @@ async def get_open_orders(
             "payment_type": job.payment_type,
             "is_return": job.is_return_required,
             "comment": job.comment,
+            "estimated_ready_at": job.estimated_ready_at.isoformat() + "Z" if job.estimated_ready_at else None,
             "_sort_key": sort_dist
         })
 
@@ -1137,6 +1138,7 @@ async def get_active_job(
             "delivery_fee": job.delivery_fee,
             "payment_type": job.payment_type,
             "is_return_required": job.is_return_required,
+            "estimated_ready_at": job.estimated_ready_at.isoformat() + "Z" if job.estimated_ready_at else None,
             
             # --- ЧАСОВІ МІТКИ ДЛЯ ТАЙМЕРІВ ---
             "assigned_at": job.accepted_at.isoformat() + "Z" if job.accepted_at else None,
@@ -1505,6 +1507,7 @@ async def api_create_order_native(
     order_price: float = Form(0.0), delivery_fee: float = Form(80.0), 
     comment: str = Form(""), payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
+    prep_time: int = Form(15), # <-- НОВИЙ ПАРАМЕТР (за замовчуванням 15 хв)
     db: AsyncSession = Depends(get_db), partner: DeliveryPartner = Depends(get_current_partner)
 ):
     if delivery_fee < 80.0:
@@ -1519,13 +1522,17 @@ async def api_create_order_native(
     if payment_type == 'buyout':
         full_comment = f"💰 ВИКУП ({order_price} грн)! {full_comment}"
 
+    estimated_ready_at = datetime.utcnow() + timedelta(minutes=prep_time)
+
     job = DeliveryJob(
         partner_id=partner.id, dropoff_address=dropoff_address, 
         dropoff_lat=client_lat, dropoff_lon=client_lon, 
         customer_phone=customer_phone, customer_name=customer_name, # <-- ЗБЕРІГАЄМО ІМ'Я КЛІЄНТА
         order_price=order_price, delivery_fee=delivery_fee,
         comment=full_comment, payment_type=payment_type,
-        is_return_required=is_return_required, status="pending"
+        is_return_required=is_return_required, 
+        estimated_ready_at=estimated_ready_at,
+        status="pending"
     )
     db.add(job)
     await db.commit()
@@ -1566,7 +1573,8 @@ async def api_create_order_native(
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
             "dist_to_rest": display_dist,
             "is_return": is_return_required,
-            "payment_type": payment_type
+            "payment_type": payment_type,
+            "estimated_ready_at": estimated_ready_at.isoformat() + "Z"
         }
         
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
@@ -1736,6 +1744,7 @@ async def create_partner_order(
     comment: str = Form(""),
     payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
+    prep_time: int = Form(15), # <-- НОВИЙ ПАРАМЕТР (за замовчуванням 15 хв)
     lat: float = Form(None),
     lon: float = Form(None),
     db: AsyncSession = Depends(get_db), 
@@ -1757,6 +1766,8 @@ async def create_partner_order(
     if payment_type == 'buyout':
         full_comment = f"💰 ВИКУП ({order_price} грн)! {full_comment}"
 
+    estimated_ready_at = datetime.utcnow() + timedelta(minutes=prep_time)
+
     job = DeliveryJob(
         partner_id=partner.id, dropoff_address=dropoff_address, 
         dropoff_lat=client_lat, dropoff_lon=client_lon, 
@@ -1764,6 +1775,7 @@ async def create_partner_order(
         order_price=order_price, delivery_fee=delivery_fee,
         comment=full_comment, payment_type=payment_type,
         is_return_required=is_return_required,
+        estimated_ready_at=estimated_ready_at,
         status="pending"
     )
     db.add(job)
@@ -1805,7 +1817,8 @@ async def create_partner_order(
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
             "dist_to_rest": display_dist,
             "is_return": is_return_required,
-            "payment_type": payment_type
+            "payment_type": payment_type,
+            "estimated_ready_at": estimated_ready_at.isoformat() + "Z"
         }
         
         await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})

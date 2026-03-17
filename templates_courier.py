@@ -747,7 +747,32 @@ def get_courier_pwa_html(courier, config):
                 checkActiveJob();
                 fetchHistory();
                 fetchAnnouncements(); // Виклик системи оголошень
+                
+                // Запуск таймера щосекунди
+                setInterval(updateTimers, 1000);
             }});
+
+            // --- НОВА ФУНКЦІЯ: ТАЙМЕРИ ---
+            function updateTimers() {{
+                const now = Date.now();
+                document.querySelectorAll('.ready-timer').forEach(el => {{
+                    const targetTime = el.getAttribute('data-time');
+                    if(!targetTime) return;
+                    const target = new Date(targetTime).getTime();
+                    const diff = target - now;
+                    if(diff <= 0) {{
+                        el.innerHTML = '<i class="fa-solid fa-check-double"></i> Вже готово (або ось-ось)';
+                        el.style.color = 'var(--success)';
+                        el.style.borderColor = 'var(--success)';
+                    }} else {{
+                        const mins = Math.floor(diff / 60000);
+                        const secs = Math.floor((diff % 60000) / 1000);
+                        const secsStr = secs < 10 ? '0' + secs : secs;
+                        el.innerHTML = `<i class="fa-solid fa-fire-burner"></i> Готово через ${{mins}}:${{secsStr}}`;
+                        el.style.color = 'var(--warning)';
+                    }}
+                }});
+            }}
 
             function initMap() {{
                 map = L.map('map', {{ zoomControl: false }}).setView([48.4647, 35.0461], 13);
@@ -1059,10 +1084,16 @@ def get_courier_pwa_html(courier, config):
                     let html = '';
                     jobs.forEach(j => {{
                         const distStr = j.dist_to_rest !== null && j.dist_to_rest !== "?" ? `${{j.dist_to_rest}} км до закладу` : 'Відстань невідома';
+                        // НОВЕ: Віджет таймера
+                        const readyTimerHtml = j.estimated_ready_at ? `<div class="job-dist ready-timer" data-time="${{j.estimated_ready_at}}" style="background:rgba(250,204,21,0.1); margin-top:5px; font-weight:bold; color:var(--warning);"><i class="fa-solid fa-fire-burner"></i> Рахуємо...</div>` : '';
+                        
                         html += `
                             <div class="job-card" onclick='openJobDetail(${{JSON.stringify(j)}})'>
-                                <div class="job-header">
-                                    <div class="job-price">${{j.fee}} ₴</div>
+                                <div class="job-header" style="align-items:flex-start;">
+                                    <div>
+                                        <div class="job-price">${{j.fee}} ₴</div>
+                                        ${{readyTimerHtml}}
+                                    </div>
                                     <div class="job-dist"><i class="fa-solid fa-route"></i> ${{distStr}}</div>
                                 </div>
                                 <div class="job-route">
@@ -1081,6 +1112,7 @@ def get_courier_pwa_html(courier, config):
                         `;
                     }});
                     container.innerHTML = html;
+                    setTimeout(updateTimers, 50); // Викликаємо одразу після рендеру
                 }} catch(e) {{ console.error(e); }}
             }}
 
@@ -1088,12 +1120,15 @@ def get_courier_pwa_html(courier, config):
                 const body = document.getElementById('jobDetailBody');
                 const distStr = job.dist_to_rest !== null && job.dist_to_rest !== "?" ? `${{job.dist_to_rest}} км` : '?';
                 
+                // НОВЕ: Великий таймер для вікна деталей
+                const readyTimerBig = job.estimated_ready_at ? `<div class="ready-timer" data-time="${{job.estimated_ready_at}}" style="font-size:1.1rem; padding:10px; background:rgba(250,204,21,0.1); color:var(--warning); border-radius:8px; margin-bottom:15px; text-align:center; font-weight:bold;">Рахуємо...</div>` : '';
+                
                 body.innerHTML = `
                     <div style="text-align:center; margin-bottom: 20px;">
                         <div style="font-size: 2.5rem; font-weight: 800; color: var(--success);">${{job.fee}} ₴</div>
                         <div style="color: var(--text-muted);">Заробіток за доставку</div>
                     </div>
-                    
+                    ${{readyTimerBig}}
                     <div class="job-route" style="background: var(--panel); padding: 15px 15px 15px 35px; border-radius: 12px; margin-bottom:20px;">
                         <div class="route-point point-rest">
                             <i class="fa-solid fa-store"></i> 
@@ -1134,6 +1169,7 @@ def get_courier_pwa_html(courier, config):
                     </button>
                 `;
                 document.getElementById('jobDetailModal').classList.add('active');
+                setTimeout(updateTimers, 50); // Викликаємо одразу після рендеру
             }}
 
             function closeJobDetail() {{
@@ -1184,6 +1220,7 @@ def get_courier_pwa_html(courier, config):
                         renderActiveJob(data.job);
                         switchTab('active');
                         drawRoute(data.job);
+                        setTimeout(updateTimers, 50); // Викликаємо одразу після рендеру
                     }} else {{
                         activeJobId = null;
                         activeJobData = null;
@@ -1244,12 +1281,24 @@ def get_courier_pwa_html(courier, config):
                 let actionHtml = '';
 
                 if (stepNum === 1) {{
+                    // НОВЕ: Статус таймера в активному замовленні
+                    let readyStatusHtml = '';
+                    if(!job.is_ready && job.estimated_ready_at) {{
+                        readyStatusHtml = `
+                            <div class="ready-timer" data-time="${{job.estimated_ready_at}}" style="text-align:center; font-size:1.2rem; font-weight:bold; padding:15px; background:rgba(250,204,21,0.05); border:2px dashed var(--warning); color:var(--warning); border-radius:8px; margin-bottom:15px;">
+                                <i class="fa-solid fa-spinner fa-spin"></i> Розрахунок часу...
+                            </div>
+                        `;
+                    }}
+                    
                     // КРОК 1: Їдемо в заклад
                     actionHtml = `
                         <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px;">
                             <h3 style="margin:0 0 10px; color:var(--warning);"><i class="fa-solid fa-store"></i> ${{job.partner_name}}</h3>
                             <p style="margin:0 0 10px;"><i class="fa-solid fa-map-pin"></i> ${{job.partner_address}}</p>
                             <a href="tel:${{pPhone}}" class="btn outline" style="margin-bottom:15px; padding:10px;"><i class="fa-solid fa-phone"></i> Зателефонувати в заклад</a>
+                            
+                            ${{readyStatusHtml}}
                             
                             <div class="job-comment" style="margin-bottom:15px;">${{job.comment}}</div>
                             

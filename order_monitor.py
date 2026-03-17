@@ -157,6 +157,58 @@ async def monitor_stale_orders(ws_manager):
                         
                     logging.warning(f"Order #{job.id}: Sent STALE warning to Partner and Admin.")
 
+                # =======================================================
+                # СЦЕНАРІЙ 3: АВТОМАТИЧНЕ ПІДТВЕРДЖЕННЯ ГОТОВНОСТІ
+                # =======================================================
+                ready_query = select(DeliveryJob).options(
+                    joinedload(DeliveryJob.courier), joinedload(DeliveryJob.partner)
+                ).where(
+                    DeliveryJob.estimated_ready_at <= now,
+                    DeliveryJob.ready_at == None, # Тільки ті, де ще не натиснули Готово
+                    DeliveryJob.status.notin_(["delivered", "cancelled"])
+                )
+                jobs_to_ready = (await db.execute(ready_query)).scalars().all()
+                
+                for job in jobs_to_ready:
+                    job.ready_at = now # Автоматично маркуємо готовим
+                    
+                    # Сповіщаємо кур'єра (якщо вже призначений)
+                    if job.courier_id and job.courier:
+                        await ws_manager.notify_courier(job.courier_id, {
+                            "type": "job_ready", 
+                            "message": "🍳 Час приготування вийшов! Замовлення автоматично позначено як Готове."
+                        })
+                        if job.courier.telegram_chat_id:
+                            await bot_service.send_telegram_message(
+                                job.courier.telegram_chat_id, 
+                                f"🍳 <b>Замовлення #{job.id} готове!</b>\nЧас приготування (таймер) вийшов. Можете забирати пакунок."
+                            )
+                        if job.courier.fcm_token:
+                            try:
+                                push_msg = messaging.Message(
+                                    token=job.courier.fcm_token,
+                                    notification=messaging.Notification(
+                                        title="🍳 Замовлення готове!",
+                                        body="Час приготування вийшов. Можете забирати."
+                                    ),
+                                    data={"url": "/courier/app", "job_id": str(job.id)},
+                                    android=messaging.AndroidConfig(priority='high', ttl=0)
+                                )
+                                messaging.send(push_msg)
+                            except Exception:
+                                pass
+                                
+                    # Сповіщаємо заклад про автоматичну зміну
+                    if job.partner_id and job.partner:
+                        await ws_manager.notify_partner(job.partner_id, {
+                            "type": "order_update", "job_id": job.id, "status": job.status,
+                            "message": f"⏳ Час приготування ({job.id}) вийшов! Автоматично позначено як Готове."
+                        })
+                        
+                if jobs_to_ready:
+                    await db.commit()
+                    logging.info(f"Auto-marked {len(jobs_to_ready)} orders as ready.")
+
         except Exception as e:
             logging.error(f"❌ Помилка в order_monitor: {e}")
             await asyncio.sleep(60) # Если база упала, ждем минуту перед повтором

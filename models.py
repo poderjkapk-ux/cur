@@ -206,6 +206,7 @@ class DeliveryJob(Base):
     arrived_at_pickup_at = Column(DateTime, nullable=True) 
     
     ready_at = Column(DateTime, nullable=True)     # Коли замовлення готове
+    estimated_ready_at = Column(DateTime, nullable=True)
     picked_up_at = Column(DateTime, nullable=True) # Коли забрав
     delivered_at = Column(DateTime, nullable=True) # Коли доставив
     

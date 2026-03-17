@@ -983,10 +983,16 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 """
 
             if not is_ready:
+                t_est_ready = format_local_time(j.estimated_ready_at, tz_string, '%H:%M') if getattr(j, 'estimated_ready_at', None) else None
+                ready_info = f"<div style='color:#facc15; font-size:0.75rem; margin-bottom:5px; text-align:center;'>⏱ Автоматично о {t_est_ready}</div>" if t_est_ready else ""
+                
                 action_btn += f"""
-                <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність">
-                    <i class="fa-solid fa-utensils"></i> Готово
-                </button>
+                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                    {ready_info}
+                    <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність РАНІШЕ">
+                        <i class="fa-solid fa-utensils"></i> Готово
+                    </button>
+                </div>
                 """
             else:
                 action_btn += '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
@@ -1118,15 +1124,28 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         <label>Телефон клієнта</label>
                         <input type="tel" name="customer_phone" placeholder="0XX XXX XX XX" required>
                         
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-bottom:15px;">
                             <div>
-                                <label>Чек (грн)</label>
-                                <input type="number" step="0.01" name="order_price" id="order_price" value="0">
+                                <label>Чек клієнта (грн)</label>
+                                <input type="number" step="0.01" name="order_price" id="order_price" value="0" style="margin-bottom:0;">
                             </div>
                             <div>
                                 <label>Доставка (грн)</label>
-                                <input type="number" step="0.01" name="delivery_fee" id="delivery_fee" value="80" min="80">
+                                <input type="number" step="0.01" name="delivery_fee" id="delivery_fee" value="80" min="80" style="margin-bottom:0;">
                             </div>
+                        </div>
+                        
+                        <div style="margin-bottom: 15px;">
+                            <label>Час приготування (авто-готовність)</label>
+                            <select name="prep_time" style="margin-bottom:0; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); color:white; padding:12px 15px; border-radius:10px; width:100%;">
+                                <option value="5">5 хвилин</option>
+                                <option value="10">10 хвилин</option>
+                                <option value="15" selected>15 хвилин</option>
+                                <option value="20">20 хвилин</option>
+                                <option value="30">30 хвилин</option>
+                                <option value="45">45 хвилин</option>
+                                <option value="60">1 година</option>
+                            </select>
                         </div>
                         
                         <label>Коментар (Під'їзд, поверх, код)</label>
