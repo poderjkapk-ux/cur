@@ -1205,6 +1205,12 @@ def get_courier_pwa_html(courier, config):
                 if(job.server_status === 'picked_up') stepNum = 2;
                 if(job.server_status === 'returning') stepNum = 3;
 
+                // --- ДОБАВЛЕНО: Форматирование номеров (замена +380 или 380 на 0) ---
+                const formatPhone = (p) => p ? p.replace(/^\+?380/, '0') : '';
+                const pPhone = formatPhone(job.partner_phone);
+                const cPhone = formatPhone(job.customer_phone);
+                // -------------------------------------------------------------------
+
                 let progressHtml = `
                     <div style="display:flex; justify-content:space-between; margin-bottom:20px; position:relative;">
                         <div style="position:absolute; top:15px; left:10%; right:10%; height:3px; background:#334155; z-index:0;"></div>
@@ -1243,7 +1249,7 @@ def get_courier_pwa_html(courier, config):
                         <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px;">
                             <h3 style="margin:0 0 10px; color:var(--warning);"><i class="fa-solid fa-store"></i> ${{job.partner_name}}</h3>
                             <p style="margin:0 0 10px;"><i class="fa-solid fa-map-pin"></i> ${{job.partner_address}}</p>
-                            <a href="tel:${{job.partner_phone}}" class="btn outline" style="margin-bottom:15px; padding:10px;"><i class="fa-solid fa-phone"></i> Зателефонувати в заклад</a>
+                            <a href="tel:${{pPhone}}" class="btn outline" style="margin-bottom:15px; padding:10px;"><i class="fa-solid fa-phone"></i> Зателефонувати в заклад</a>
                             
                             <div class="job-comment" style="margin-bottom:15px;">${{job.comment}}</div>
                             
@@ -1266,7 +1272,7 @@ def get_courier_pwa_html(courier, config):
                         <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid var(--primary);">
                             <h3 style="margin:0 0 10px; color:var(--primary);"><i class="fa-solid fa-user"></i> Клієнт: ${{job.customer_name || 'Не вказано'}}</h3>
                             <p style="margin:0 0 10px; font-size:1.1rem;"><i class="fa-solid fa-map-pin"></i> <b>${{job.customer_address}}</b></p>
-                            <a href="tel:${{job.customer_phone}}" class="btn outline" style="margin-bottom:15px; padding:10px; border-color:var(--primary); color:var(--primary);"><i class="fa-solid fa-phone"></i> Зателефонувати клієнту</a>
+                            <a href="tel:${{cPhone}}" class="btn outline" style="margin-bottom:15px; padding:10px; border-color:var(--primary); color:var(--primary);"><i class="fa-solid fa-phone"></i> Зателефонувати клієнту</a>
                             
                             <div style="background:#0f172a; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center;">
                                 <div style="color:var(--text-muted); font-size:0.9rem;">До сплати:</div>
