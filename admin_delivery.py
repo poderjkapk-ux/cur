@@ -1324,6 +1324,7 @@ async def courier_control(
     
     if action == "ban":
         courier.is_active = False
+        courier.is_online = False
         msg = f"Кур'єр {courier.name} заблокований."
     elif action == "unban":
         courier.is_active = True
