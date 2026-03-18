@@ -30,6 +30,7 @@ import admin_delivery
 import bot_service
 import order_monitor
 import admin_reports
+import account_deletion
 
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, CourierTransaction,
@@ -169,6 +170,9 @@ app.include_router(admin_reports.router)
 
 # Підключення роутера адмінки доставки
 app.include_router(admin_delivery.router)
+
+# Подключение роутера удаления аккаунта (Google Play Data Safety)
+app.include_router(account_deletion.router)
 
 # ==============================================================================
 # ЗАХИСТ ДОКУМЕНТІВ: ПЕРЕХОПЛЮЄМО РОУТ ДО МОНТУВАННЯ СТАТИКИ

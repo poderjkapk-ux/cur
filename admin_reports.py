@@ -29,9 +29,11 @@ def format_local_time(utc_dt, tz_string='Europe/Kiev', fmt='%H:%M'):
 
 def get_reports_html(
     couriers, 
-    selected_date_str, 
+    start_date_str, 
+    end_date_str, 
     selected_courier_id, 
     total_orders, 
+    total_cancelled, 
     total_commission, 
     real_money, 
     bonus_money,
@@ -39,6 +41,11 @@ def get_reports_html(
     online_count,
     activity_data
 ):
+    # Підрахунок відсотків
+    total_resolved = total_orders + total_cancelled
+    success_percent = (total_orders / total_resolved * 100) if total_resolved > 0 else 0
+    cancel_percent = (total_cancelled / total_resolved * 100) if total_resolved > 0 else 0
+
     # Опції для випадаючого списку кур'єрів
     courier_options = '<option value="all">Всі кур\'єри (Загальний звіт)</option>'
     for c in couriers:
@@ -133,7 +140,7 @@ def get_reports_html(
         .filter-form {{ display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }}
         .filter-form .form-group {{ display: flex; flex-direction: column; gap: 5px; }}
         .filter-form label {{ font-size: 0.85rem; color: #94a3b8; font-weight: bold; }}
-        .filter-form input, .filter-form select {{ padding: 12px; border-radius: 8px; background: #334155; border: 1px solid #475569; color: white; min-width: 220px; font-size:1rem; }}
+        .filter-form input, .filter-form select {{ padding: 12px; border-radius: 8px; background: #334155; border: 1px solid #475569; color: white; min-width: 150px; font-size:1rem; }}
         
         /* СТИЛІ ДЛЯ ДЕТАЛЬНОЇ ТАБЛИЦІ */
         .details-table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95rem; }}
@@ -192,8 +199,12 @@ def get_reports_html(
             <div class="panel">
                 <form method="get" action="/admin/delivery/reports" class="filter-form">
                     <div class="form-group">
-                        <label>Оберіть дату:</label>
-                        <input type="date" name="date" value="{selected_date_str}" required>
+                        <label>З дати:</label>
+                        <input type="date" name="start_date" value="{start_date_str}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>По дату:</label>
+                        <input type="date" name="end_date" value="{end_date_str}" required>
                     </div>
                     <div class="form-group">
                         <label>Фільтр по кур'єру:</label>
@@ -231,6 +242,36 @@ def get_reports_html(
                 </div>
             </div>
 
+            <div class="panel" style="margin-top: 20px; border: 1px dashed #3b82f6;">
+                <h2 style="margin-top: 0; color: white; display: flex; align-items: center; gap: 10px;">
+                    <i class="fa-solid fa-chart-pie" style="color: #8b5cf6;"></i> Конверсія замовлень (Виконані / Скасовані)
+                </h2>
+                <div style="display: flex; gap: 30px; align-items: center; flex-wrap: wrap;">
+                    <div style="flex: 2; min-width: 250px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span style="color: #94a3b8; font-weight: bold;">Успішні ({total_orders})</span>
+                            <span style="color: #3b82f6; font-weight: bold;">{success_percent:.1f}%</span>
+                        </div>
+                        <div style="width: 100%; background: rgba(0,0,0,0.3); border-radius: 10px; height: 14px; overflow: hidden; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.05);">
+                            <div style="width: {success_percent}%; background: linear-gradient(90deg, #2563eb, #3b82f6); height: 100%; border-radius: 10px;"></div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span style="color: #94a3b8; font-weight: bold;">Скасовані ({total_cancelled})</span>
+                            <span style="color: #ef4444; font-weight: bold;">{cancel_percent:.1f}%</span>
+                        </div>
+                        <div style="width: 100%; background: rgba(0,0,0,0.3); border-radius: 10px; height: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05);">
+                            <div style="width: {cancel_percent}%; background: linear-gradient(90deg, #dc2626, #ef4444); height: 100%; border-radius: 10px;"></div>
+                        </div>
+                    </div>
+                    
+                    <div style="flex: 1; min-width: 150px; text-align: center; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
+                        <h3 style="margin: 0; color: #94a3b8; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.05em;">Всього оброблено</h3>
+                        <div style="font-size: 3rem; font-weight: bold; color: white; margin-top: 10px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">{total_resolved}</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="panel" style="margin-top: 20px;">
                 <h2 style="margin-top: 0; color: white; display: flex; align-items: center; gap: 10px;">
                     <i class="fa-solid fa-stopwatch" style="color: #3b82f6;"></i> Статистика по кур'єрам (за період)
@@ -260,34 +301,57 @@ def get_reports_html(
 @router.get("/admin/delivery/reports", response_class=HTMLResponse)
 async def admin_reports_page(
     request: Request,
-    date: str = None,
+    start_date: str = None,
+    end_date: str = None,
     courier_id: str = "all",
     user: str = Depends(check_admin_auth),
     db: AsyncSession = Depends(get_db)
 ):
-    # 1. Визначаємо дату для звіту (за замовчуванням - сьогодні)
-    if not date:
-        target_date = datetime.utcnow().date()
+    # 1. Визначаємо дати для звіту (за замовчуванням - сьогоднішня дата для обох)
+    today = datetime.utcnow().date()
+    
+    if not start_date:
+        target_start_date = today
     else:
         try:
-            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            target_start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
         except ValueError:
-            target_date = datetime.utcnow().date()
-            
-    selected_date_str = target_date.strftime("%Y-%m-%d")
+            target_start_date = today
 
-    # Створюємо межі дня (від 00:00:00 до 23:59:59)
-    start_of_day = datetime.combine(target_date, time.min)
-    end_of_day = datetime.combine(target_date, time.max)
+    if not end_date:
+        target_end_date = today
+    else:
+        try:
+            target_end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            target_end_date = today
+            
+    # Перестраховка: якщо обрана початкова дата більша за кінцеву - міняємо їх місцями
+    if target_start_date > target_end_date:
+        target_start_date, target_end_date = target_end_date, target_start_date
+        
+    start_date_str = target_start_date.strftime("%Y-%m-%d")
+    end_date_str = target_end_date.strftime("%Y-%m-%d")
+
+    # Створюємо межі періоду (від 00:00:00 початкової дати до 23:59:59 кінцевої дати)
+    start_of_day = datetime.combine(target_start_date, time.min)
+    end_of_day = datetime.combine(target_end_date, time.max)
 
     # 2. Отримуємо список усіх кур'єрів для фільтра
     couriers = (await db.execute(select(Courier).order_by(Courier.name))).scalars().all()
 
-    # 3. Формуємо базові умови для запитів (фільтр по даті)
+    # 3. Формуємо базові умови для запитів (фільтр по діапазону дат)
     job_conditions = [
         DeliveryJob.status == "delivered",
         DeliveryJob.delivered_at >= start_of_day,
         DeliveryJob.delivered_at <= end_of_day
+    ]
+    
+    # Умови для скасованих замовлень
+    cancel_conditions = [
+        DeliveryJob.status == "cancelled",
+        DeliveryJob.created_at >= start_of_day,
+        DeliveryJob.created_at <= end_of_day
     ]
     
     transaction_conditions = [
@@ -299,11 +363,16 @@ async def admin_reports_page(
     if courier_id and courier_id != "all" and courier_id.isdigit():
         c_id = int(courier_id)
         job_conditions.append(DeliveryJob.courier_id == c_id)
+        cancel_conditions.append(DeliveryJob.courier_id == c_id) 
         transaction_conditions.append(CourierTransaction.courier_id == c_id)
 
     # --- ЗАПИТ 1: Кількість успішних замовлень ---
     orders_query = select(func.count(DeliveryJob.id)).where(and_(*job_conditions))
     total_orders = (await db.execute(orders_query)).scalar() or 0
+
+    # --- ЗАПИТ: Кількість скасованих замовлень ---
+    cancelled_query = select(func.count(DeliveryJob.id)).where(and_(*cancel_conditions))
+    total_cancelled = (await db.execute(cancelled_query)).scalar() or 0
 
     # --- ЗАПИТ 2: Списано комісії (type == 'commission') ---
     comm_query = select(func.sum(CourierTransaction.amount)).where(
@@ -342,7 +411,7 @@ async def admin_reports_page(
     online_query = select(func.count(Courier.id)).where(Courier.is_online == True)
     online_count = (await db.execute(online_query)).scalar() or 0
 
-    # --- ЗАПИТ 7: Активність та середній час доставки (Нове) ---
+    # --- ЗАПИТ 7: Активність та середній час доставки ---
     jobs_query = select(DeliveryJob).where(and_(*job_conditions))
     jobs_for_stats = (await db.execute(jobs_query)).scalars().all()
     
@@ -390,9 +459,11 @@ async def admin_reports_page(
 
     return get_reports_html(
         couriers=couriers,
-        selected_date_str=selected_date_str,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str,
         selected_courier_id=courier_id,
         total_orders=total_orders,
+        total_cancelled=total_cancelled,
         total_commission=total_commission,
         real_money=real_money,
         bonus_money=bonus_money,
