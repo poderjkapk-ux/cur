@@ -35,13 +35,29 @@ def get_reports_html(
     total_commission, 
     real_money, 
     bonus_money,
-    transactions_data=None
+    transactions_data,
+    online_count,
+    activity_data
 ):
     # Опції для випадаючого списку кур'єрів
     courier_options = '<option value="all">Всі кур\'єри (Загальний звіт)</option>'
     for c in couriers:
         selected = "selected" if str(c.id) == str(selected_courier_id) else ""
         courier_options += f'<option value="{c.id}" {selected}>{c.name} (ID: {c.id})</option>'
+
+    # Формування таблиці активності кур'єрів
+    activity_rows = ""
+    if not activity_data:
+        activity_rows = "<tr><td colspan='3' style='text-align:center;'>Немає активності за обраний період.</td></tr>"
+    else:
+        for item in activity_data:
+            activity_rows += f"""
+            <tr>
+                <td data-label="Кур'єр"><b style="color:#f8fafc;">{item['name']}</b></td>
+                <td data-label="Виконано замовлень" style="text-align: center;">{item['orders']}</td>
+                <td data-label="Середній час виконання" style="text-align: center;"><b>{item['avg_time_min']} хв</b></td>
+            </tr>
+            """
 
     # Детальна таблиця транзакцій та таймінгів
     details_html = ""
@@ -189,9 +205,16 @@ def get_reports_html(
                 </form>
 
                 <div class="grid-4">
+                    <div class="stat-card" style="border-bottom: 3px solid #10b981;">
+                        <h3>🟢 Кур'єрів онлайн</h3>
+                        <div class="val" style="color: #10b981;">{online_count}</div>
+                        <small style="color:#94a3b8; font-size:0.75rem;">в даний момент</small>
+                    </div>
+
                     <div class="stat-card" style="border-bottom: 3px solid #3b82f6;">
                         <h3>📦 Успішних замовлень</h3>
                         <div class="val" style="color: #3b82f6;">{total_orders}</div>
+                        <small style="color:#94a3b8; font-size:0.75rem;">за обраний період</small>
                     </div>
                     
                     <div class="stat-card" style="border-bottom: 3px solid #facc15;">
@@ -205,12 +228,26 @@ def get_reports_html(
                         <div class="val" style="color: #4ade80;">{real_money:.2f} ₴</div>
                         <small style="color:#94a3b8; font-size:0.75rem;">реальні гроші в касу</small>
                     </div>
-                    
-                    <div class="stat-card" style="border-bottom: 3px solid #ec4899;">
-                        <h3>🎁 Внесено бонусів</h3>
-                        <div class="val" style="color: #ec4899;">{bonus_money:.2f} ₴</div>
-                        <small style="color:#94a3b8; font-size:0.75rem;">без фізичної готівки</small>
-                    </div>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top: 20px;">
+                <h2 style="margin-top: 0; color: white; display: flex; align-items: center; gap: 10px;">
+                    <i class="fa-solid fa-stopwatch" style="color: #3b82f6;"></i> Статистика по кур'єрам (за період)
+                </h2>
+                <div style="overflow-x:auto;">
+                    <table class="details-table">
+                        <thead>
+                            <tr>
+                                <th>Кур'єр</th>
+                                <th style="text-align: center;">Виконано замовлень</th>
+                                <th style="text-align: center;">Середній час виконання</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {activity_rows}
+                        </tbody>
+                    </table>
                 </div>
             </div>
             
@@ -287,8 +324,7 @@ async def admin_reports_page(
     )
     bonus_money = (await db.execute(bonus_money_query)).scalar() or 0.0
 
-    # --- ЗАПИТ 5: Деталізація транзакцій (НОВИЙ КОД) ---
-    # Зв'язуємо таблиці транзакцій, кур'єра та замовлення для виводу повної статистики
+    # --- ЗАПИТ 5: Деталізація транзакцій ---
     details_query = select(CourierTransaction, Courier, DeliveryJob).join(
         Courier, CourierTransaction.courier_id == Courier.id
     ).outerjoin(
@@ -302,6 +338,56 @@ async def admin_reports_page(
     details_result = await db.execute(details_query)
     transactions_data = details_result.all()
 
+    # --- ЗАПИТ 6: Скільки кур'єрів онлайн ЗАРАЗ ---
+    online_query = select(func.count(Courier.id)).where(Courier.is_online == True)
+    online_count = (await db.execute(online_query)).scalar() or 0
+
+    # --- ЗАПИТ 7: Активність та середній час доставки (Нове) ---
+    jobs_query = select(DeliveryJob).where(and_(*job_conditions))
+    jobs_for_stats = (await db.execute(jobs_query)).scalars().all()
+    
+    courier_dict = {c.id: c.name for c in couriers}
+    courier_stats = {}
+    
+    for job in jobs_for_stats:
+        cid = job.courier_id
+        if not cid:
+            continue
+            
+        if cid not in courier_stats:
+            courier_stats[cid] = {
+                'name': courier_dict.get(cid, f"Невідомий (ID: {cid})"),
+                'orders': 0,
+                'total_seconds': 0,
+                'timed_orders': 0
+            }
+            
+        courier_stats[cid]['orders'] += 1
+        
+        # Рахуємо час виконання: від 'accepted_at' до 'delivered_at'
+        if job.accepted_at and job.delivered_at:
+            delta = job.delivered_at - job.accepted_at
+            courier_stats[cid]['total_seconds'] += delta.total_seconds()
+            courier_stats[cid]['timed_orders'] += 1
+
+    # Формуємо список і рахуємо середнє
+    activity_data = []
+    for cid, data in courier_stats.items():
+        if data['timed_orders'] > 0:
+            avg_seconds = data['total_seconds'] / data['timed_orders']
+            avg_min = int(avg_seconds // 60)
+        else:
+            avg_min = 0
+            
+        activity_data.append({
+            'name': data['name'],
+            'orders': data['orders'],
+            'avg_time_min': avg_min
+        })
+
+    # Сортуємо по кількості замовлень (від більшого до меншого)
+    activity_data.sort(key=lambda x: x['orders'], reverse=True)
+
     return get_reports_html(
         couriers=couriers,
         selected_date_str=selected_date_str,
@@ -310,5 +396,7 @@ async def admin_reports_page(
         total_commission=total_commission,
         real_money=real_money,
         bonus_money=bonus_money,
-        transactions_data=transactions_data
+        transactions_data=transactions_data,
+        online_count=online_count,
+        activity_data=activity_data
     )
