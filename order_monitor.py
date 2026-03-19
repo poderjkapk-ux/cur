@@ -165,7 +165,7 @@ async def monitor_stale_orders(ws_manager):
                 ).where(
                     DeliveryJob.estimated_ready_at <= now,
                     DeliveryJob.ready_at == None, # Тільки ті, де ще не натиснули Готово
-                    DeliveryJob.status.notin_(["delivered", "cancelled"])
+                    DeliveryJob.status.in_(["pending", "assigned", "arrived_pickup"])
                 )
                 jobs_to_ready = (await db.execute(ready_query)).scalars().all()
                 

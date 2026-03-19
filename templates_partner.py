@@ -827,13 +827,22 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     active_jobs = [j for j in jobs if j.status not in ['delivered', 'cancelled']]
     history_jobs = [j for j in jobs if j.status in ['delivered', 'cancelled']]
     
+    
     # --- ТАБЛИЦА АКТИВНЫХ ЗАКАЗОВ ---
     active_rows = ""
     for j in active_jobs:
         track_btn = ""
-        cancel_btn = f'<button class="btn-mini danger" onclick="cancelOrder({j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i></button>'
+        
+        # Кнопка отмены скрыта по умолчанию
+        cancel_btn = "" 
+        
+        # Показываем кнопку отмены ТОЛЬКО если курьер еще не найден
+        if j.status == 'pending':
+            cancel_btn = f'<button class="btn-mini danger" onclick="cancelOrder({j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i></button>'
+            
         comm_btns = ""
         
+        # --- ИНИЦИАЛИЗАЦИЯ ПЕРЕМЕННЫХ ---
         status_color = "#ccc"
         status_text = j.status
         status_bg = "rgba(255,255,255,0.1)"
