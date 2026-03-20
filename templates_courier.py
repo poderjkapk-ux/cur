@@ -1087,8 +1087,11 @@ def get_courier_pwa_html(courier, config):
                         // НОВЕ: Віджет таймера
                         const readyTimerHtml = j.estimated_ready_at ? `<div class="job-dist ready-timer" data-time="${{j.estimated_ready_at}}" style="background:rgba(250,204,21,0.1); margin-top:5px; font-weight:bold; color:var(--warning);"><i class="fa-solid fa-fire-burner"></i> Рахуємо...</div>` : '';
                         
+                        // Екрануємо одинарні лапки для безпечної вставки в HTML-атрибут
+                        const safeJobJson = JSON.stringify(j).replace(/'/g, "&#39;");
+                        
                         html += `
-                            <div class="job-card" onclick='openJobDetail(${{JSON.stringify(j)}})'>
+                            <div class="job-card" onclick='openJobDetail(${{safeJobJson}})'>
                                 <div class="job-header" style="align-items:flex-start;">
                                     <div>
                                         <div class="job-price">${{j.fee}} ₴</div>
