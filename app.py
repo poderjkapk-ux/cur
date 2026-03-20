@@ -1055,7 +1055,7 @@ async def get_open_orders(
             "restaurant_name": job.partner.name,
             "restaurant_address": job.partner.address,
             "dropoff_address": job.dropoff_address,
-            "customer_name": job.customer_name, # <-- ДОДАНО ІМ'Я КЛІЄНТА В СТРІЧКУ ЗАМОВЛЕНЬ
+            "customer_name": job.customer_name,
             "fee": job.delivery_fee,
             "price": job.order_price,
             "dist_to_rest": dist_to_rest, 
@@ -1162,6 +1162,10 @@ async def courier_arrived_pickup(
     if not job or job.courier_id != courier.id:
         return JSONResponse({"status": "error"}, 404)
     
+    # ИСПРАВЛЕНИЕ: Проверяем, что курьер может нажать кнопку только если он "назначен"
+    if job.status != "assigned":
+        return JSONResponse({"status": "error", "message": "Неправильний статус замовлення для цієї дії"}, status_code=400)
+        
     job.status = "arrived_pickup"
     job.arrived_at_pickup_at = datetime.utcnow()
     await db.commit()
@@ -1193,13 +1197,15 @@ async def update_job_status(
     if not job or job.courier_id != courier.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
-    # ИСПРАВЛЕНО: Если это Выкуп, и ресторан НЕ нажал "Оплачено" (статус остался buyout),
-    # курьер обязан вернуть деньги в заклад (включается 3-й шаг).
+    # ИСПРАВЛЕНИЕ: Запрет перепрыгивания или изменения статусов для завершенных заказов
+    if job.status in ["delivered", "cancelled"] or (job.status == "returning" and status != "delivered"):
+        return JSONResponse({"status": "error", "message": "Замовлення вже завершено або скасовано"}, status_code=400)
+
     needs_return = job.is_return_required or job.payment_type == "buyout"
 
     if status == "delivered" and needs_return:
         job.status = "returning"
-        job.is_return_required = True # Принудительно включаем для фронтендов, чтобы появился 3-й шаг!
+        job.is_return_required = True 
         job.delivered_at = datetime.utcnow()
         msg_text = f"💰 Кур'єр {courier.name} віддав замовлення клієнту і везе гроші назад у заклад!"
         color = "#fb923c" 
@@ -1507,11 +1513,11 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
 @app.post("/api/partner/create_order_native")
 async def api_create_order_native(
     dropoff_address: str = Form(...), customer_phone: str = Form(...), 
-    customer_name: str = Form(""), # <-- ДОДАНО ІМ'Я КЛІЄНТА В НАТИВНЕ API
+    customer_name: str = Form(""), 
     order_price: float = Form(0.0), delivery_fee: float = Form(80.0), 
     comment: str = Form(""), payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
-    prep_time: int = Form(15), # <-- НОВИЙ ПАРАМЕТР (за замовчуванням 15 хв)
+    prep_time: int = Form(15), 
     db: AsyncSession = Depends(get_db), partner: DeliveryPartner = Depends(get_current_partner)
 ):
     if delivery_fee < 80.0:
@@ -1531,7 +1537,7 @@ async def api_create_order_native(
     job = DeliveryJob(
         partner_id=partner.id, dropoff_address=dropoff_address, 
         dropoff_lat=client_lat, dropoff_lon=client_lon, 
-        customer_phone=customer_phone, customer_name=customer_name, # <-- ЗБЕРІГАЄМО ІМ'Я КЛІЄНТА
+        customer_phone=customer_phone, customer_name=customer_name, 
         order_price=order_price, delivery_fee=delivery_fee,
         comment=full_comment, payment_type=payment_type,
         is_return_required=is_return_required, 
@@ -1572,7 +1578,7 @@ async def api_create_order_native(
 
         personal_data = {
             "id": job.id, "address": dropoff_address, 
-            "customer_name": job.customer_name, # <-- ДОДАНО В ПЕРСОНАЛЬНІ ДАНІ ДЛЯ WEBSOCKET (НАТИВКА)
+            "customer_name": job.customer_name, 
             "restaurant": partner.name, "restaurant_address": partner.address,
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
             "dist_to_rest": display_dist,
@@ -1748,7 +1754,7 @@ async def create_partner_order(
     comment: str = Form(""),
     payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
-    prep_time: int = Form(15), # <-- НОВИЙ ПАРАМЕТР (за замовчуванням 15 хв)
+    prep_time: int = Form(15), 
     lat: float = Form(None),
     lon: float = Form(None),
     db: AsyncSession = Depends(get_db), 
@@ -1816,7 +1822,7 @@ async def create_partner_order(
 
         personal_data = {
             "id": job.id, "address": dropoff_address, 
-            "customer_name": job.customer_name, # <-- ДОДАНО В ПЕРСОНАЛЬНІ ДАНІ ДЛЯ WEBSOCKET (WEB API)
+            "customer_name": job.customer_name, 
             "restaurant": partner.name, "restaurant_address": partner.address,
             "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
             "dist_to_rest": display_dist,
@@ -1848,6 +1854,10 @@ async def partner_order_ready(
     job = await db.get(DeliveryJob, job_id)
     if not job or job.partner_id != partner.id: return JSONResponse({"status": "error"}, 404)
     
+    # ИСПРАВЛЕНИЕ: Блокируем кнопку "Готово", если курьер уже забрал или заказ отменен
+    if job.status not in ["pending", "assigned", "arrived_pickup"]:
+         return JSONResponse({"status": "error", "message": "Замовлення вже забрано або скасовано"}, status_code=400)
+
     job.ready_at = datetime.utcnow()
     await db.commit()
     
@@ -1869,6 +1879,11 @@ async def partner_cancel_order(
 ):
     job = await db.get(DeliveryJob, job_id)
     if not job or job.partner_id != partner.id: return JSONResponse({"status": "error"}, 404)
+    
+    # ИСПРАВЛЕНИЕ: Ресторан может отменить заказ, только пока не найден курьер
+    if job.status != "pending":
+        return JSONResponse({"status": "error", "message": "Замовлення вже прийнято кур'єром або завершено, скасування неможливе."}, status_code=400)
+
     job.status = "cancelled"
     await db.commit()
     return JSONResponse({"status": "ok"})
