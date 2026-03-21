@@ -1621,6 +1621,8 @@ async def partner_login_page(message: str = ""):
 async def partner_register_page(message: str = ""):
     return templates_partner.get_partner_auth_html(is_register=True, message=message)
 
+# --- app.py ---
+
 @app.post("/partner/register")
 async def partner_register_action(
     name: str = Form(...), address: str = Form(...), email: str = Form(...),
@@ -1628,11 +1630,13 @@ async def partner_register_action(
 ):
     verif = await db.get(PendingVerification, verification_token)
     if not verif or verif.status != "verified":
-         return templates_partner.get_partner_auth_html(is_register=True, message="Телефон не підтверджено.")
+         # ДОДАНО HTMLResponse
+         return HTMLResponse(content=templates_partner.get_partner_auth_html(is_register=True, message="Телефон не підтверджено."))
     
     existing = await db.execute(select(DeliveryPartner).where(DeliveryPartner.email == email))
     if existing.scalar():
-        return templates_partner.get_partner_auth_html(is_register=True, message="Email вже зайнятий")
+         # ДОДАНО HTMLResponse
+        return HTMLResponse(content=templates_partner.get_partner_auth_html(is_register=True, message="Email вже зайнятий"))
     
     db.add(DeliveryPartner(
         name=name, phone=verif.phone, address=address, email=email, 
@@ -1650,7 +1654,8 @@ async def partner_login_action(
     partner = result.scalar_one_or_none()
     
     if not partner or not auth.verify_password(password, partner.hashed_password):
-        return templates_partner.get_partner_auth_html(is_register=False, message="Невірний логін/пароль")
+        # ДОДАНО HTMLResponse
+        return HTMLResponse(content=templates_partner.get_partner_auth_html(is_register=False, message="Невірний логін/пароль"))
     
     token = auth.create_access_token(data={"sub": f"partner:{partner.id}"})
     resp = RedirectResponse("/partner/dashboard", status_code=303)
