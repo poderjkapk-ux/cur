@@ -1242,21 +1242,29 @@ async def update_job_status(
             status_text = "delivered"
             color = "#bbf7d0"
             
-            # --- НОВЕ: СПИСАННЯ КОМІСІЇ ---
-            commission_rate = getattr(courier, 'commission_rate', 10.0)
-            commission_amount = (job.delivery_fee * commission_rate) / 100.0
+            # --- ВИПРАВЛЕННЯ: ЗАПОБІГАННЯ ПОДВІЙНОМУ СПИСАННЮ КОМІСІЇ ---
+            existing_tx = await db.execute(
+                select(CourierTransaction).where(
+                    CourierTransaction.job_id == job.id,
+                    CourierTransaction.type == "commission"
+                )
+            )
             
-            if not hasattr(courier, 'balance'):
-                courier.balance = 0.0
-            courier.balance -= commission_amount
-            
-            db.add(CourierTransaction(
-                courier_id=courier.id,
-                amount=-commission_amount,
-                type="commission",
-                description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
-                job_id=job.id
-            ))
+            if not existing_tx.scalar_one_or_none():
+                commission_rate = getattr(courier, 'commission_rate', 10.0)
+                commission_amount = (job.delivery_fee * commission_rate) / 100.0
+                
+                if not hasattr(courier, 'balance'):
+                    courier.balance = 0.0
+                courier.balance -= commission_amount
+                
+                db.add(CourierTransaction(
+                    courier_id=courier.id,
+                    amount=-commission_amount,
+                    type="commission",
+                    description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
+                    job_id=job.id
+                ))
             # -------------------------------
             
         else:
@@ -1723,18 +1731,27 @@ async def partner_confirm_return(
     if job.courier_id:
         courier = await db.get(Courier, job.courier_id)
         if courier:
-            commission_rate = getattr(courier, 'commission_rate', 10.0)
-            commission_amount = (job.delivery_fee * commission_rate) / 100.0
+            # Перевіряємо, чи не зняли комісію раніше
+            existing_tx = await db.execute(
+                select(CourierTransaction).where(
+                    CourierTransaction.job_id == job.id,
+                    CourierTransaction.type == "commission"
+                )
+            )
             
-            if not hasattr(courier, 'balance'):
-                courier.balance = 0.0
-            courier.balance -= commission_amount
-            
-            db.add(CourierTransaction(
-                courier_id=courier.id, amount=-commission_amount,
-                type="commission", description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
-                job_id=job.id
-            ))
+            if not existing_tx.scalar_one_or_none():
+                commission_rate = getattr(courier, 'commission_rate', 10.0)
+                commission_amount = (job.delivery_fee * commission_rate) / 100.0
+                
+                if not hasattr(courier, 'balance'):
+                    courier.balance = 0.0
+                courier.balance -= commission_amount
+                
+                db.add(CourierTransaction(
+                    courier_id=courier.id, amount=-commission_amount,
+                    type="commission", description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
+                    job_id=job.id
+                ))
             
         await manager.notify_courier(job.courier_id, {
             "type": "job_update", 
