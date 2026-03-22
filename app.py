@@ -31,6 +31,7 @@ import bot_service
 import order_monitor
 import admin_reports
 import account_deletion
+import admin_rating_reports
 
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, CourierTransaction,
@@ -170,9 +171,12 @@ app.include_router(admin_reports.router)
 
 # Підключення роутера адмінки доставки
 app.include_router(admin_delivery.router)
+app.include_router(admin_rating_reports.router)
 
 # Подключение роутера удаления аккаунта (Google Play Data Safety)
 app.include_router(account_deletion.router)
+
+
 
 # ==============================================================================
 # ЗАХИСТ ДОКУМЕНТІВ: ПЕРЕХОПЛЮЄМО РОУТ ДО МОНТУВАННЯ СТАТИКИ
@@ -375,8 +379,8 @@ async def handle_instance_creation(
         if (await db.execute(select(Instance).where(Instance.subdomain == sub))).scalar():
             return JSONResponse(status_code=400, content={"detail": "Цей піддомен вже зайнятий. Виберіть інше ім'я."})
         
-        # Виклик provision для створення контейнера та БД
-        res = provision.create_new_client_instance(c_name, ROOT_DOMAIN, client_bot_token, admin_bot_token, admin_chat_id)
+        # Виклик provision для створення контейнера та БД (ВЫЗЫВАЕТСЯ ЧЕРЕЗ AWAIT)
+        res = await provision.create_new_client_instance(c_name, ROOT_DOMAIN, client_bot_token, admin_bot_token, admin_chat_id)
         
         # Збереження в нашу БД
         db.add(Instance(
@@ -403,11 +407,12 @@ async def handle_instance_control(
     if not instance or instance.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Instance not found")
     
+    # ДОБАВЛЕНЫ AWAIT ДЛЯ PROVISION
     if action == "stop":
-        provision.stop_instance(instance.container_name)
+        await provision.stop_instance(instance.container_name)
         instance.status = "suspended"
     elif action == "start":
-        provision.start_instance(instance.container_name)
+        await provision.start_instance(instance.container_name)
         instance.status = "active"
         
     await db.commit()
@@ -421,8 +426,8 @@ async def handle_instance_delete(
     if not instance or instance.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Instance not found")
     
-    # Повне видалення
-    if provision.delete_client_instance(instance.container_name):
+    # Повне видалення (ДОБАВЛЕН AWAIT ДЛЯ PROVISION)
+    if await provision.delete_client_instance(instance.container_name):
         await db.delete(instance)
         await db.commit()
         return JSONResponse({"message": "Проект успішно видалено."})
@@ -448,16 +453,17 @@ async def admin_control(
     if not instance:
         return RedirectResponse("/admin?message=Instance not found", status_code=302)
 
+    # ДОБАВЛЕНЫ AWAIT ДЛЯ ВСЕХ ФУНКЦИЙ PROVISION
     if action == "stop":
-        provision.stop_instance(instance.container_name)
+        await provision.stop_instance(instance.container_name)
         instance.status = "suspended"
     elif action == "start":
-        provision.start_instance(instance.container_name)
+        await provision.start_instance(instance.container_name)
         instance.status = "active"
     elif action == "update":
-        provision.recreate_container_with_new_code(instance.container_name)
+        await provision.recreate_container_with_new_code(instance.container_name)
     elif action == "force_delete":
-        provision.delete_client_instance(instance.container_name)
+        await provision.delete_client_instance(instance.container_name)
         await db.delete(instance)
     
     await db.commit()
@@ -1408,18 +1414,32 @@ async def send_chat_message(
 # --- PARTNER LOGIC ---
 
 async def get_current_partner(request: Request, db: AsyncSession = Depends(get_db)):
+    # 1. Try cookie
     token = request.cookies.get("partner_token")
-    if not token: raise HTTPException(status_code=401)
+    
+    # 2. Try Authorization header
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+
+    if not token: 
+        raise HTTPException(status_code=401)
+        
     try:
         payload = auth.jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
         sub = payload.get("sub")
-        if not sub or not sub.startswith("partner:"): raise HTTPException(status_code=401)
+        if not sub or not sub.startswith("partner:"): 
+            raise HTTPException(status_code=401)
         partner_id = int(sub.split(":")[1])
         partner = await db.get(DeliveryPartner, partner_id)
-        if not partner: raise HTTPException(status_code=401)
-        if hasattr(partner, 'is_active') and not partner.is_active: raise HTTPException(status_code=403, detail="Banned")
+        if not partner: 
+            raise HTTPException(status_code=401)
+        if hasattr(partner, 'is_active') and not partner.is_active: 
+            raise HTTPException(status_code=403, detail="Banned")
         return partner
-    except Exception: raise HTTPException(status_code=401)
+    except Exception: 
+        raise HTTPException(status_code=401)
 
 # ==========================================
 # НАТИВНІ JSON API ДЛЯ ANDROID ДОДАТКА ПАРТНЕРА
