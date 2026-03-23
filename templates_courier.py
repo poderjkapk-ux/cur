@@ -358,6 +358,11 @@ def get_courier_register_page():
     """
 
 def get_courier_pwa_html(courier, config):
+    # Форматируем номер телефона курьера для профиля
+    c_phone = courier.phone.replace('+', '').strip() if courier.phone else ""
+    if c_phone.startswith("380") and len(c_phone) == 12:
+        c_phone = "0" + c_phone[3:]
+
     PWA_STYLES = """
     :root {
         --bg: #0f172a; --panel: #1e293b; --text: #f8fafc;
@@ -625,7 +630,7 @@ def get_courier_pwa_html(courier, config):
                 <div class="profile-header">
                     <div class="avatar-circle"><i class="fa-solid fa-user-ninja"></i></div>
                     <h2 style="margin:0;">{courier.name}</h2>
-                    <p style="color:var(--text-muted); margin:5px 0 0;">{courier.phone}</p>
+                    <p style="color:var(--text-muted); margin:5px 0 0;">{c_phone}</p>
                     <div style="margin-top:10px; font-weight:bold; color:var(--warning);">
                         <i class="fa-solid fa-star"></i> {getattr(courier, 'avg_rating', 5.0):.1f} ({getattr(courier, 'rating_count', 0)} відгуків)
                     </div>
@@ -1245,8 +1250,15 @@ def get_courier_pwa_html(courier, config):
                 if(job.server_status === 'picked_up') stepNum = 2;
                 if(job.server_status === 'returning') stepNum = 3;
 
-                // --- ДОБАВЛЕНО: Форматирование номеров (замена +380 или 380 на 0) ---
-                const formatPhone = (p) => p ? p.replace(/^\+?380/, '0') : '';
+                // --- ФОРМАТУВАННЯ ТЕЛЕФОНУ (залишаємо тільки 0... для звонилки) ---
+                const formatPhone = (p) => {{
+                    if (!p) return '';
+                    let clean = p.replace(/\+/g, '').trim();
+                    if (clean.startsWith('380') && clean.length === 12) {{
+                        return '0' + clean.substring(3);
+                    }}
+                    return clean;
+                }};
                 const pPhone = formatPhone(job.partner_phone);
                 const cPhone = formatPhone(job.customer_phone);
                 // -------------------------------------------------------------------

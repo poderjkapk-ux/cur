@@ -930,7 +930,13 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             <div style="font-size:0.75rem; color:#facc15;">{rating_display} <span style="color:#64748b">({rating_cnt})</span></div>
             """
             
-            phone_link = f"tel:{j.courier.phone}"
+            # --- ФОРМАТИРОВАНИЕ ТЕЛЕФОНА КУРЬЕРА ---
+            c_phone = j.courier.phone.replace('+', '').strip() if j.courier.phone else ""
+            if c_phone.startswith("380") and len(c_phone) == 12:
+                c_phone = "0" + c_phone[3:]
+            # ----------------------------------------
+
+            phone_link = f"tel:{c_phone}"
             comm_btns = f"""
             <a href="{phone_link}" class="btn-mini success" title="Зателефонувати"><i class="fa-solid fa-phone"></i></a>
             <button class="btn-mini info" onclick="openChat({j.id}, 'Кур\\'єр {j.courier.name}')" title="Чат"><i class="fa-solid fa-comments"></i></button>
