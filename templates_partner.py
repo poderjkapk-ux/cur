@@ -290,12 +290,42 @@ def get_partner_auth_html(is_register=False, message=""):
         """
 
     extra_fields = ""
+    reset_btn = ""
+    reset_script = ""
+
     if is_register:
         extra_fields = f"""
         <input type="text" name="name" placeholder="Назва закладу" required>
         {phone_input}
         {verify_block}
         {map_html} """
+    else:
+        reset_btn = '<button type="button" onclick="resetPartnerPassword()" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.85rem; padding: 0; text-decoration: underline; margin-top: 15px; display: block; width: 100%; text-align: center;">Забули пароль? Відновити через Telegram</button>'
+        reset_script = """
+        <script>
+            async function resetPartnerPassword() {
+                const email = prompt("Введіть ваш Email для відновлення:");
+                if(!email) return;
+                
+                try {
+                    const fd = new FormData();
+                    fd.append('email', email.trim());
+                    const res = await fetch('/api/partner/reset_password', {
+                        method: 'POST', body: fd
+                    });
+                    const data = await res.json();
+                    
+                    if(res.ok) {
+                        alert("Успіх! Новий пароль відправлено у ваш Telegram-бот.");
+                    } else {
+                        alert("Помилка: " + (data.detail || "Невідома помилка"));
+                    }
+                } catch(e) {
+                    alert("Помилка з'єднання з сервером.");
+                }
+            }
+        </script>
+        """
     
     toggle_link = f'<a href="/partner/login">Вже є акаунт? Увійти</a>' if is_register else f'<a href="/partner/register">Стати партнером</a>'
 
@@ -310,11 +340,13 @@ def get_partner_auth_html(is_register=False, message=""):
             <input type="password" name="password" placeholder="Пароль" required>
             <button type="submit" class="btn" id="submit-btn" {submit_attr}>Продовжити</button>
         </form>
+        {reset_btn}
         {f"<div class='message error'>{message}</div>" if message else ""}
         {toggle_link}
         <a href="/" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 15px;">← На головну</a>
     </div>
     {verify_script}
+    {reset_script}
     </body></html>
     """
 

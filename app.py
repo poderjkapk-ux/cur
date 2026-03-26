@@ -944,22 +944,20 @@ async def get_firebase_sw(db: AsyncSession = Depends(get_db)):
 
 # --- WEBSOCKET COURIER ---
 @app.websocket("/ws/courier")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    db: AsyncSession = Depends(get_db)
-):
+async def websocket_endpoint(websocket: WebSocket):
     token = websocket.cookies.get("courier_token")
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    try:
-        courier = await auth.get_current_courier(token, db)
-    except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
+    async with async_session_maker() as db:
+        try:
+            courier = await auth.get_current_courier(token, db)
+            courier_id = courier.id 
+        except Exception:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
 
-    courier_id = courier.id 
     await manager.connect_courier(websocket, courier_id)
     
     try:
@@ -974,25 +972,27 @@ async def websocket_endpoint(
                     lat = float(data.get("lat"))
                     lon = float(data.get("lon"))
                     
-                    courier.lat = lat
-                    courier.lon = lon
-                    courier.last_seen = datetime.utcnow()
-                    await db.commit() 
-                    
-                    logging.info(f"Courier {courier_id} updated location via WS: {lat}, {lon}")
-                    
-                    db.expire_all() 
-                    
-                    active_job_check = await db.execute(
-                        select(DeliveryJob.id)
-                        .where(DeliveryJob.courier_id == courier_id) 
-                        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
-                    )
-                    
-                    if active_job_check.scalar():
-                         pass
-                    else:
-                        pass 
+                    async with async_session_maker() as session:
+                        db_courier = await session.get(Courier, courier_id)
+                        
+                        if db_courier:
+                            db_courier.lat = lat
+                            db_courier.lon = lon
+                            db_courier.last_seen = datetime.utcnow()
+                            await session.commit() 
+                            
+                            logging.info(f"Courier {courier_id} updated location via WS: {lat}, {lon}")
+                            
+                            active_job_check = await session.execute(
+                                select(DeliveryJob.id)
+                                .where(DeliveryJob.courier_id == courier_id) 
+                                .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+                            )
+                            
+                            if active_job_check.scalar():
+                                 pass
+                            else:
+                                pass 
                 
                 elif data == "ping":
                     await websocket.send_text("pong")
@@ -2053,7 +2053,7 @@ async def track_courier_location(
     })
 
 @app.websocket("/ws/partner")
-async def websocket_partner_endpoint(websocket: WebSocket, db: AsyncSession = Depends(get_db)):
+async def websocket_partner_endpoint(websocket: WebSocket):
     token = websocket.cookies.get("partner_token")
     if not token: 
         await websocket.close()

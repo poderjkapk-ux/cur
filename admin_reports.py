@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
+from sqlalchemy.orm import joinedload
 
-from models import get_db, Courier, DeliveryJob, CourierTransaction
+from models import get_db, Courier, DeliveryJob, CourierTransaction, DeliveryPartner
 from auth import check_admin_auth
 from templates_saas import GLOBAL_STYLES
 from crud_settings import get_setting
@@ -39,7 +40,8 @@ def get_reports_html(
     bonus_money,
     transactions_data,
     online_count,
-    activity_data
+    activity_data,
+    unassigned_cancelled_jobs=None
 ):
     # Підрахунок відсотків
     total_resolved = total_orders + total_cancelled
@@ -65,6 +67,50 @@ def get_reports_html(
                 <td data-label="Середній час виконання" style="text-align: center;"><b>{item['avg_time_min']} хв</b></td>
             </tr>
             """
+
+    # --- НОВИЙ БЛОК: СКАСОВАНІ ЗАМОВЛЕННЯ БЕЗ КУР'ЄРА ---
+    cancelled_html = ""
+    if unassigned_cancelled_jobs:
+        c_rows = ""
+        for job in unassigned_cancelled_jobs:
+            t_created = format_local_time(job.created_at, fmt='%d.%m %H:%M')
+            partner_name = job.partner.name if getattr(job, 'partner', None) else "Невідомо"
+            
+            c_rows += f"""
+            <tr style="background: rgba(239, 68, 68, 0.15);">
+                <td data-label="Створено">{t_created}</td>
+                <td data-label="Замовлення"><b style="color:#f8fafc;">#{job.id}</b></td>
+                <td data-label="Заклад"><b>{partner_name}</b></td>
+                <td data-label="Адреса">{job.dropoff_address}</td>
+                <td data-label="Ціна">{job.order_price} ₴ (+{job.delivery_fee} ₴ доставка)</td>
+                <td data-label="Статус"><span class="badge" style="background: #ef4444; color: white;">Не знайдено кур'єра</span></td>
+            </tr>
+            """
+            
+        cancelled_html = f"""
+        <div class="panel" style="margin-top: 20px; border: 1px dashed #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);">
+            <h2 style="margin-top: 0; color: #fca5a5; display: flex; align-items: center; gap: 10px;">
+                <i class="fa-solid fa-triangle-exclamation" style="color: #ef4444;"></i> Втрачені замовлення (Скасовані, бо не знайдено кур'єра)
+            </h2>
+            <div style="overflow-x:auto;">
+                <table class="details-table">
+                    <thead>
+                        <tr>
+                            <th>Час</th>
+                            <th>ID</th>
+                            <th>Заклад</th>
+                            <th>Адреса доставки</th>
+                            <th>Сума</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {c_rows}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        """
 
     # Детальна таблиця транзакцій та таймінгів
     details_html = ""
@@ -292,6 +338,7 @@ def get_reports_html(
                 </div>
             </div>
             
+            {cancelled_html}
             {details_html}
             
         </div>
@@ -457,6 +504,22 @@ async def admin_reports_page(
     # Сортуємо по кількості замовлень (від більшого до меншого)
     activity_data.sort(key=lambda x: x['orders'], reverse=True)
 
+    # --- НОВИЙ ЗАПИТ: Отримуємо скасовані замовлення, де не було призначено кур'єра ---
+    unassigned_cancelled_jobs = []
+    # Показуємо їх тільки якщо дивимося загальний звіт по всім кур'єрам
+    if courier_id == "all" or not courier_id:
+        unassigned_cancel_conditions = [
+            DeliveryJob.status == "cancelled",
+            DeliveryJob.courier_id.is_(None), # Кур'єр не був призначений
+            DeliveryJob.created_at >= start_of_day,
+            DeliveryJob.created_at <= end_of_day
+        ]
+        unassigned_query = select(DeliveryJob).options(
+            joinedload(DeliveryJob.partner)
+        ).where(and_(*unassigned_cancel_conditions)).order_by(DeliveryJob.created_at.desc())
+        
+        unassigned_cancelled_jobs = (await db.execute(unassigned_query)).scalars().all()
+
     return get_reports_html(
         couriers=couriers,
         start_date_str=start_date_str,
@@ -469,5 +532,6 @@ async def admin_reports_page(
         bonus_money=bonus_money,
         transactions_data=transactions_data,
         online_count=online_count,
-        activity_data=activity_data
+        activity_data=activity_data,
+        unassigned_cancelled_jobs=unassigned_cancelled_jobs
     )
