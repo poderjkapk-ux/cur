@@ -905,7 +905,8 @@ def get_settings_page_html(config, message=""):
 
 def get_landing_page_html(config: Dict[str, str]):
     """
-    ПРОФЕСІЙНА ГОЛОВНА СТОРІНКА (SEO, MOBILE-FIRST, PREMIUM UI, БЕЗ ТОЧНИХ ЦИФР)
+    ПРОФЕСІЙНА ГОЛОВНА СТОРІНКА (SEO, MOBILE-FIRST, PREMIUM UI)
+    Оптимізовано під ключі: "курьерская служба Одесса", "автоматизация доставки еды Украина"
     """
     
     custom_button_html = ""
@@ -924,14 +925,14 @@ def get_landing_page_html(config: Dict[str, str]):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
-    <title>Restify Delivery | Інноваційна платформа для ресторанів та кур'єрів</title>
-    <meta name="description" content="Restify Delivery - надійна логістична B2B платформа. Швидкий пошук верифікованих кур'єрів для ресторанів та вигідна робота з гнучким графіком для кур'єрів. Без абонплат!">
-    <meta name="keywords" content="доставка їжі, кур'єри, для ресторанів, логістика, B2B доставка, Restify, робота кур'єром, виклик кур'єра, кур'єрська служба">
+    <title>Restify Delivery | Автоматизація доставки їжі Україна | Кур'єрська служба Одеса</title>
+    <meta name="description" content="Restify Delivery — сучасна автоматизация доставки еды (Украина) та надійна курьерская служба (Одесса). Швидкий пошук верифікованих кур'єрів для B2B сектору. Без абонплат!">
+    <meta name="keywords" content="курьерская служба Одесса, автоматизация доставки еды Украина, кур'єрська служба Одеса, автоматизація доставки їжі Україна, доставка їжі, кур'єри, для ресторанів, логістика, B2B доставка, Restify">
     <meta name="author" content="Restify">
     
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Restify Delivery | Платформа для ресторанів та кур'єрів">
-    <meta property="og:description" content="Прозора та надійна система доставки без абонплати за софт. Викликайте кур'єрів в один клік!">
+    <meta property="og:title" content="Restify Delivery | Кур'єрська служба Одеса та Автоматизація доставки Україна">
+    <meta property="og:description" content="Прозора та надійна система доставки без абонплати за софт. Інноваційна автоматизація доставки їжі для ресторанів та виклик кур'єрів в один клік!">
     <meta property="og:url" content="https://restify.site/">
     <meta property="og:image" content="/static/og-image.jpg">
     
@@ -944,6 +945,7 @@ def get_landing_page_html(config: Dict[str, str]):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <style>
+        /* ... (УВЕСЬ ВАШ ПОПЕРЕДНІЙ CSS КОД ЗАЛИШАЄТЬСЯ БЕЗ ЗМІН) ... */
         :root {{ 
             --bg: #07090e; 
             --bg-card: rgba(22, 31, 51, 0.4);
@@ -966,7 +968,6 @@ def get_landing_page_html(config: Dict[str, str]):
         
         .container {{ max-width: 1240px; margin: 0 auto; padding: 0 24px; }}
         
-        /* --- ANIMATIONS --- */
         @keyframes fadeInUp {{ from {{ opacity: 0; transform: translateY(30px); }} to {{ opacity: 1; transform: translateY(0); }} }}
         @keyframes float {{ 0% {{ transform: translateY(0px); }} 50% {{ transform: translateY(-15px); }} 100% {{ transform: translateY(0px); }} }}
         @keyframes pulseGlow {{ 0% {{ box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }} 70% {{ box-shadow: 0 0 0 20px rgba(99, 102, 241, 0); }} 100% {{ box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }} }}
@@ -976,7 +977,6 @@ def get_landing_page_html(config: Dict[str, str]):
         .delay-2 {{ animation-delay: 0.2s; }}
         .delay-3 {{ animation-delay: 0.3s; }}
 
-        /* --- NAVBAR --- */
         .navbar {{ position: fixed; top: 0; left: 0; width: 100%; padding: 18px 0; background: rgba(7, 9, 14, 0.7); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid var(--border); z-index: 1000; transition: 0.3s; }}
         .nav-inner {{ display: flex; justify-content: space-between; align-items: center; }}
         .logo {{ font-weight: 800; font-size: 1.6rem; display: flex; align-items: center; gap: 10px; color: white; letter-spacing: -0.5px; }}
@@ -995,7 +995,6 @@ def get_landing_page_html(config: Dict[str, str]):
         .btn-accent {{ background: var(--accent); color: #0f172a; box-shadow: 0 8px 25px rgba(250, 204, 21, 0.3); }}
         .btn-accent:hover {{ background: var(--accent-hover); transform: translateY(-3px); box-shadow: 0 12px 30px rgba(250, 204, 21, 0.5); }}
 
-        /* --- MOBILE MENU --- */
         .mobile-menu-btn {{ display: none; color: white; font-size: 1.8rem; background: none; border: none; cursor: pointer; z-index: 1001; transition: 0.3s; }}
         .mobile-overlay {{ position: fixed; top: 0; left: 0; width: 100%; height: 100vh; background: rgba(7, 9, 14, 0.98); z-index: 999; display: flex; flex-direction: column; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: 0.4s ease; backdrop-filter: blur(15px); }}
         .mobile-overlay.active {{ opacity: 1; pointer-events: all; }}
@@ -1003,7 +1002,6 @@ def get_landing_page_html(config: Dict[str, str]):
         .mobile-nav-link {{ font-size: 1.5rem; font-weight: 700; color: white; }}
         .mobile-auth-btns {{ display: flex; flex-direction: column; gap: 15px; width: 80%; max-width: 300px; }}
 
-        /* --- HERO SECTION --- */
         .hero {{ padding: 200px 0 140px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
         .hero-bg-glow1 {{ position: absolute; top: 10%; left: 10%; width: 50vw; height: 50vw; background: var(--primary); filter: blur(150px); opacity: 0.15; border-radius: 50%; z-index: -1; animation: float 10s infinite alternate; }}
         .hero-bg-glow2 {{ position: absolute; bottom: 10%; right: 10%; width: 40vw; height: 40vw; background: var(--accent); filter: blur(150px); opacity: 0.1; border-radius: 50%; z-index: -1; animation: float 12s infinite alternate-reverse; }}
@@ -1017,7 +1015,6 @@ def get_landing_page_html(config: Dict[str, str]):
         
         .hero-actions {{ display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }}
         
-        /* --- STATS BAR --- */
         .stats-wrapper {{ margin-top: -80px; position: relative; z-index: 10; padding: 0 20px; }}
         .stats-bar {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; background: var(--bg-glass); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); border: 1px solid var(--border); padding: 40px; border-radius: 30px; box-shadow: 0 25px 50px rgba(0,0,0,0.4); }}
         .stat-item {{ text-align: center; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; }}
@@ -1026,7 +1023,6 @@ def get_landing_page_html(config: Dict[str, str]):
         .stat-val {{ font-size: 1.6rem; font-weight: 800; color: white; margin-bottom: 5px; line-height: 1.2; }}
         .stat-label {{ color: var(--text-muted); font-size: 0.95rem; font-weight: 500; }}
 
-        /* --- SPLIT SECTION (RESTAURANTS & COURIERS) --- */
         .section {{ padding: 140px 0; }}
         .section-header {{ text-align: center; margin-bottom: 70px; }}
         .section-header h2 {{ font-size: clamp(2rem, 4vw, 3rem); color: white; margin-bottom: 20px; font-weight: 800; letter-spacing: -0.5px; }}
@@ -1054,7 +1050,6 @@ def get_landing_page_html(config: Dict[str, str]):
         
         .service-actions {{ margin-top: 50px; display: flex; gap: 16px; flex-wrap: wrap; }}
 
-        /* --- HOW IT WORKS --- */
         .process-section {{ background: linear-gradient(to bottom, transparent, rgba(22, 31, 51, 0.3), transparent); padding: 120px 0; border-top: 1px solid rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.03); }}
         .process-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; position: relative; margin-top: 60px; }}
         .process-step {{ text-align: center; position: relative; z-index: 2; padding: 20px; }}
@@ -1065,7 +1060,6 @@ def get_landing_page_html(config: Dict[str, str]):
         
         .process-grid::before {{ content: ''; position: absolute; top: 70px; left: 12%; right: 12%; height: 2px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1) 20%, rgba(255,255,255,0.1) 80%, transparent); z-index: 1; }}
 
-        /* --- FOOTER --- */
         footer {{ background: #050609; padding: 80px 0 40px; text-align: center; position: relative; }}
         .footer-logo {{ font-size: 2rem; font-weight: 800; color: white; display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 25px; }}
         .footer-logo i {{ color: var(--accent); }}
@@ -1074,7 +1068,6 @@ def get_landing_page_html(config: Dict[str, str]):
         .footer-links a:hover {{ color: white; transform: translateY(-2px); }}
         .footer-bottom {{ border-top: 1px solid rgba(255,255,255,0.05); padding-top: 30px; color: #475569; font-size: 0.95rem; font-weight: 500; display: flex; flex-direction: column; align-items: center; gap: 10px; }}
 
-        /* --- MODAL --- */
         .modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 20px; }}
         .modal-overlay.visible {{ display: flex; animation: fadeIn 0.3s ease; }}
         .modal-content {{ background: rgba(15, 20, 35, 0.95); padding: 50px 40px; border-radius: 30px; max-width: 650px; width: 100%; color: #fff; position: relative; border: 1px solid var(--border); box-shadow: 0 30px 60px rgba(0,0,0,0.6); animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); max-height: 90vh; overflow-y: auto; }}
@@ -1084,7 +1077,6 @@ def get_landing_page_html(config: Dict[str, str]):
         @keyframes fadeIn {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
         @keyframes slideUp {{ from {{ transform: translateY(50px) scale(0.95); opacity: 0; }} to {{ transform: translateY(0) scale(1); opacity: 1; }} }}
 
-        /* --- RESPONSIVE / MOBILE OPTIMIZATION --- */
         @media (max-width: 1024px) {{
             .stats-bar {{ grid-template-columns: repeat(2, 1fr); padding: 30px; gap: 30px; border-radius: 24px; }}
             .stat-item:nth-child(2) {{ border-right: none; }}
@@ -1183,8 +1175,8 @@ def get_landing_page_html(config: Dict[str, str]):
         <div class="hero-bg-glow2"></div>
         <div class="container hero-content">
             <div class="hero-badge animate-up"><i class="fa-solid fa-rocket"></i> B2B Платформа для HoReCa</div>
-            <h1 class="animate-up delay-1"><span>Новий стандарт доставки</span> <br>для вашого бізнесу</h1>
-            <p class="animate-up delay-2">Прозора та сучасна система логістики. Викликайте верифікованих кур'єрів в один клік, керуйте викупами, відстежуйте замовлення на Live-карті та спілкуйтеся у вбудованому чаті.</p>
+            <h1 class="animate-up delay-1"><span>Автоматизація доставки їжі</span> <br>для вашого бізнесу в Україні</h1>
+            <p class="animate-up delay-2">Прозора та сучасна система логістики. Надійна кур'єрська служба (Одеса) та комплексна платформа для B2B сектору. Викликайте верифікованих кур'єрів в один клік, керуйте викупами та відстежуйте замовлення на Live-карті.</p>
             
             <div class="hero-actions animate-up delay-3">
                 <a href="/partner/register" class="btn btn-primary" style="padding: 18px 36px; font-size: 1.1rem;">Підключити заклад</a>
@@ -1221,7 +1213,7 @@ def get_landing_page_html(config: Dict[str, str]):
     <section class="section" id="restaurants">
         <div class="container">
             <div class="section-header">
-                <h2>Ідеальне рішення для всіх</h2>
+                <h2>Ідеальне рішення для доставки в Україні</h2>
                 <p>Ми об'єднуємо кращі заклади міста з надійними кур'єрами на єдиній сучасній платформі.</p>
             </div>
             
@@ -1229,7 +1221,7 @@ def get_landing_page_html(config: Dict[str, str]):
                 <div class="service-card sc-partner">
                     <div class="sc-icon-wrapper"><i class="fa-solid fa-store"></i></div>
                     <h3>Ресторанам та Кафе</h3>
-                    <p>Повний контроль над логістикою без утримання власного штату. Створюйте заявки, мотивуйте кур'єрів преміями та відстежуйте кожну доставку онлайн.</p>
+                    <p>Повний контроль над логістикою без утримання власного штату. Сучасна автоматизація доставки їжі: створюйте заявки, мотивуйте кур'єрів преміями та відстежуйте кожну доставку онлайн.</p>
                     
                     <ul class="feature-list">
                         <li><i class="fa-solid fa-bolt"></i> <div><b>Миттєвий виклик & Boost:</b> Створення заявки за секунди. Функція Boost для термінового пошуку вільного кур'єра.</div></li>
@@ -1246,7 +1238,7 @@ def get_landing_page_html(config: Dict[str, str]):
                 <div class="service-card sc-courier" id="couriers">
                     <div class="sc-icon-wrapper"><i class="fa-solid fa-helmet-safety"></i></div>
                     <h3>Професійним Кур'єрам</h3>
-                    <p>Доставляйте замовлення з кращих закладів міста через зручний PWA додаток. Чесний розподіл замовлень, безпека та високий стабільний дохід.</p>
+                    <p>Доставляйте замовлення з кращих закладів міста через зручний PWA додаток. Наша кур'єрська служба (Одеса) гарантує чесний розподіл замовлень, безпеку та високий стабільний дохід.</p>
                     
                     <ul class="feature-list">
                         <li><i class="fa-solid fa-shield-halved"></i> <div><b>Безпека & Довіра:</b> Легка реєстрація через Telegram з обов'язковою верифікацією гарантує безпеку всіх учасників.</div></li>
@@ -1302,7 +1294,7 @@ def get_landing_page_html(config: Dict[str, str]):
     		<img src="/static/logo.png" alt="Restify" style="height: 45px; width: auto; object-fit: contain;"> 
     			Restify Delivery
 		</div>
-            <p style="color: var(--text-muted); margin-bottom: 35px; font-size: 1.05rem; max-width: 500px; margin-inline: auto;">Ваш надійний технологічний партнер у сфері ресторанної логістики.</p>
+            <p style="color: var(--text-muted); margin-bottom: 35px; font-size: 1.05rem; max-width: 500px; margin-inline: auto;">Ваш надійний технологічний партнер. Автоматизація доставки їжі (Україна) та кур'єрська служба (Одеса).</p>
             
             <div class="footer-links">
                 <a href="/partner/register">Підключити ресторан</a>
