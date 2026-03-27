@@ -142,7 +142,7 @@ def get_courier_register_page():
             .input-group input:focus { outline: none; border-color: var(--primary); }
             
             .file-upload {
-                display: block; /* ИСПРАВЛЕНИЕ: Делаем элемент блочным, чтобы не рвался интерфейс */
+                display: block; 
                 border: 2px dashed #334155; border-radius: 8px; padding: 20px;
                 text-align: center; cursor: pointer; margin-bottom: 15px;
                 background: rgba(0,0,0,0.2); transition: 0.3s;
@@ -490,7 +490,7 @@ def get_courier_pwa_html(courier, config):
     .point-rest i { color: var(--warning); }
     .point-client i { color: var(--primary); }
     
-    .job-comment { background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--warning); padding: 8px; font-size: 0.85rem; margin-bottom: 10px; border-radius: 0 4px 4px 0;}
+    .job-comment { background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--warning); padding: 8px; font-size: 0.85rem; margin-bottom: 10px; border-radius: 0 4px 4px 0; word-break: break-word; }
     
     .btn {
         width: 100%; padding: 14px; background: var(--primary); color: white;
@@ -529,7 +529,7 @@ def get_courier_pwa_html(courier, config):
     /* ЧАТ */
     #chat-container { display: flex; flex-direction: column; height: 300px; background: #0f172a; border-radius: 8px; margin-bottom: 15px; overflow: hidden; border: 1px solid var(--border);}
     #chat-messages { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-    .msg-bubble { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.9rem; position: relative; }
+    .msg-bubble { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.9rem; position: relative; word-break: break-word; }
     .msg-courier { align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px; }
     .msg-partner { align-self: flex-start; background: #334155; color: white; border-bottom-left-radius: 2px; }
     .msg-time { font-size: 0.65rem; opacity: 0.7; display: block; text-align: right; margin-top: 4px; }
@@ -680,6 +680,24 @@ def get_courier_pwa_html(courier, config):
         <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
         <script>
+            // --- Словники та Захист від XSS ---
+            const paymentLabels = {{
+                "prepaid": "✅ Оплачено",
+                "cash": "💵 Готівка",
+                "buyout": "💰 Викуп",
+                "buyout_paid": "✅ Оплачено (Викуп)"
+            }};
+
+            function escapeHTML(str) {{
+                if (str === null || str === undefined) return '';
+                return String(str)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }}
+
             // --- FIREBASE PUSH ---
             const firebaseConfig = {{
                 apiKey: "{config.get('firebase_api_key', '')}",
@@ -751,7 +769,7 @@ def get_courier_pwa_html(courier, config):
                 startLocationTracking();
                 checkActiveJob();
                 fetchHistory();
-                fetchAnnouncements(); // Виклик системи оголошень
+                fetchAnnouncements(); 
                 
                 // Запуск таймера щосекунди
                 setInterval(updateTimers, 1000);
@@ -829,7 +847,6 @@ def get_courier_pwa_html(courier, config):
             }}
 
             function updateFabPosition(sheetHeightStr) {{
-                // Якщо sheetHeightStr = '40vh', робимо calc(40vh + 15px)
                 fab.style.bottom = `calc(${{sheetHeightStr}} + 15px)`;
             }}
 
@@ -840,7 +857,6 @@ def get_courier_pwa_html(courier, config):
                 document.getElementById('tab-' + tabId).classList.add('active');
                 document.getElementById('content-' + tabId).classList.add('active');
                 
-                // Розгортаємо sheet трохи більше при перемиканні
                 sheet.style.height = '60vh';
                 updateFabPosition('60vh');
 
@@ -860,7 +876,6 @@ def get_courier_pwa_html(courier, config):
             }}
 
             function renderAnnouncement(ann) {{
-                // Уникаємо дублювання
                 if(document.getElementById(`ann-${{ann.id}}`)) return;
                 
                 const container = document.getElementById('announcements-wrapper');
@@ -875,8 +890,8 @@ def get_courier_pwa_html(courier, config):
                 
                 div.innerHTML = `
                     <div class="ann-content">
-                        <div class="ann-title"><i class="fa-solid ${{icon}}"></i> ${{ann.title}}</div>
-                        <div class="ann-text">${{ann.message}}</div>
+                        <div class="ann-title"><i class="fa-solid ${{icon}}"></i> ${{escapeHTML(ann.title)}}</div>
+                        <div class="ann-text">${{escapeHTML(ann.message)}}</div>
                     </div>
                     <button class="ann-close" onclick="dismissAnnouncement(${{ann.id}})">
                         <i class="fa-solid fa-xmark"></i>
@@ -893,7 +908,6 @@ def get_courier_pwa_html(courier, config):
                     el.style.transition = '0.3s';
                     setTimeout(() => el.remove(), 300);
                 }}
-                // Відправляємо на сервер
                 try {{
                     await fetch(`/api/courier/announcements/${{id}}/dismiss`, {{ method: 'POST' }});
                 }} catch(e) {{}}
@@ -910,7 +924,6 @@ def get_courier_pwa_html(courier, config):
                     console.log("WS Connected");
                     if(currentLat && currentLon) sendLocationToWS();
                     
-                    // При відновленні з'єднання одразу підтягуємо нові замовлення
                     if(isOnline && !activeJobId) {{
                         fetchOpenOrders();
                     }} else if (activeJobId) {{
@@ -981,8 +994,12 @@ def get_courier_pwa_html(courier, config):
             document.addEventListener("visibilitychange", () => {{
                 if (document.visibilityState === "visible") {{
                     console.log("App became visible, updating data...");
-                    if(isOnline && !activeJobId) fetchOpenOrders();
-                    if(activeJobId) checkActiveJob();
+                    if (!ws || ws.readyState !== WebSocket.OPEN) {{
+                        initWebSocket();
+                    }} else {{
+                        if(isOnline && !activeJobId) fetchOpenOrders();
+                        if(activeJobId) checkActiveJob();
+                    }}
                 }}
             }});
 
@@ -1009,7 +1026,12 @@ def get_courier_pwa_html(courier, config):
                             sendLocationToWS();
                             updateLocationViaHttp();
                         }},
-                        (err) => console.error(err),
+                        (err) => {{
+                            console.error(err);
+                            if (err.code === err.PERMISSION_DENIED) {{
+                                alert("Будь ласка, увімкніть GPS та надайте дозвіл на геолокацію. Без цього ви не зможете отримувати замовлення!");
+                            }}
+                        }},
                         {{ enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }}
                     );
                 }}
@@ -1088,11 +1110,15 @@ def get_courier_pwa_html(courier, config):
                     
                     let html = '';
                     jobs.forEach(j => {{
+                        const safeComment = escapeHTML(j.comment);
+                        const safeRestName = escapeHTML(j.restaurant_name);
+                        const safeRestAddress = escapeHTML(j.restaurant_address);
+                        const safeCustName = escapeHTML(j.customer_name || 'Клієнт');
+                        const safeCustAddress = escapeHTML(j.dropoff_address);
+
                         const distStr = j.dist_to_rest !== null && j.dist_to_rest !== "?" ? `${{j.dist_to_rest}} км до закладу` : 'Відстань невідома';
-                        // НОВЕ: Віджет таймера
-                        const readyTimerHtml = j.estimated_ready_at ? `<div class="job-dist ready-timer" data-time="${{j.estimated_ready_at}}" style="background:rgba(250,204,21,0.1); margin-top:5px; font-weight:bold; color:var(--warning);"><i class="fa-solid fa-fire-burner"></i> Рахуємо...</div>` : '';
+                        const readyTimerHtml = (!j.is_ready && j.estimated_ready_at) ? `<div class="job-dist ready-timer" data-time="${{j.estimated_ready_at}}" style="background:rgba(250,204,21,0.1); margin-top:5px; font-weight:bold; color:var(--warning);"><i class="fa-solid fa-fire-burner"></i> Рахуємо...</div>` : '';
                         
-                        // Екрануємо одинарні лапки для безпечної вставки в HTML-атрибут
                         const safeJobJson = JSON.stringify(j).replace(/'/g, "&#39;");
                         
                         html += `
@@ -1106,30 +1132,36 @@ def get_courier_pwa_html(courier, config):
                                 </div>
                                 <div class="job-route">
                                     <div class="route-point point-rest">
-                                        <i class="fa-solid fa-store"></i> <b>${{j.restaurant_name}}</b><br>
-                                        <small>${{j.restaurant_address}}</small>
+                                        <i class="fa-solid fa-store"></i> <b>${{safeRestName}}</b><br>
+                                        <small>${{safeRestAddress}}</small>
                                     </div>
                                     <div class="route-point point-client">
-                                        <i class="fa-solid fa-location-dot"></i> <b>${{j.customer_name || 'Клієнт'}}</b><br>
-                                        <small>${{j.dropoff_address}}</small>
+                                        <i class="fa-solid fa-location-dot"></i> <b>${{safeCustName}}</b><br>
+                                        <small>${{safeCustAddress}}</small>
                                     </div>
                                 </div>
-                                <div class="job-comment">${{j.comment}}</div>
+                                <div class="job-comment">${{safeComment}}</div>
                                 <button class="btn outline" style="padding: 8px;">Деталі</button>
                             </div>
                         `;
                     }});
                     container.innerHTML = html;
-                    setTimeout(updateTimers, 50); // Викликаємо одразу після рендеру
+                    setTimeout(updateTimers, 50);
                 }} catch(e) {{ console.error(e); }}
             }}
 
             function openJobDetail(job) {{
                 const body = document.getElementById('jobDetailBody');
-                const distStr = job.dist_to_rest !== null && job.dist_to_rest !== "?" ? `${{job.dist_to_rest}} км` : '?';
                 
-                // НОВЕ: Великий таймер для вікна деталей
-                const readyTimerBig = job.estimated_ready_at ? `<div class="ready-timer" data-time="${{job.estimated_ready_at}}" style="font-size:1.1rem; padding:10px; background:rgba(250,204,21,0.1); color:var(--warning); border-radius:8px; margin-bottom:15px; text-align:center; font-weight:bold;">Рахуємо...</div>` : '';
+                const safeComment = escapeHTML(job.comment);
+                const safeRestName = escapeHTML(job.restaurant_name);
+                const safeRestAddress = escapeHTML(job.restaurant_address);
+                const safeCustName = escapeHTML(job.customer_name || 'Клієнт');
+                const safeCustAddress = escapeHTML(job.dropoff_address);
+                const paymentStr = paymentLabels[job.payment_type] || job.payment_type;
+
+                const distStr = job.dist_to_rest !== null && job.dist_to_rest !== "?" ? `${{job.dist_to_rest}} км` : '?';
+                const readyTimerBig = (!job.is_ready && job.estimated_ready_at) ? `<div class="ready-timer" data-time="${{job.estimated_ready_at}}" style="font-size:1.1rem; padding:10px; background:rgba(250,204,21,0.1); color:var(--warning); border-radius:8px; margin-bottom:15px; text-align:center; font-weight:bold;">Рахуємо...</div>` : '';
                 
                 body.innerHTML = `
                     <div style="text-align:center; margin-bottom: 20px;">
@@ -1141,26 +1173,26 @@ def get_courier_pwa_html(courier, config):
                         <div class="route-point point-rest">
                             <i class="fa-solid fa-store"></i> 
                             <div style="color:var(--text-muted); font-size:0.8rem;">Забрати (${{distStr}})</div>
-                            <b>${{job.restaurant_name}}</b><br>
-                            ${{job.restaurant_address}}
+                            <b>${{safeRestName}}</b><br>
+                            ${{safeRestAddress}}
                         </div>
                         <div class="route-point point-client">
                             <i class="fa-solid fa-location-dot"></i>
                             <div style="color:var(--text-muted); font-size:0.8rem;">Доставити (${{job.dist_trip}} км)</div>
-                            <b>${{job.customer_name || 'Клієнт'}}</b><br>
-                            ${{job.dropoff_address}}
+                            <b>${{safeCustName}}</b><br>
+                            ${{safeCustAddress}}
                         </div>
                     </div>
                     
                     <div class="job-comment" style="font-size: 1rem; padding: 15px;">
                         <i class="fa-solid fa-circle-info"></i> <b>Коментар:</b><br>
-                        ${{job.comment}}
+                        ${{safeComment}}
                     </div>
                     
                     <div style="background: var(--panel); padding: 15px; border-radius: 12px; margin-bottom:20px;">
                         <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
                             <span style="color:var(--text-muted);">Тип оплати:</span>
-                            <b>${{job.payment_type}}</b>
+                            <b>${{paymentStr}}</b>
                         </div>
                         <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
                             <span style="color:var(--text-muted);">Сума чеку:</span>
@@ -1177,7 +1209,7 @@ def get_courier_pwa_html(courier, config):
                     </button>
                 `;
                 document.getElementById('jobDetailModal').classList.add('active');
-                setTimeout(updateTimers, 50); // Викликаємо одразу після рендеру
+                setTimeout(updateTimers, 50);
             }}
 
             function closeJobDetail() {{
@@ -1222,13 +1254,13 @@ def get_courier_pwa_html(courier, config):
                     
                     if(data.active) {{
                         activeJobId = data.job.id;
-                        activeJobData = data.job; // Зберігаємо повні дані
+                        activeJobData = data.job;
                         tabActive.style.display = 'block';
                         tabOrders.style.display = 'none';
                         renderActiveJob(data.job);
                         switchTab('active');
                         drawRoute(data.job);
-                        setTimeout(updateTimers, 50); // Викликаємо одразу після рендеру
+                        setTimeout(updateTimers, 50);
                     }} else {{
                         activeJobId = null;
                         activeJobData = null;
@@ -1245,12 +1277,17 @@ def get_courier_pwa_html(courier, config):
             function renderActiveJob(job) {{
                 const container = document.getElementById('activeJobContent');
                 
-                // Визначаємо КРОК
+                const paymentStr = paymentLabels[job.payment_type] || job.payment_type;
+                const safeComment = escapeHTML(job.comment);
+                const safeRestName = escapeHTML(job.partner_name);
+                const safeRestAddress = escapeHTML(job.partner_address);
+                const safeCustName = escapeHTML(job.customer_name || 'Не вказано');
+                const safeCustAddress = escapeHTML(job.customer_address);
+
                 let stepNum = 1;
                 if(job.server_status === 'picked_up') stepNum = 2;
                 if(job.server_status === 'returning') stepNum = 3;
 
-                // --- ФОРМАТУВАННЯ ТЕЛЕФОНУ (залишаємо тільки 0... для звонилки) ---
                 const formatPhone = (p) => {{
                     if (!p) return '';
                     let clean = p.replace(/\+/g, '').trim();
@@ -1261,7 +1298,6 @@ def get_courier_pwa_html(courier, config):
                 }};
                 const pPhone = formatPhone(job.partner_phone);
                 const cPhone = formatPhone(job.customer_phone);
-                // -------------------------------------------------------------------
 
                 let progressHtml = `
                     <div style="display:flex; justify-content:space-between; margin-bottom:20px; position:relative;">
@@ -1292,11 +1328,16 @@ def get_courier_pwa_html(courier, config):
                 }}
                 progressHtml += `</div>`;
 
-                // КОНТЕНТ ЗАЛЕЖНО ВІД КРОКУ ТА СТАТУСУ
                 let actionHtml = '';
+                
+                let feeInfoHtml = `
+                    <div style="background: rgba(34, 197, 94, 0.1); border: 1px solid var(--success); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center;">
+                        <span style="color: var(--text-muted); font-size: 0.9rem;">Ваш заробіток за доставку:</span><br>
+                        <b style="color: var(--success); font-size: 1.5rem;">${{job.delivery_fee}} ₴</b>
+                    </div>
+                `;
 
                 if (stepNum === 1) {{
-                    // НОВЕ: Статус таймера в активному замовленні
                     let readyStatusHtml = '';
                     if(!job.is_ready && job.estimated_ready_at) {{
                         readyStatusHtml = `
@@ -1306,16 +1347,15 @@ def get_courier_pwa_html(courier, config):
                         `;
                     }}
                     
-                    // КРОК 1: Їдемо в заклад
                     actionHtml = `
                         <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px;">
-                            <h3 style="margin:0 0 10px; color:var(--warning);"><i class="fa-solid fa-store"></i> ${{job.partner_name}}</h3>
-                            <p style="margin:0 0 10px;"><i class="fa-solid fa-map-pin"></i> ${{job.partner_address}}</p>
+                            <h3 style="margin:0 0 10px; color:var(--warning);"><i class="fa-solid fa-store"></i> ${{safeRestName}}</h3>
+                            <p style="margin:0 0 10px;"><i class="fa-solid fa-map-pin"></i> ${{safeRestAddress}}</p>
                             <a href="tel:${{pPhone}}" class="btn outline" style="margin-bottom:15px; padding:10px;"><i class="fa-solid fa-phone"></i> Зателефонувати в заклад</a>
                             
                             ${{readyStatusHtml}}
                             
-                            <div class="job-comment" style="margin-bottom:15px;">${{job.comment}}</div>
+                            <div class="job-comment" style="margin-bottom:15px;">${{safeComment}}</div>
                             
                             ${{job.server_status === 'assigned' ? `
                                 <button class="btn" onclick="updateStatus('arrived_pickup', this)"><i class="fa-solid fa-location-crosshairs"></i> Я на місці (Заклад)</button>
@@ -1331,17 +1371,16 @@ def get_courier_pwa_html(courier, config):
                     `;
                 }} 
                 else if (stepNum === 2) {{
-                    // КРОК 2: Їдемо до клієнта
                     actionHtml = `
                         <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid var(--primary);">
-                            <h3 style="margin:0 0 10px; color:var(--primary);"><i class="fa-solid fa-user"></i> Клієнт: ${{job.customer_name || 'Не вказано'}}</h3>
-                            <p style="margin:0 0 10px; font-size:1.1rem;"><i class="fa-solid fa-map-pin"></i> <b>${{job.customer_address}}</b></p>
+                            <h3 style="margin:0 0 10px; color:var(--primary);"><i class="fa-solid fa-user"></i> Клієнт: ${{safeCustName}}</h3>
+                            <p style="margin:0 0 10px; font-size:1.1rem;"><i class="fa-solid fa-map-pin"></i> <b>${{safeCustAddress}}</b></p>
                             <a href="tel:${{cPhone}}" class="btn outline" style="margin-bottom:15px; padding:10px; border-color:var(--primary); color:var(--primary);"><i class="fa-solid fa-phone"></i> Зателефонувати клієнту</a>
                             
                             <div style="background:#0f172a; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center;">
                                 <div style="color:var(--text-muted); font-size:0.9rem;">До сплати:</div>
                                 <div style="font-size:2rem; font-weight:800; color:var(--success); margin:5px 0;">${{job.order_price}} ₴</div>
-                                <div style="font-size:0.9rem;">Спосіб: <b>${{job.payment_type}}</b></div>
+                                <div style="font-size:0.9rem;">Спосіб: <b>${{paymentStr}}</b></div>
                             </div>
 
                             <button class="btn success" style="height:60px; font-size:1.2rem;" onclick="updateStatus('delivered', this)"><i class="fa-solid fa-check-double"></i> Замовлення доставлено</button>
@@ -1349,14 +1388,13 @@ def get_courier_pwa_html(courier, config):
                     `;
                 }}
                 else if (stepNum === 3) {{
-                    // КРОК 3: Повернення
                     actionHtml = `
                         <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px; border:2px solid var(--warning);">
                             <div style="text-align:center; margin-bottom:15px;">
                                 <i class="fa-solid fa-sack-dollar" style="font-size:3rem; color:var(--warning); margin-bottom:10px;"></i>
                                 <h3 style="margin:0; color:var(--warning);">Поверніть готівку в заклад!</h3>
                             </div>
-                            <p style="text-align:center; margin-bottom:20px;">Поверніться в <b>${{job.partner_name}}</b> (${{job.partner_address}}) та віддайте гроші адміністратору.</p>
+                            <p style="text-align:center; margin-bottom:20px;">Поверніться в <b>${{safeRestName}}</b> (${{safeRestAddress}}) та віддайте гроші адміністратору.</p>
                             
                             <div style="text-align:center; padding:15px; background:rgba(255,255,255,0.05); border-radius:8px; color:var(--text-muted);">
                                 <i class="fa-solid fa-spinner fa-spin" style="font-size:1.5rem; margin-bottom:10px;"></i><br>
@@ -1367,14 +1405,13 @@ def get_courier_pwa_html(courier, config):
                     `;
                 }}
 
-                // Кнопка Чату (доступна завжди, крім 3 кроку)
                 const chatBtn = stepNum < 3 ? `
                     <button class="btn outline" style="margin-bottom:15px;" onclick="openChat()">
                         <i class="fa-solid fa-comments"></i> Чат із закладом
                     </button>
                 ` : '';
 
-                container.innerHTML = progressHtml + chatBtn + actionHtml;
+                container.innerHTML = progressHtml + feeInfoHtml + chatBtn + actionHtml;
             }}
 
             async function updateStatus(status, btnEl) {{
@@ -1396,7 +1433,7 @@ def get_courier_pwa_html(courier, config):
                     checkActiveJob();
                 }} catch(e) {{
                     alert("Помилка оновлення статусу");
-                    checkActiveJob(); // Відновлюємо
+                    checkActiveJob(); 
                 }}
             }}
 
@@ -1404,16 +1441,12 @@ def get_courier_pwa_html(courier, config):
             function drawRoute(job) {{
                 clearMap();
                 
-                // Якщо є координати закладу та клієнта (в ідеалі брати з API, але тут використовуємо те, що є)
-                // Оскільки в /active_job ми віддаємо customer_lat/lon, а partner_lat/lon немає напряму, 
-                // просто малюємо клієнта, якщо є.
-                
                 const bounds = [];
                 if(currentLat && currentLon) bounds.push([currentLat, currentLon]);
 
                 if(job.customer_lat && job.customer_lon) {{
                     clientMarker = L.marker([job.customer_lat, job.customer_lon], {{icon: clientIcon}}).addTo(map);
-                    clientMarker.bindPopup(`<b>Клієнт</b><br>${{job.customer_address}}`);
+                    clientMarker.bindPopup(`<b>Клієнт</b><br>${{escapeHTML(job.customer_address)}}`);
                     bounds.push([job.customer_lat, job.customer_lon]);
                 }}
 
@@ -1449,8 +1482,8 @@ def get_courier_pwa_html(courier, config):
                         html += `
                             <div class="history-item">
                                 <div>
-                                    <b>${{h.date}}</b><br>
-                                    <small>${{h.address}}</small>
+                                    <b>${{escapeHTML(h.date)}}</b><br>
+                                    <small>${{escapeHTML(h.address)}}</small>
                                 </div>
                                 <div style="text-align:right;">
                                     <b style="color:${{color}};">${{h.price}} ₴</b><br>
@@ -1489,7 +1522,7 @@ def get_courier_pwa_html(courier, config):
                 const container = document.getElementById('chat-messages');
                 const div = document.createElement('div');
                 div.className = `msg-bubble ${{role === 'courier' ? 'msg-courier' : 'msg-partner'}}`;
-                div.innerHTML = `${{text}} <span class="msg-time">${{time}}</span>`;
+                div.innerHTML = `${{escapeHTML(text)}} <span class="msg-time">${{escapeHTML(time)}}</span>`;
                 container.appendChild(div);
                 if(scroll) scrollToBottom();
             }}
