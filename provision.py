@@ -115,6 +115,7 @@ async def create_new_client_instance(client_name_base, root_domain, client_bot_t
         "-e", f"ADMIN_CHAT_ID={admin_chat_id}",
         "-e", "ADMIN_USER=admin",
         "-e", f"ADMIN_PASS={admin_pass}",
+        "-e", "TZ=Europe/Kiev",
         "--network", "saas_network",
         
         # --- ПОДКЛЮЧЕНИЕ ТОМОВ (Сохраняем файлы) ---
@@ -250,6 +251,7 @@ async def recreate_container_with_new_code(container_name):
         "--name", container_name,
         "--network", "saas_network",
         "--restart", "always",
+        "-e", "TZ=Europe/Kiev",
         
         # --- ПОДКЛЮЧЕНИЕ ТОМОВ (Чтобы файлы вернулись) ---
         "-v", f"{client_id}_images:/app/static/images",
