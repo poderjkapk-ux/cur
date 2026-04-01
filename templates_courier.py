@@ -1479,28 +1479,33 @@ def get_courier_pwa_html(courier, config):
                     data.forEach(h => {{
                         const color = h.status === 'delivered' ? 'var(--success)' : 'var(--danger)';
                         const icon = h.status === 'delivered' ? 'fa-check' : 'fa-xmark';
-                        html += `
-                            <div class="history-item">
-                                <div>
-                                    <b>${{escapeHTML(h.date)}}</b><br>
-                                    <small>${{escapeHTML(h.address)}}</small>
+                        
+                        // Красиве відображення комісії
+                        let commissionHtml = '';
+                        if (h.status === 'delivered' && h.commission > 0) {{
+                            commissionHtml = `
+                                <div style="font-size: 0.75rem; color: #ef4444; margin-top: 6px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 3px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                    <i class="fa-solid fa-coins"></i> Комісія: -${{h.commission}} ₴
                                 </div>
-                                <div style="text-align:right;">
-                                    <b style="color:${{color}};">${{h.price}} ₴</b><br>
-                                    <small style="color:${{color}}"><i class="fa-solid ${{icon}}"></i> ${{h.status === 'delivered' ? 'Доставлено' : 'Скасовано'}}</small>
+                            `;
+                        }}
+
+                        html += `
+                            <div class="history-item" style="align-items: flex-start;">
+                                <div style="flex: 1; padding-right: 10px;">
+                                    <b>${{escapeHTML(h.date)}}</b><br>
+                                    <small style="color: var(--text-muted);">${{escapeHTML(h.address)}}</small>
+                                </div>
+                                <div style="text-align:right; min-width: 90px;">
+                                    <b style="color:${{color}}; font-size: 1.1rem;">${{h.price}} ₴</b><br>
+                                    <small style="color:${{color}}"><i class="fa-solid ${{icon}}"></i> ${{h.status === 'delivered' ? 'Доставлено' : 'Скасовано'}}</small><br>
+                                    ${{commissionHtml}}
                                 </div>
                             </div>
                         `;
                     }});
                     container.innerHTML = html;
                 }} catch(e) {{}}
-            }}
-
-            // --- CHAT LOGIC ---
-            async function openChat() {{
-                if(!activeJobId) return;
-                document.getElementById('chatModal').classList.add('active');
-                await loadChatHistory();
             }}
 
             function closeChat() {{

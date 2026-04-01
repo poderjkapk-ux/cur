@@ -1094,14 +1094,21 @@ async def get_courier_history(
     )
     jobs = result.scalars().all()
     
+    # Отримуємо ставку комісії кур'єра (за замовчуванням 10%)
+    commission_rate = getattr(courier, 'commission_rate', 10.0)
+    
     data = []
     for j in jobs:
+        # Рахуємо комісію тільки для доставлених замовлень
+        commission = round((j.delivery_fee * commission_rate) / 100.0, 2) if j.status == 'delivered' else 0.0
+        
         data.append({
             "id": j.id,
             "date": format_local_time(j.created_at, tz, "%d.%m %H:%M"),
             "address": j.dropoff_address,
             "price": j.delivery_fee,
-            "status": j.status
+            "status": j.status,
+            "commission": commission # <- Передаємо комісію для PWA та Нативного додатка
         })
     return JSONResponse(data)
 
