@@ -36,7 +36,8 @@ import admin_rating_reports
 from models import (
     Base, engine, async_session_maker, User, Instance, Courier, CourierTransaction,
     DeliveryPartner, DeliveryJob, PendingVerification, ChatMessage, 
-    create_db_tables, get_db, Announcement, AnnouncementDismissal
+    create_db_tables, get_db, Announcement, AnnouncementDismissal,
+    CourierMotivator, CourierMotivatorProgress
 )
 from auth import check_admin_auth
 
@@ -256,6 +257,39 @@ def calculate_distance(lat1, lon1, lat2, lon2):
         return round(c * 6371, 2)
     except Exception:
         return None
+
+# --- ХЕЛПЕР ЗАСЧИТЫВАНИЯ ЗАКАЗА В ПРОГРЕСС (Вызывать при статусе 'delivered') ---
+async def process_courier_motivator_progress(db: AsyncSession, courier_id: int):
+    now = datetime.utcnow()
+    query = select(CourierMotivatorProgress).options(joinedload(CourierMotivatorProgress.motivator)).where(
+        CourierMotivatorProgress.courier_id == courier_id,
+        CourierMotivatorProgress.status == "in_progress"
+    )
+    active_goals = (await db.execute(query)).scalars().all()
+    
+    for prog in active_goals:
+        if now > prog.deadline_date:
+            prog.status = "failed"
+            continue
+            
+        prog.current_orders += 1
+        
+        if prog.current_orders >= prog.motivator.target_orders:
+            # ЦЕЛЬ ДОСТИГНУТА! Включаем бонус
+            prog.status = "reward_active"
+            prog.reward_end_date = now + timedelta(days=prog.motivator.reward_days)
+            
+            courier = await db.get(Courier, courier_id)
+            if courier:
+                prog.old_commission = getattr(courier, 'commission_rate', 10.0)
+                courier.commission_rate = prog.motivator.reward_commission
+                
+                # Уведомляем курьера!
+                if courier.telegram_chat_id:
+                    tg_msg = f"🎉 <b>ЦІЛЬ ДОСЯГНУТА!</b>\nВи виконали ціль «{prog.motivator.title}».\nВаша нова комісія: <b>{prog.motivator.reward_commission}%</b> на {prog.motivator.reward_days} днів!"
+                    asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_msg))
+                    
+    await db.commit()
 
 
 # ==============================================================================
@@ -710,6 +744,59 @@ async def get_courier_profile(
         "rating_count": getattr(courier, 'rating_count', 0),
 	"is_online": courier.is_online
     })
+
+# --- API ДЛЯ ОТОБРАЖЕНИЯ ЦЕЛЕЙ КУРЬЕРУ (ДЛЯ PWA И ANDROID NATIVE) ---
+@app.get("/api/courier/motivators")
+async def get_courier_motivators(
+    courier: Courier = Depends(auth.get_current_courier), 
+    db: AsyncSession = Depends(get_db)
+):
+    query_mot = select(CourierMotivator).where(
+        CourierMotivator.is_active == True,
+        or_(CourierMotivator.target_courier_id == None, CourierMotivator.target_courier_id == courier.id)
+    )
+    active_motivators = (await db.execute(query_mot)).scalars().all()
+    
+    query_prog = select(CourierMotivatorProgress).options(joinedload(CourierMotivatorProgress.motivator)).where(
+        CourierMotivatorProgress.courier_id == courier.id,
+        CourierMotivatorProgress.status.in_(["in_progress", "reward_active"])
+    )
+    progress_records = (await db.execute(query_prog)).scalars().all()
+    progress_dict = {p.motivator_id: p for p in progress_records}
+    
+    result = []
+    now = datetime.utcnow()
+    
+    for mot in active_motivators:
+        prog = progress_dict.get(mot.id)
+        
+        if not prog:
+            prog = CourierMotivatorProgress(
+                courier_id=courier.id,
+                motivator_id=mot.id,
+                start_date=now,
+                deadline_date=now + timedelta(days=mot.period_days)
+            )
+            db.add(prog)
+            await db.commit()
+            await db.refresh(prog)
+            
+        result.append({
+            "id": mot.id,
+            "title": mot.title,
+            "description": mot.description,
+            "target_orders": mot.target_orders,
+            "current_orders": prog.current_orders,
+            "period_days": mot.period_days,     # <-- ДОДАНО ВИПРАВЛЕННЯ
+            "reward_days": mot.reward_days,
+            "reward_commission": mot.reward_commission,
+            "status": prog.status,
+            "deadline_date": prog.deadline_date.isoformat() + "Z" if prog.deadline_date else None,
+            "reward_end_date": prog.reward_end_date.isoformat() + "Z" if prog.reward_end_date else None,
+            "progress_percent": min(100, int((prog.current_orders / mot.target_orders) * 100)) if mot.target_orders > 0 else 0
+        })
+        
+    return JSONResponse(result)
 
 @app.get("/courier/app", response_class=HTMLResponse)
 async def courier_pwa_main(request: Request, db: AsyncSession = Depends(get_db)):
@@ -1249,6 +1336,10 @@ async def update_job_status(
             status_text = "delivered"
             color = "#bbf7d0"
             
+            # --- ОНОВЛЕННЯ ПРОГРЕСУ МОТИВАТОРА ---
+            await process_courier_motivator_progress(db, courier.id)
+            # -----------------------------------
+            
             # --- ВИПРАВЛЕННЯ: ЗАПОБІГАННЯ ПОДВІЙНОМУ СПИСАННЮ КОМІСІЇ ---
             existing_tx = await db.execute(
                 select(CourierTransaction).where(
@@ -1759,6 +1850,10 @@ async def partner_confirm_return(
     job.delivered_at = datetime.utcnow()
     
     if job.courier_id:
+        # --- ОНОВЛЕННЯ ПРОГРЕСУ МОТИВАТОРА ---
+        await process_courier_motivator_progress(db, job.courier_id)
+        # -----------------------------------
+        
         courier = await db.get(Courier, job.courier_id)
         if courier:
             existing_tx = await db.execute(

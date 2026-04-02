@@ -304,6 +304,52 @@ class AnnouncementDismissal(Base):
     courier_id = Column(Integer, ForeignKey("couriers.id", ondelete="CASCADE"), nullable=False)
     dismissed_at = Column(DateTime, default=datetime.utcnow)
 
+class CourierMotivator(Base):
+    """
+    Модель правила мотивации (цели)
+    """
+    __tablename__ = "courier_motivators"
+    
+    id = Column(Integer, primary_key=True)
+    title = Column(String(100), nullable=False) # Название (напр. "Бонус турбо-курьера")
+    description = Column(String(255), nullable=True) # Описание
+    
+    target_orders = Column(Integer, nullable=False) # Сколько заказов нужно сделать
+    period_days = Column(Integer, nullable=False)   # За сколько дней
+    
+    reward_commission = Column(Float, nullable=False) # Новая комиссия (напр. 5.0%)
+    reward_days = Column(Integer, nullable=False)     # На сколько дней дается бонус
+    
+    # Если NULL - значит правило доступно всем. Если указан ID - персональное
+    target_courier_id = Column(Integer, ForeignKey("couriers.id", ondelete="CASCADE"), nullable=True) 
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CourierMotivatorProgress(Base):
+    """
+    Прогресс курьера по конкретному мотиватору
+    """
+    __tablename__ = "courier_motivator_progress"
+    
+    id = Column(Integer, primary_key=True)
+    courier_id = Column(Integer, ForeignKey("couriers.id", ondelete="CASCADE"), nullable=False)
+    motivator_id = Column(Integer, ForeignKey("courier_motivators.id", ondelete="CASCADE"), nullable=False)
+    
+    start_date = Column(DateTime, default=datetime.utcnow)
+    deadline_date = Column(DateTime, nullable=False)
+    
+    current_orders = Column(Integer, default=0)
+    
+    # Статусы: in_progress, reward_active, completed, failed
+    status = Column(String(50), default="in_progress") 
+    
+    # Поля для бонуса
+    reward_end_date = Column(DateTime, nullable=True)
+    old_commission = Column(Float, nullable=True) # Запоминаем старую комиссию, чтобы вернуть обратно
+    
+    motivator = relationship("CourierMotivator")
+
 # --- 3. Функції для роботи з БД ---
 
 async def create_db_tables():

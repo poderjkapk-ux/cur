@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 from sqlalchemy import select, text
 from sqlalchemy.orm import joinedload
-from models import async_session_maker, DeliveryJob, Courier, DeliveryPartner, engine
+from models import async_session_maker, DeliveryJob, Courier, DeliveryPartner, engine, CourierMotivatorProgress
 
 # Импортируем сервис бота для отправки сообщений
 import bot_service
@@ -15,6 +15,31 @@ from firebase_admin import messaging
 # Получаем ID админа для тревожных уведомлений (берем из окружения, как в app.py)
 ADMIN_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
+# --- НОВА ФОНОВА ЗАДАЧА ДЛЯ СИСТЕМИ МОТИВАТОРІВ ---
+async def monitor_expired_motivators(db_session):
+    now = datetime.utcnow()
+    # Ищем бонусы, срок которых вышел
+    query = select(CourierMotivatorProgress).where(
+        CourierMotivatorProgress.status == "reward_active",
+        CourierMotivatorProgress.reward_end_date <= now
+    )
+    expired_bonuses = (await db_session.execute(query)).scalars().all()
+    
+    for prog in expired_bonuses:
+        prog.status = "completed" # Бонус отработал свое
+        courier = await db_session.get(Courier, prog.courier_id)
+        if courier and prog.old_commission is not None:
+            courier.commission_rate = prog.old_commission # Возвращаем старую
+            
+            # Уведомляем курьера о завершении бонуса
+            if courier.telegram_chat_id:
+                tg_msg = f"ℹ️ <b>Бонус завершено</b>\nЧас дії вашої нагороди вийшов. Ваша комісія повернута до стандартної ({prog.old_commission}%)."
+                asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_msg))
+            
+    if expired_bonuses:
+        await db_session.commit()
+        logging.info(f"🔄 Скинуто комісію для {len(expired_bonuses)} кур'єрів (бонус мотиватора вийшов).")
+# --------------------------------------------------
 
 async def monitor_stale_orders(ws_manager):
     """
@@ -33,6 +58,10 @@ async def monitor_stale_orders(ws_manager):
             
             async with async_session_maker() as db:
                 now = datetime.utcnow()
+                
+                # --- ВИКЛИК МОНІТОРИНГУ МОТИВАТОРІВ ---
+                await monitor_expired_motivators(db)
+                # --------------------------------------
                 
                 # =======================================================
                 # СЦЕНАРИЙ 1: 5 МИНУТ -> "ГОРЯЧИЙ ЗАКАЗ" КУРЬЕРАМ

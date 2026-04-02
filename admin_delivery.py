@@ -17,7 +17,7 @@ from sqlalchemy.orm import joinedload
 import bot_service
 
 # Імпортуємо auth замість app, щоб уникнути циклічного імпорту
-from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage, Announcement
+from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage, Announcement, CourierMotivator
 from auth import check_admin_auth 
 from crud_settings import get_setting, set_setting # Імпорт для отримання часового поясу та збереження налаштувань
 
@@ -496,7 +496,7 @@ def get_admin_chat_html(job_id, messages, tz_string="Europe/Kiev"):
     """
 
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None, announcements=None, selected_date_str="", min_fee=80.0, fee_reason=""):
+def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None, announcements=None, selected_date_str="", min_fee=80.0, fee_reason="", motivators=None):
     if cash_transactions is None:
         cash_transactions = []
     if non_cash_deposits is None:
@@ -505,6 +505,8 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         active_jobs = []
     if announcements is None:
         announcements = []
+    if motivators is None:
+        motivators = []
         
     courier_rows = ""
     for c in couriers:
@@ -679,6 +681,29 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
     if not ann_rows:
         ann_rows = "<tr><td colspan='4' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає активних оголошень</td></tr>"
 
+    # ГЕНЕРАЦІЯ СТРОК МОТИВАТОРІВ
+    mot_rows = ""
+    for m in motivators:
+        target_str = "Усім" if not m.target_courier_id else f"ID: {m.target_courier_id}"
+        status_dot = "#4ade80" if m.is_active else "#ef4444"
+        mot_rows += f"""
+        <tr>
+            <td><span style="color:{status_dot};">●</span> <b>{m.title}</b><br><small>{m.description}</small></td>
+            <td>{m.target_orders} зам. за {m.period_days} дн.</td>
+            <td>{m.reward_commission}% на {m.reward_days} дн.</td>
+            <td>{target_str}</td>
+            <td>
+                <form action="/admin/delivery/motivators/delete" method="post" onsubmit="return confirm('Видалити мотиватор?');" style="margin:0;">
+                    <input type="hidden" name="id" value="{m.id}">
+                    <button class="btn-mini danger"><i class="fa-solid fa-trash"></i></button>
+                </form>
+            </td>
+        </tr>
+        """
+    if not mot_rows:
+        mot_rows = "<tr><td colspan='5' style='text-align:center; padding: 20px; color:#94a3b8;'>Немає активних мотиваторів</td></tr>"
+
+
     return f"""
     <!DOCTYPE html><html><head><title>Delivery Admin</title>{GLOBAL_STYLES}
     <style>
@@ -819,6 +844,54 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                         <table>
                             <thead><tr><th>ID</th><th>Заклад</th><th>Контакти</th><th>Статус</th><th>Дії</th></tr></thead>
                             <tbody>{partner_rows}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel" style="margin-top: 20px; border-color: #facc15;">
+                <h2 style="color: #fef08a;"><i class="fa-solid fa-trophy"></i> Система мотивації (Цілі для кур'єрів)</h2>
+                <div class="grid" style="grid-template-columns: 1fr 2fr;">
+                    <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px;">
+                        <form action="/admin/delivery/motivators/create" method="post">
+                            <input type="text" name="title" placeholder="Назва цілі (напр: Турбо-тиждень)" required style="width:100%; padding:8px; margin-bottom:10px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box;">
+                            <textarea name="description" placeholder="Опис (необов'язково)" style="width:100%; padding:8px; margin-bottom:10px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box; font-family: inherit;"></textarea>
+                            
+                            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                                <div style="flex:1;">
+                                    <label style="font-size:0.8rem; color:#94a3b8;">Ціль: Замовлень</label>
+                                    <input type="number" name="target_orders" required min="1" style="width:100%; padding:8px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box;">
+                                </div>
+                                <div style="flex:1;">
+                                    <label style="font-size:0.8rem; color:#94a3b8;">Дається днів</label>
+                                    <input type="number" name="period_days" required min="1" style="width:100%; padding:8px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box;">
+                                </div>
+                            </div>
+                            
+                            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                                <div style="flex:1;">
+                                    <label style="font-size:0.8rem; color:#94a3b8;">Бонус: Нова комісія %</label>
+                                    <input type="number" step="0.1" name="reward_commission" required min="0" style="width:100%; padding:8px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box;">
+                                </div>
+                                <div style="flex:1;">
+                                    <label style="font-size:0.8rem; color:#94a3b8;">Бонус діє днів</label>
+                                    <input type="number" name="reward_days" required min="1" style="width:100%; padding:8px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box;">
+                                </div>
+                            </div>
+
+                            <label style="font-size:0.8rem; color:#94a3b8;">Для кого:</label>
+                            <select name="target_courier_id" style="width:100%; padding:8px; margin-bottom:10px; background:#334155; border:1px solid #475569; color:white; border-radius:6px; box-sizing: border-box;">
+                                <option value="0">Усім кур'єрам (Глобально)</option>
+                                {"".join([f'<option value="{c.id}">{c.name} (ID: {c.id})</option>' for c in couriers])}
+                            </select>
+                            
+                            <button type="submit" class="btn success" style="width:100%; padding:10px; border:none; border-radius:6px; font-weight:bold;"><i class="fa-solid fa-plus"></i> Створити ціль</button>
+                        </form>
+                    </div>
+                    <div style="max-height: 350px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                            <thead><tr><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Назва та Опис</th><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Умова</th><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Бонус</th><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Кому</th><th style="padding:8px; border-bottom:1px solid rgba(255,255,255,0.1); text-align:left;">Дії</th></tr></thead>
+                            <tbody>{mot_rows}</tbody>
                         </table>
                     </div>
                 </div>
@@ -985,6 +1058,7 @@ async def admin_delivery_page(
     )).scalars().all()
 
     announcements = (await db.execute(select(Announcement).order_by(Announcement.id.desc()))).scalars().all()
+    motivators = (await db.execute(select(CourierMotivator).order_by(CourierMotivator.id.desc()))).scalars().all()
 
     pwa_config = load_pwa_config()
     apk_config = load_apk_config()
@@ -1026,7 +1100,7 @@ async def admin_delivery_page(
     return get_delivery_admin_html(
         couriers, partners, pwa_config, apk_config, tz_string, message, 
         cash_balance, cash_transactions, non_cash_deposits, active_jobs, announcements, date or "",
-        min_fee, fee_reason
+        min_fee, fee_reason, motivators
     )
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
@@ -1206,7 +1280,7 @@ async def download_apk(app_type: str):
 
 # ==============================================================================
 
-# --- РОУТИ ОГОЛОШЕНЬ (ANNOUNCEMENTS) ---
+# --- РОУТИ ОГОЛОШЕНЬ ТА МОТИВАТОРІВ ---
 
 @router.post("/admin/delivery/announcements/create")
 async def create_announcement(
@@ -1247,6 +1321,38 @@ async def delete_announcement(
         await db.delete(ann)
         await db.commit()
     return RedirectResponse("/admin/delivery?message=Оголошення видалено", status_code=302)
+
+
+@router.post("/admin/delivery/motivators/create")
+async def create_motivator(
+    title: str = Form(...), description: str = Form(""),
+    target_orders: int = Form(...), period_days: int = Form(...),
+    reward_commission: float = Form(...), reward_days: int = Form(...),
+    target_courier_id: int = Form(0), 
+    user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)
+):
+    target = target_courier_id if target_courier_id > 0 else None
+    new_mot = CourierMotivator(
+        title=title, description=description,
+        target_orders=target_orders, period_days=period_days,
+        reward_commission=reward_commission, reward_days=reward_days,
+        target_courier_id=target
+    )
+    db.add(new_mot)
+    await db.commit()
+    return RedirectResponse("/admin/delivery?message=Мотиватор успішно створено!", status_code=302)
+
+
+@router.post("/admin/delivery/motivators/delete")
+async def delete_motivator(
+    id: int = Form(...), user: str = Depends(check_admin_auth), db: AsyncSession = Depends(get_db)
+):
+    mot = await db.get(CourierMotivator, id)
+    if mot:
+        await db.delete(mot)
+        await db.commit()
+    return RedirectResponse("/admin/delivery?message=Мотиватор видалено", status_code=302)
+
 
 # --- УПРАВЛІННЯ КУР'ЄРАМИ ТА ПАРТНЕРАМИ ---
 

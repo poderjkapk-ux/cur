@@ -519,6 +519,25 @@ def get_courier_pwa_html(courier, config):
     }
     .stat-val { font-size: 1.2rem; font-weight: bold; color: var(--success); }
     
+    /* --- СТИЛІ МОТИВАТОРІВ (ЦІЛЕЙ) --- */
+    .motivator-card {
+        background: linear-gradient(145deg, #1e293b, #0f172a);
+        border: 1px solid var(--primary);
+        border-radius: 12px; padding: 15px; margin-top: 15px;
+        position: relative; overflow: hidden;
+    }
+    .motivator-card.reward-active {
+        border-color: var(--success);
+        background: linear-gradient(145deg, rgba(34, 197, 94, 0.1), #0f172a);
+    }
+    .motivator-title { font-weight: bold; color: #facc15; font-size: 1.1rem; margin-bottom: 5px; }
+    .motivator-desc { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px; }
+    .progress-bar-bg { background: #334155; height: 10px; border-radius: 5px; width: 100%; overflow: hidden; margin-bottom: 5px; }
+    .progress-bar-fill { background: var(--primary); height: 100%; transition: width 0.5s ease-out; }
+    .reward-active .progress-bar-fill { background: var(--success); }
+    .motivator-stats { display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: bold; }
+    /* --------------------------------- */
+
     /* History */
     .history-item {
         display: flex; justify-content: space-between; align-items: center;
@@ -643,6 +662,8 @@ def get_courier_pwa_html(courier, config):
                     </div>
                     <div class="stat-val">{getattr(courier, 'balance', 0.0):.2f} ₴</div>
                 </div>
+
+                <div id="motivatorsContainer"></div>
                 
                 <button class="btn outline" style="margin-top:20px; color:var(--danger); border-color:var(--danger);" onclick="window.location.href='/courier/logout'">
                     <i class="fa-solid fa-arrow-right-from-bracket"></i> Вийти з акаунту
@@ -862,6 +883,7 @@ def get_courier_pwa_html(courier, config):
 
                 if(tabId === 'orders' && !activeJobId) fetchOpenOrders();
                 if(tabId === 'history') fetchHistory();
+                if(tabId === 'profile') fetchMotivators();
             }}
 
             // --- СИСТЕМА ОГОЛОШЕНЬ (ANNOUNCEMENTS) ---
@@ -911,6 +933,51 @@ def get_courier_pwa_html(courier, config):
                 try {{
                     await fetch(`/api/courier/announcements/${{id}}/dismiss`, {{ method: 'POST' }});
                 }} catch(e) {{}}
+            }}
+
+            // --- СИСТЕМА МОТИВАТОРІВ (ЦІЛЕЙ) ---
+            async function fetchMotivators() {{
+                try {{
+                    const res = await fetch('/api/courier/motivators');
+                    const data = await res.json();
+                    const container = document.getElementById('motivatorsContainer');
+                    
+                    if (data.length === 0) {{
+                        container.innerHTML = ''; return;
+                    }}
+                    
+                    let html = '<h3 style="margin-top:20px;"><i class="fa-solid fa-trophy" style="color:var(--warning);"></i> Ваші цілі та бонуси</h3>';
+                    data.forEach(m => {{
+                        if (m.status === 'reward_active') {{
+                            const date = new Date(m.reward_end_date).toLocaleDateString('uk-UA');
+                            html += `
+                            <div class="motivator-card reward-active">
+                                <div class="motivator-title"><i class="fa-solid fa-gift"></i> ${{escapeHTML(m.title)}}</div>
+                                <div class="motivator-desc">Бонус активний! Ваша комісія знижена до <b>${{m.reward_commission}}%</b>.</div>
+                                <div class="motivator-stats" style="color:var(--success);">
+                                    <span>Діє до: ${{date}}</span>
+                                    <span><i class="fa-solid fa-check-double"></i> Виконано</span>
+                                </div>
+                            </div>`;
+                        }} else if (m.status === 'in_progress') {{
+                            const daysLeft = Math.ceil((new Date(m.deadline_date) - new Date()) / (1000 * 60 * 60 * 24));
+                            html += `
+                            <div class="motivator-card">
+                                <div class="motivator-title"><i class="fa-solid fa-fire"></i> ${{escapeHTML(m.title)}}</div>
+                                <div class="motivator-desc">Зробіть ${{m.target_orders}} замовлень за ${{m.period_days}} днів та отримайте комісію <b>${{m.reward_commission}}%</b> на ${{m.reward_days}} днів!</div>
+                                
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill" style="width: ${{m.progress_percent}}%;"></div>
+                                </div>
+                                <div class="motivator-stats">
+                                    <span>Залишилось: ${{daysLeft}} днів</span>
+                                    <span>${{m.current_orders}} / ${{m.target_orders}}</span>
+                                </div>
+                            </div>`;
+                        }}
+                    }});
+                    container.innerHTML = html;
+                }} catch(e) {{ console.error(e); }}
             }}
 
             // --- WEBSOCKET ТА ОНОВЛЕННЯ ДАНИХ ---
