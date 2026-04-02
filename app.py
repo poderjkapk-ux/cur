@@ -1734,11 +1734,9 @@ async def partner_confirm_return(
     job.status = "delivered" 
     job.delivered_at = datetime.utcnow()
     
-    # --- НОВЕ: СПИСАННЯ КОМІСІЇ ПІСЛЯ ПОВЕРНЕННЯ КОШТІВ ---
     if job.courier_id:
         courier = await db.get(Courier, job.courier_id)
         if courier:
-            # Перевіряємо, чи не зняли комісію раніше
             existing_tx = await db.execute(
                 select(CourierTransaction).where(
                     CourierTransaction.job_id == job.id,
@@ -1760,11 +1758,24 @@ async def partner_confirm_return(
                     job_id=job.id
                 ))
             
-        await manager.notify_courier(job.courier_id, {
-            "type": "job_update", 
-            "status": "delivered",
-            "message": "✅ Заклад підтвердив отримання коштів. Ви вільні!"
-        })
+            # --- Отправка уведомлений (WS, Telegram, Push) ---
+            msg_text = "✅ Заклад підтвердив отримання коштів. Ви вільні!"
+            
+            # 1. WebSocket
+            await manager.notify_courier(job.courier_id, {
+                "type": "job_update", 
+                "status": "delivered",
+                "message": msg_text
+            })
+            
+            # 2. Telegram
+            if courier.telegram_chat_id:
+                tg_msg = f"✅ <b>Замовлення #{job.id} завершено!</b>\n{msg_text}"
+                asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_msg))
+                
+            # 3. Push-уведомление (FCM)
+            if courier.fcm_token:
+                await send_push_to_couriers([courier.fcm_token], "Кошти отримано!", msg_text, job_id=job.id)
         
     await db.commit()
     return JSONResponse({"status": "ok"})
@@ -1777,19 +1788,32 @@ async def partner_confirm_buyout_paid(
     if not job or job.partner_id != partner.id: 
         return JSONResponse({"status": "error"}, 404)
     
-    # Меняем тип оплаты, чтобы курьеру теперь писало "Оплачено"
     job.payment_type = "buyout_paid"
     await db.commit()
     
     if job.courier_id:
+        courier = await db.get(Courier, job.courier_id)
+        msg_text = "✅ Заклад підтвердив вашу оплату. Замовлення тепер 'Оплачено'."
+        
+        # 1. WebSocket
         await manager.notify_courier(job.courier_id, {
             "type": "order_update", 
             "job_id": job.id,
             "status": job.status,
             "status_text": "Оплачено",
             "status_color": "#4ade80",
-            "message": "✅ Заклад підтвердив вашу оплату. Замовлення тепер 'Оплачено'."
+            "message": msg_text
         })
+
+        if courier:
+            # 2. Telegram
+            if courier.telegram_chat_id:
+                tg_msg = f"💰 <b>Викуп підтверджено!</b>\n{msg_text}\nЗамовлення #{job.id}."
+                asyncio.create_task(bot_service.send_telegram_message(courier.telegram_chat_id, tg_msg))
+                
+            # 3. Push-уведомление (FCM)
+            if courier.fcm_token:
+                await send_push_to_couriers([courier.fcm_token], "Оплату підтверджено!", msg_text, job_id=job.id)
         
     return JSONResponse({"status": "ok"})
 
