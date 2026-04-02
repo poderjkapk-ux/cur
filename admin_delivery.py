@@ -17,7 +17,7 @@ from sqlalchemy.orm import joinedload
 import bot_service
 
 # Імпортуємо auth замість app, щоб уникнути циклічного імпорту
-from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage, Announcement, CourierMotivator
+from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage, Announcement, CourierMotivator, CourierMotivatorProgress
 from auth import check_admin_auth 
 from crud_settings import get_setting, set_setting # Імпорт для отримання часового поясу та збереження налаштувань
 
@@ -692,7 +692,8 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
             <td>{m.target_orders} зам. за {m.period_days} дн.</td>
             <td>{m.reward_commission}% на {m.reward_days} дн.</td>
             <td>{target_str}</td>
-            <td>
+            <td style="display:flex; gap:5px;">
+                <a href="/admin/delivery/motivators/{m.id}" class="btn-mini info" title="Переглянути прогрес кур'єрів"><i class="fa-solid fa-eye"></i></a>
                 <form action="/admin/delivery/motivators/delete" method="post" onsubmit="return confirm('Видалити мотиватор?');" style="margin:0;">
                     <input type="hidden" name="id" value="{m.id}">
                     <button class="btn-mini danger"><i class="fa-solid fa-trash"></i></button>
@@ -1038,6 +1039,84 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
     </body></html>
     """
 
+# --- HTML TEMPLATE: Детальна статистика мотиватора ---
+def get_motivator_details_html(mot, progress_data, tz_string="Europe/Kiev"):
+    rows = ""
+    status_colors = {
+        "in_progress": "#3b82f6", 
+        "reward_active": "#facc15", 
+        "completed": "#4ade80", 
+        "failed": "#ef4444"
+    }
+    status_text = {
+        "in_progress": "В процесі", 
+        "reward_active": "Бонус активний", 
+        "completed": "Завершено", 
+        "failed": "Провалено"
+    }
+    
+    for p, c in progress_data:
+        color = status_colors.get(p.status, "#ffffff")
+        text = status_text.get(p.status, p.status)
+        start_str = format_local_time(p.start_date, tz_string, '%d.%m %H:%M') if p.start_date else "-"
+        dead_str = format_local_time(p.deadline_date, tz_string, '%d.%m %H:%M') if p.deadline_date else "-"
+        rew_str = format_local_time(p.reward_end_date, tz_string, '%d.%m %H:%M') if p.reward_end_date else "-"
+        
+        rows += f"""
+        <tr>
+            <td>{c.id}</td>
+            <td><b>{c.name}</b><br><small>{c.phone}</small></td>
+            <td>{p.current_orders} / {mot.target_orders}</td>
+            <td><span style="color:{color}; font-weight:bold;">{text}</span></td>
+            <td><small>{start_str}</small></td>
+            <td><small>{dead_str}</small></td>
+            <td><small>{rew_str}</small></td>
+        </tr>
+        """
+        
+    if not rows:
+        rows = "<tr><td colspan='7' style='text-align:center; padding:20px; color:#94a3b8;'>Жоден кур'єр ще не почав виконувати цю ціль</td></tr>"
+        
+    return f"""
+    <!DOCTYPE html><html><head><title>Прогрес цілі: {mot.title}</title>{GLOBAL_STYLES}
+    <style>
+        .panel {{ background: #1e293b; padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
+        td, th {{ padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: left; vertical-align: middle; }}
+        th {{ color: #94a3b8; font-weight: 600; }}
+    </style>
+    </head>
+    <body>
+        <div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h1 style="margin-bottom:5px;"><i class="fa-solid fa-trophy" style="color:#facc15;"></i> {mot.title}</h1>
+                    <p style="color:#94a3b8; margin-top:0;">{mot.description or 'Без опису'} | Ціль: {mot.target_orders} зам. за {mot.period_days} дн. | Бонус: {mot.reward_commission}% на {mot.reward_days} дн.</p>
+                </div>
+                <a href="/admin/delivery" class="btn" style="width:auto; padding: 10px 20px;">← Назад в панель</a>
+            </div>
+            
+            <div class="panel" style="overflow-x: auto;">
+                <h2 style="margin-top:0;">Учасники та їх прогрес</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Кур'єр</th>
+                            <th>Замовлень</th>
+                            <th>Статус</th>
+                            <th>Початок</th>
+                            <th>Дедлайн</th>
+                            <th>Бонус діє до</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows}</tbody>
+                </table>
+            </div>
+        </div>
+    </body></html>
+    """
+
 # --- РОУТИ ПАНЕЛІ ---
 
 @router.get("/admin/delivery", response_class=HTMLResponse)
@@ -1353,6 +1432,28 @@ async def delete_motivator(
         await db.commit()
     return RedirectResponse("/admin/delivery?message=Мотиватор видалено", status_code=302)
 
+@router.get("/admin/delivery/motivators/{mot_id}", response_class=HTMLResponse)
+async def view_motivator_progress(
+    mot_id: int, 
+    user: str = Depends(check_admin_auth), 
+    db: AsyncSession = Depends(get_db)
+):
+    mot = await db.get(CourierMotivator, mot_id)
+    if not mot:
+        return RedirectResponse("/admin/delivery?message=Мотиватор не знайдено", status_code=302)
+    
+    # Делаем JOIN таблиц прогресса и курьеров, чтобы получить имена и телефоны
+    query = (
+        select(CourierMotivatorProgress, Courier)
+        .join(Courier, CourierMotivatorProgress.courier_id == Courier.id)
+        .where(CourierMotivatorProgress.motivator_id == mot_id)
+        .order_by(CourierMotivatorProgress.current_orders.desc())
+    )
+    progress_data = (await db.execute(query)).all()
+    
+    tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
+    
+    return get_motivator_details_html(mot, progress_data, tz_string)
 
 # --- УПРАВЛІННЯ КУР'ЄРАМИ ТА ПАРТНЕРАМИ ---
 
