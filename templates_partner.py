@@ -846,11 +846,16 @@ DASHBOARD_SCRIPT = """
 </script>
 """
 
-def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob], tz_string: str = "Europe/Kiev"):
+def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob], tz_string: str = "Europe/Kiev", min_fee: float = 80.0, fee_reason: str = ""):
     """
     Дашборд партнера з підтримкою часових поясів та візуальним таймлайном.
     """
     
+    alert_html = ""
+    if min_fee > 80.0 or fee_reason:
+        reason_text = f" Причина: {fee_reason}" if fee_reason else ""
+        alert_html = f'<div style="background: rgba(239, 68, 68, 0.2); border-left: 4px solid #ef4444; padding: 12px; margin-bottom: 15px; border-radius: 6px; font-size: 0.9rem; color: #fca5a5; line-height: 1.4;"><i class="fa-solid fa-bolt"></i> <b>Увага:</b> Мінімальна доставка зараз <b>{min_fee} грн</b>.{reason_text}</div>'
+
     def calc_mins(start, end):
         if not start or not end: return None
         mins = int((end - start).total_seconds() / 60)
@@ -1171,6 +1176,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         <label>Телефон клієнта</label>
                         <input type="tel" name="customer_phone" placeholder="0XX XXX XX XX" required>
                         
+                        {alert_html}
                         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-bottom:15px;">
                             <div>
                                 <label>Чек клієнта (грн)</label>
@@ -1178,7 +1184,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             </div>
                             <div>
                                 <label>Доставка (грн)</label>
-                                <input type="number" step="0.01" name="delivery_fee" id="delivery_fee" value="80" min="80" style="margin-bottom:0;">
+                                <input type="number" step="0.01" name="delivery_fee" id="delivery_fee" value="{min_fee}" min="{min_fee}" style="margin-bottom:0;" required>
                             </div>
                         </div>
                         

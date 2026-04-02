@@ -19,7 +19,7 @@ import bot_service
 # Імпортуємо auth замість app, щоб уникнути циклічного імпорту
 from models import get_db, Courier, DeliveryPartner, DeliveryJob, CourierTransaction, CashRegisterTransaction, ChatMessage, Announcement
 from auth import check_admin_auth 
-from crud_settings import get_setting # Імпорт для отримання часового поясу
+from crud_settings import get_setting, set_setting # Імпорт для отримання часового поясу та збереження налаштувань
 
 # Імпортуємо GLOBAL_STYLES
 from templates_saas import GLOBAL_STYLES
@@ -496,7 +496,7 @@ def get_admin_chat_html(job_id, messages, tz_string="Europe/Kiev"):
     """
 
 # --- HTML TEMPLATE: Управління ---
-def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None, announcements=None, selected_date_str=""):
+def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_string="Europe/Kiev", message="", cash_balance=0.0, cash_transactions=None, non_cash_deposits=None, active_jobs=None, announcements=None, selected_date_str="", min_fee=80.0, fee_reason=""):
     if cash_transactions is None:
         cash_transactions = []
     if non_cash_deposits is None:
@@ -722,6 +722,29 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                         <tbody>{active_jobs_rows}</tbody>
                     </table>
                 </div>
+            </div>
+
+            <div class="panel" style="margin-bottom: 20px; border-color: #ef4444; border-style: dashed;">
+                <h2 style="color: #fca5a5;"><i class="fa-solid fa-bolt"></i> Динамічне ціноутворення (Мінімальна вартість)</h2>
+                <form action="/admin/delivery/update_min_fee" method="post">
+                    <div class="grid" style="grid-template-columns: 1fr 2fr; gap: 20px;">
+                        <div>
+                            <label style="color:#94a3b8; font-size:0.9rem; margin-bottom:5px; display:block;">Мінімальна сума доставки (грн):</label>
+                            <input type="number" step="1" name="min_fee" value="{min_fee}" required style="width:100%; padding:10px; background:rgba(0,0,0,0.2); border:1px solid #475569; color:white; border-radius:6px; font-size: 1.2rem; font-weight: bold;">
+                        </div>
+                        <div>
+                            <label style="color:#94a3b8; font-size:0.9rem; margin-bottom:5px; display:block;">Причина підвищення (буде показана закладам):</label>
+                            <div style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:10px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                <label style="cursor:pointer; color:white;"><input type="radio" name="reason" value="" {'checked' if fee_reason == '' else ''}> Без причини</label>
+                                <label style="cursor:pointer; color:white;"><input type="radio" name="reason" value="Велике навантаження" {'checked' if fee_reason == 'Велике навантаження' else ''}> Велике навантаження</label>
+                                <label style="cursor:pointer; color:white;"><input type="radio" name="reason" value="Погодні умови" {'checked' if fee_reason == 'Погодні умови' else ''}> Погодні умови</label>
+                                <label style="cursor:pointer; color:white;"><input type="radio" name="reason" value="custom" {'checked' if fee_reason not in ['', 'Велике навантаження', 'Погодні умови'] else ''}> Своя причина</label>
+                            </div>
+                            <input type="text" name="custom_reason" placeholder="Напишіть свою причину (якщо обрано 'Своя причина')" value="{fee_reason if fee_reason not in ['', 'Велике навантаження', 'Погодні умови'] else ''}" style="width:100%; padding:8px; background:rgba(0,0,0,0.2); border:1px solid #475569; color:white; border-radius:6px; box-sizing:border-box;">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn success" style="margin-top: 15px; width: auto; padding: 10px 25px;"><i class="fa-solid fa-save"></i> Зберегти нову ціну</button>
+                </form>
             </div>
 
             <div class="panel" style="margin-bottom: 20px; border: 1px dashed #3b82f6;">
@@ -993,9 +1016,17 @@ async def admin_delivery_page(
     cash_transactions = (await db.execute(cash_query.order_by(CashRegisterTransaction.id.desc()).limit(50))).scalars().all()
     non_cash_deposits = (await db.execute(non_cash_query.order_by(CourierTransaction.id.desc()).limit(50))).all()
     
+    # НОВОЕ: Получаем минимальную цену и причину из базы данных
+    try:
+        min_fee = float(await get_setting(db, "min_delivery_fee", 80.0))
+    except (TypeError, ValueError):
+        min_fee = 80.0
+    fee_reason = await get_setting(db, "min_delivery_fee_reason", "")
+
     return get_delivery_admin_html(
         couriers, partners, pwa_config, apk_config, tz_string, message, 
-        cash_balance, cash_transactions, non_cash_deposits, active_jobs, announcements, date or ""
+        cash_balance, cash_transactions, non_cash_deposits, active_jobs, announcements, date or "",
+        min_fee, fee_reason
     )
 
 @router.get("/admin/delivery/map", response_class=HTMLResponse)
@@ -1509,3 +1540,20 @@ async def get_partner_manifest():
         "theme_color": conf["theme_color"],
         "icons": [{"src": conf["icon_url"], "sizes": "512x512", "type": "image/png"}]
     })
+
+# --- НОВИЙ МАРШРУТ: ОНОВЛЕННЯ ДИНАМІЧНОЇ МІНІМАЛЬНОЇ ВАРТОСТІ ---
+@router.post("/admin/delivery/update_min_fee")
+async def update_min_fee(
+    min_fee: float = Form(...),
+    reason: str = Form(""),
+    custom_reason: str = Form(""),
+    user: str = Depends(check_admin_auth),
+    db: AsyncSession = Depends(get_db)
+):
+    # Якщо обрана "Своя причина", використовуємо текст з текстового поля
+    final_reason = custom_reason if reason == "custom" else reason
+    
+    await set_setting(db, "min_delivery_fee", min_fee)
+    await set_setting(db, "min_delivery_fee_reason", final_reason)
+    
+    return RedirectResponse("/admin/delivery?message=Мінімальну вартість доставки та причину оновлено!", status_code=302)

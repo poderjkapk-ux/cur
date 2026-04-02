@@ -1545,6 +1545,21 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
         })
     return JSONResponse(data)
 
+# --- НОВИЙ МАРШРУТ: Отримання динамічної ціни для Нативного додатку ---
+@app.get("/api/partner/min_fee_native")
+async def api_partner_min_fee_native(db: AsyncSession = Depends(get_db), partner: DeliveryPartner = Depends(get_current_partner)):
+    try:
+        min_fee = float(await get_setting(db, "min_delivery_fee", 80.0))
+    except (TypeError, ValueError):
+        min_fee = 80.0
+    fee_reason = await get_setting(db, "min_delivery_fee_reason", "")
+    
+    return JSONResponse({
+        "status": "ok",
+        "min_fee": min_fee,
+        "reason": fee_reason
+    })
+
 @app.post("/api/partner/create_order_native")
 async def api_create_order_native(
     dropoff_address: str = Form(...), customer_phone: str = Form(...), 
@@ -1555,8 +1570,13 @@ async def api_create_order_native(
     prep_time: int = Form(15), 
     db: AsyncSession = Depends(get_db), partner: DeliveryPartner = Depends(get_current_partner)
 ):
-    if delivery_fee < 80.0:
-        return JSONResponse({"status": "error", "message": "Мінімальна вартість доставки 80 грн"}, status_code=400)
+    try:
+        min_fee_from_db = float(await get_setting(db, "min_delivery_fee", 80.0))
+    except (TypeError, ValueError):
+        min_fee_from_db = 80.0
+
+    if delivery_fee < min_fee_from_db:
+        return JSONResponse({"status": "error", "message": f"Мінімальна вартість доставки зараз складає {min_fee_from_db} грн"}, status_code=400)
         
     client_lat, client_lon = await geocode_address(dropoff_address)
     rest_lat, rest_lon = await geocode_address(partner.address)
@@ -1656,8 +1676,6 @@ async def partner_login_page(message: str = ""):
 async def partner_register_page(message: str = ""):
     return templates_partner.get_partner_auth_html(is_register=True, message=message)
 
-# --- app.py ---
-
 @app.post("/partner/register")
 async def partner_register_action(
     name: str = Form(...), address: str = Form(...), email: str = Form(...),
@@ -1712,6 +1730,12 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
     config = await get_all_settings(db)
     tz = config.get("timezone", "Europe/Kiev")
     
+    try:
+        min_fee = float(config.get("min_delivery_fee", 80.0))
+    except (TypeError, ValueError):
+        min_fee = 80.0
+    fee_reason = config.get("min_delivery_fee_reason", "")
+    
     result = await db.execute(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.courier))
@@ -1719,7 +1743,7 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
         .order_by(DeliveryJob.id.desc())
     )
     # Передаємо таймзону (tz) останнім аргументом в шаблон
-    return templates_partner.get_partner_dashboard_html(partner, result.scalars().all(), tz)
+    return templates_partner.get_partner_dashboard_html(partner, result.scalars().all(), tz, min_fee, fee_reason)
 
 @app.post("/api/partner/confirm_return")
 async def partner_confirm_return(
@@ -1833,8 +1857,13 @@ async def create_partner_order(
     db: AsyncSession = Depends(get_db), 
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
-    if delivery_fee < 80.0:
-        delivery_fee = 80.0
+    try:
+        min_fee_from_db = float(await get_setting(db, "min_delivery_fee", 80.0))
+    except (TypeError, ValueError):
+        min_fee_from_db = 80.0
+        
+    if delivery_fee < min_fee_from_db:
+        delivery_fee = min_fee_from_db
         
     client_lat, client_lon = lat, lon
     
