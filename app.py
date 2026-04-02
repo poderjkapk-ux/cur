@@ -1181,13 +1181,27 @@ async def get_courier_history(
     )
     jobs = result.scalars().all()
     
-    # Отримуємо ставку комісії кур'єра (за замовчуванням 10%)
-    commission_rate = getattr(courier, 'commission_rate', 10.0)
+    # 1. Получаем ID всех заказов из истории
+    job_ids = [j.id for j in jobs]
+    
+    # 2. Ищем фактические транзакции (списания комиссии) для этих заказов
+    commission_map = {}
+    if job_ids:
+        tx_result = await db.execute(
+            select(CourierTransaction)
+            .where(CourierTransaction.job_id.in_(job_ids))
+            .where(CourierTransaction.type == 'commission')
+        )
+        transactions = tx_result.scalars().all()
+        # Сохраняем в словарь: {job_id: сумма_комиссии} 
+        # (берем abs(), так как в базу сумма пишется с минусом)
+        commission_map = {tx.job_id: abs(tx.amount) for tx in transactions}
     
     data = []
     for j in jobs:
-        # Рахуємо комісію тільки для доставлених замовлень
-        commission = round((j.delivery_fee * commission_rate) / 100.0, 2) if j.status == 'delivered' else 0.0
+        # Вместо динамического пересчета берем зафиксированную сумму из базы
+        # Если транзакции нет (например, заказ отменен), будет 0.0
+        commission = commission_map.get(j.id, 0.0)
         
         data.append({
             "id": j.id,
@@ -1195,7 +1209,7 @@ async def get_courier_history(
             "address": j.dropoff_address,
             "price": j.delivery_fee,
             "status": j.status,
-            "commission": commission # <- Передаємо комісію для PWA та Нативного додатка
+            "commission": commission 
         })
     return JSONResponse(data)
 
