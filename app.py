@@ -1646,6 +1646,7 @@ async def api_partner_orders_native(partner: DeliveryPartner = Depends(get_curre
             "order_price": j.order_price, "delivery_fee": j.delivery_fee,
             "payment_type": j.payment_type, "is_return_required": j.is_return_required,
             "is_ready": bool(j.ready_at) or j.status == 'ready',
+            "is_rated": j.courier_rating is not None,
             "courier": c_data
         })
     return JSONResponse(data)
@@ -2108,23 +2109,33 @@ async def partner_rate_courier(
     db: AsyncSession = Depends(get_db)
 ):
     job = await db.get(DeliveryJob, job_id)
-    if job and job.partner_id == partner.id:
-        job.courier_rating = rating
-        job.courier_review = review
+    
+    # Захист 1: Перевірка, що замовлення належить цьому ресторану
+    if not job or job.partner_id != partner.id:
+        return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
         
-        if job.courier_id:
-            courier = await db.get(Courier, job.courier_id)
-            if courier:
-                current_avg = getattr(courier, 'avg_rating', 5.0)
-                current_count = getattr(courier, 'rating_count', 0)
-                
-                new_count = current_count + 1
-                new_avg = ((current_avg * current_count) + rating) / new_count
-                
-                courier.avg_rating = round(new_avg, 2)
-                courier.rating_count = new_count
-        
-        await db.commit()
+    # Захист 2: Блокування повторної оцінки
+    if job.courier_rating is not None:
+        return JSONResponse({"status": "error", "message": "Ви вже залишили відгук для цього замовлення"}, status_code=400)
+
+    # Зберігаємо оцінку
+    job.courier_rating = rating
+    job.courier_review = review
+    
+    # Перераховуємо середній рейтинг кур'єра
+    if job.courier_id:
+        courier = await db.get(Courier, job.courier_id)
+        if courier:
+            current_avg = getattr(courier, 'avg_rating', 5.0)
+            current_count = getattr(courier, 'rating_count', 0)
+            
+            new_count = current_count + 1
+            new_avg = ((current_avg * current_count) + rating) / new_count
+            
+            courier.avg_rating = round(new_avg, 2)
+            courier.rating_count = new_count
+    
+    await db.commit()
     return JSONResponse({"status": "ok"})
 
 @app.post("/api/partner/boost_order")
