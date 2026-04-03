@@ -426,6 +426,7 @@ DASHBOARD_CSS = """
 
     /* --- MOBILE ADAPTATION (RESPONSIVE) --- */
     @media (max-width: 768px) {
+        .hide-mobile { display: none; }
         body { padding: 10px; }
         .header-bar { margin-bottom: 20px; }
         .header-bar h2 { font-size: 1.2rem; }
@@ -843,6 +844,39 @@ DASHBOARD_SCRIPT = """
             }
         } catch(e) {}
     }
+
+    // --- СЛУЖБА ПІДТРИМКИ ---
+    function openPartnerFeedback() {
+        document.getElementById('feedbackPartnerModal').style.display = 'flex';
+    }
+
+    async function submitPartnerFeedback(e, name, phone) {
+        e.preventDefault();
+        const btn = document.getElementById('feedbackPartnerSubmitBtn');
+        const text = document.getElementById('feedbackPartnerText').value.trim();
+        if(!text) return;
+        
+        btn.disabled = true; 
+        btn.innerHTML = '<span class="spinner" style="display:inline-block; width:15px; height:15px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 1s infinite linear;"></span> Відправка...';
+        
+        const fd = new FormData();
+        fd.append('role', 'Заклад');
+        fd.append('phone', phone);
+        fd.append('name', name);
+        fd.append('message', text);
+        
+        try {
+            await fetch('/api/feedback', {method: 'POST', body: fd});
+            showToast('✅ Повідомлення успішно відправлено!');
+            document.getElementById('feedbackPartnerModal').style.display = 'none';
+            document.getElementById('feedbackPartnerText').value = '';
+        } catch(err) { 
+            showToast('❌ Помилка відправки. Спробуйте ще раз.'); 
+        }
+        
+        btn.disabled = false; 
+        btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Надіслати повідомлення';
+    }
 </script>
 """
 
@@ -850,6 +884,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     """
     Дашборд партнера з підтримкою часових поясів та візуальним таймлайном.
     """
+    
+    # Виносимо телефон у безпечну змінну для HTML атрибутів, щоб уникнути конфліктів лапок у f-string
+    partner_phone = getattr(partner, 'phone', '')
     
     alert_html = ""
     if min_fee > 80.0 or fee_reason:
@@ -1132,7 +1169,13 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         <div style="width: 100%;">
             <div class="header-bar">
                 <div><h2>{partner.name}</h2><span style="color: #94a3b8; font-size:0.9rem;"><i class="fa-solid fa-location-dot"></i> {partner.address}</span></div>
-                <a href="/partner/logout" class="btn" style="width:auto; padding: 8px 20px; background: #334155; font-size: 0.9rem;">Вийти</a>
+                
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button class="btn" style="width:auto; padding: 8px 15px; background: #6366f1; border:none; font-size: 0.9rem;" onclick="openPartnerFeedback()">
+                        <i class="fa-solid fa-headset"></i> <span class="hide-mobile">Підтримка</span>
+                    </button>
+                    <a href="/partner/logout" class="btn" style="width:auto; padding: 8px 20px; background: #334155; font-size: 0.9rem;">Вийти</a>
+                </div>
             </div>
 
             <div class="dashboard-grid">
@@ -1273,6 +1316,23 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                     <input type="hidden" id="chat_job_id">
                     <input type="text" id="chat_input" placeholder="Написати повідомлення..." autocomplete="off" required style="margin-bottom:0;">
                     <button type="submit" class="btn" style="width:auto; padding:0 20px;"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+            </div>
+        </div>
+
+        <div id="feedbackPartnerModal" class="modal-overlay">
+            <div class="modal-card">
+                <button style="position:absolute; top:15px; right:15px; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;" onclick="document.getElementById('feedbackPartnerModal').style.display='none'">×</button>
+                
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <i class="fa-solid fa-headset" style="font-size: 2.5rem; color: #6366f1; margin-bottom: 10px;"></i>
+                    <h2 style="margin:0; color:white; font-size: 1.5rem;">Служба підтримки</h2>
+                    <p style="color:var(--text-muted); font-size: 0.9rem; margin-top: 5px;">Маєте питання чи пропозицію? Напишіть нам.</p>
+                </div>
+                
+                <form id="feedbackPartnerForm" onsubmit="submitPartnerFeedback(event, '{partner.name}', '{partner_phone}')">
+                    <textarea id="feedbackPartnerText" placeholder="Текст вашого повідомлення..." required style="min-height:120px; width:100%; box-sizing:border-box; margin-bottom:15px; border-radius: 12px; resize: none; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 15px; font-family: inherit; font-size: 1rem; outline: none;"></textarea>
+                    <button type="submit" class="btn" id="feedbackPartnerSubmitBtn" style="background: #6366f1; width: 100%;"><i class="fa-solid fa-paper-plane"></i> Надіслати повідомлення</button>
                 </form>
             </div>
         </div>

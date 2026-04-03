@@ -393,6 +393,32 @@ async def handle_registration(
     
     return JSONResponse(content={"detail": "User created successfully."})
 
+# ==============================================================================
+# FEEDBACK API (ДЛЯ PWA ТА NATIVE ANDROID)
+# ==============================================================================
+
+@app.post("/api/feedback")
+async def submit_feedback(
+    role: str = Form(...),  # Роль: "Кур'єр" або "Заклад"
+    name: str = Form(...),  # Ім'я курьєра або назва закладу
+    phone: str = Form(...), # Контактний телефон
+    message: str = Form(...) # Текст повідомлення
+):
+    """
+    Універсальний ендпоінт для зворотного зв'язку.
+    Приймає запити з PWA та нативних додатків і відправляє в адмінський чат.
+    """
+    if TG_CHAT_ID:
+        admin_msg = (
+            f"🆘 <b>Нове звернення в підтримку!</b>\n\n"
+            f"🧑‍💼 <b>Від кого:</b> {name} (<i>{role}</i>)\n"
+            f"📱 <b>Телефон:</b> <code>{phone}</code>\n\n"
+            f"💬 <b>Повідомлення:</b>\n<i>{message}</i>"
+        )
+        # Відправляємо повідомлення в адмінський чат
+        asyncio.create_task(bot_service.send_telegram_message(TG_CHAT_ID, admin_msg))
+        
+    return JSONResponse({"status": "ok", "message": "Повідомлення відправлено"})
 
 # ==============================================================================
 # 2. УПРАВЛІННЯ ІНСТАНСАМИ (SAAS LOGIC)

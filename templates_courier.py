@@ -665,6 +665,10 @@ def get_courier_pwa_html(courier, config):
 
                 <div id="motivatorsContainer"></div>
                 
+                <button class="btn" style="margin-top:20px; background: #6366f1; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);" onclick="openFeedbackModal()">
+                    <i class="fa-solid fa-headset"></i> Написати в підтримку
+                </button>
+                
                 <button class="btn outline" style="margin-top:20px; color:var(--danger); border-color:var(--danger);" onclick="window.location.href='/courier/logout'">
                     <i class="fa-solid fa-arrow-right-from-bracket"></i> Вийти з акаунту
                 </button>
@@ -690,6 +694,27 @@ def get_courier_pwa_html(courier, config):
                     <input type="text" id="chatInput" placeholder="Написати повідомлення...">
                     <button onclick="sendChatMessage()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
+            </div>
+        </div>
+
+        <div class="full-modal" id="feedbackModal">
+            <div class="modal-header">
+                <button class="modal-back" onclick="closeFeedbackModal()"><i class="fa-solid fa-arrow-left"></i></button>
+                <h3 style="margin:0;">Служба підтримки</h3>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <i class="fa-solid fa-headset" style="font-size: 3rem; color: #6366f1; margin-bottom: 10px;"></i>
+                    <p style="color:var(--text-muted); font-size: 0.95rem; margin: 0;">Опишіть вашу проблему або пропозицію, і ми обов'язково вам допоможемо.</p>
+                </div>
+                
+                <form id="feedbackForm" onsubmit="submitCourierFeedback(event, '{c_phone}', '{courier.name}')">
+                    <div style="margin-bottom: 15px;">
+                        <label style="color: #cbd5e1; font-size: 0.9rem; display: block; margin-bottom: 5px;">Ваше повідомлення</label>
+                        <textarea id="feedbackText" rows="6" placeholder="Почніть писати тут..." required style="width:100%; background:var(--panel); border:1px solid var(--border); color:white; padding:15px; border-radius:12px; resize:none; font-family: inherit; font-size: 1rem; outline: none; box-sizing: border-box;"></textarea>
+                    </div>
+                    <button type="submit" class="btn" id="feedbackSubmitBtn" style="background: #6366f1;"><i class="fa-solid fa-paper-plane"></i> Відправити</button>
+                </form>
             </div>
         </div>
 
@@ -1620,6 +1645,43 @@ def get_courier_pwa_html(courier, config):
                 fd.append('role', 'courier');
                 
                 try {{ await fetch('/api/chat/send', {{method:'POST', body: fd}}); }} catch(e) {{}}
+            }}
+
+            // --- СЛУЖБА ПІДТРИМКИ ---
+            function openFeedbackModal() {{ 
+                document.getElementById('feedbackModal').classList.add('active'); 
+            }}
+            
+            function closeFeedbackModal() {{ 
+                document.getElementById('feedbackModal').classList.remove('active'); 
+            }}
+            
+            async function submitCourierFeedback(e, phone, name) {{
+                e.preventDefault();
+                const btn = document.getElementById('feedbackSubmitBtn');
+                const text = document.getElementById('feedbackText').value.trim();
+                if(!text) return;
+                
+                btn.disabled = true; 
+                btn.innerHTML = '<span class="spinner"></span> Відправка...';
+                
+                const fd = new FormData();
+                fd.append('role', "Кур'єр"); 
+                fd.append('phone', phone); 
+                fd.append('name', name); 
+                fd.append('message', text);
+                
+                try {{
+                    await fetch('/api/feedback', {{method: 'POST', body: fd}});
+                    alert('✅ Дякуємо! Ваше звернення відправлено в підтримку.');
+                    closeFeedbackModal();
+                    document.getElementById('feedbackText').value = '';
+                }} catch(err) {{ 
+                    alert('❌ Помилка відправки. Спробуйте ще раз.'); 
+                }}
+                
+                btn.disabled = false; 
+                btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Відправити';
             }}
         </script>
     </body>
