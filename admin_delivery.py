@@ -621,6 +621,15 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         partner_name = j.partner.name if j.partner else "Невідомо"
         courier_name = j.courier.name if j.courier else "Не призначено"
         
+        unassign_btn = ""
+        if j.courier_id:
+            unassign_btn = f"""
+            <form action="/admin/delivery/unassign_courier" method="post" style="margin:0;" onsubmit="return confirm('Відв\\'язати кур\\'єра і повернути замовлення в пошук?');">
+                <input type="hidden" name="job_id" value="{j.id}">
+                <button type="submit" class="btn-mini warn" title="Відв'язати кур'єра (перепризначити)"><i class="fa-solid fa-user-minus"></i></button>
+            </form>
+            """
+            
         active_jobs_rows += f"""
         <tr>
             <td><b>#{j.id}</b><br><small>{date_str}</small></td>
@@ -630,6 +639,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
             <td>{j.order_price} / {j.delivery_fee} ₴</td>
             <td style="display:flex; gap:5px;">
                 <a href="/admin/delivery/job/{j.id}/chat" class="btn-mini info" title="Відкрити чат"><i class="fa-regular fa-comments"></i></a>
+                {unassign_btn}
                 <form action="/admin/delivery/force_cancel_order" method="post" style="margin:0;" onsubmit="return confirm('Ви впевнені, що хочете примусово скасувати це замовлення?');">
                     <input type="hidden" name="job_id" value="{j.id}">
                     <button type="submit" class="btn-mini danger" title="Скасувати замовлення"><i class="fa-solid fa-xmark"></i></button>

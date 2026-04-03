@@ -564,6 +564,143 @@ async def admin_force_cancel_order(
             await send_push_to_couriers([courier.fcm_token], "Замовлення скасовано", cancel_msg, job_id=job.id)
 
     return RedirectResponse(f"/admin/delivery?message=Замовлення #{job.id} успішно скасовано.", status_code=302)
+@app.post("/admin/delivery/unassign_courier")
+async def admin_unassign_courier(
+    job_id: int = Form(...), 
+    db: AsyncSession = Depends(get_db), 
+    _ = Depends(check_admin_auth)
+):
+    """Отвязать курьера и вернуть заказ в поиск (переназначить)"""
+    result = await db.execute(
+        select(DeliveryJob)
+        .options(joinedload(DeliveryJob.partner), joinedload(DeliveryJob.courier))
+        .where(DeliveryJob.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+
+    if not job:
+        return RedirectResponse("/admin/delivery?message=Замовлення не знайдено", status_code=302)
+        
+    if job.status in ["delivered", "cancelled"]:
+        return RedirectResponse("/admin/delivery?message=Замовлення вже завершено або скасовано", status_code=302)
+
+    if not job.courier_id:
+        return RedirectResponse("/admin/delivery?message=Кур'єр ще не призначений", status_code=302)
+
+    old_courier = job.courier
+    partner = job.partner
+
+    # 1. Отвязываем курьера
+    job.courier_id = None
+    job.status = "pending"
+    # Сбрасываем метки времени, чтобы у нового курьера были свои
+    job.accepted_at = None
+    job.arrived_at_pickup_at = None
+    job.picked_up_at = None
+    
+    await db.commit()
+
+    # 2. Уведомляем старого курьера
+    msg_to_courier = f"⚠️ Адміністратор відв'язав вас від замовлення #{job.id}. Ви можете брати нові замовлення."
+    
+    # WS
+    await manager.notify_courier(old_courier.id, {
+        "type": "job_update", 
+        "status": "cancelled", # Для старого курьера это выглядит как отмена заказа у него
+        "message": msg_to_courier
+    })
+    
+    # Telegram и Push
+    if old_courier.telegram_chat_id:
+        asyncio.create_task(bot_service.send_telegram_message(old_courier.telegram_chat_id, f"❌ <b>УВАГА</b>\n{msg_to_courier}"))
+    if old_courier.fcm_token:
+        await send_push_to_couriers([old_courier.fcm_token], "Замовлення скасовано", msg_to_courier, job_id=job.id)
+
+    # 3. Уведомляем ресторан
+    msg_to_partner = f"⚠️ З технічних причин кур'єра було відв'язано. Розпочато пошук нового кур'єра для замовлення #{job.id}."
+    
+    # WS
+    if partner:
+        await manager.notify_partner(partner.id, {
+            "type": "order_update", 
+            "job_id": job.id, 
+            "status": "pending",
+            "status_text": "Пошук кур'єра", 
+            "status_color": "#facc15",
+            "message": msg_to_partner
+        })
+        
+        # Telegram и Push
+        if partner.telegram_chat_id:
+            asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, f"⚠️ <b>УВАГА</b>\n{msg_to_partner}"))
+        if partner.fcm_token:
+            await send_push_to_partners([partner.fcm_token], "Пошук нового кур'єра", msg_to_partner, job_id=job.id)
+
+    # 4. Отправляем заказ заново в пул (оповещаем всех свободных курьеров)
+    rest_lat, rest_lon = None, None
+    if partner:
+        rest_lat, rest_lon = await geocode_address(partner.address)
+
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
+    
+    personal_data = {
+        "id": job.id, "address": job.dropoff_address, 
+        "customer_name": job.customer_name, 
+        "restaurant": partner.name if partner else "", 
+        "restaurant_address": partner.address if partner else "",
+        "fee": job.delivery_fee, "price": job.order_price, 
+        "comment": job.comment if job.comment else "",
+        "dist_to_rest": "?",
+        "is_return": job.is_return_required,
+        "payment_type": job.payment_type,
+        "estimated_ready_at": job.estimated_ready_at.isoformat() + "Z" if job.estimated_ready_at else None
+    }
+
+    # Находим занятых курьеров
+    busy_couriers_res = await db.execute(
+        select(DeliveryJob.courier_id)
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        .where(DeliveryJob.courier_id.is_not(None))
+    )
+    busy_ids = set(busy_couriers_res.scalars().all())
+
+    # Находим онлайн курьеров
+    online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
+
+    async def notify_new_courier_async(c):
+        is_location_fresh = True
+        if c.last_seen:
+            diff = datetime.utcnow() - c.last_seen
+            if diff.total_seconds() > 1800: 
+                is_location_fresh = False
+        
+        dist_to_rest = None
+        if is_location_fresh and c.lat and c.lon and rest_lat and rest_lon:
+            dist_to_rest = calculate_distance(c.lat, c.lon, rest_lat, rest_lon)
+        
+        if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
+            return 
+            
+        display_dist = dist_to_rest if (is_location_fresh and dist_to_rest is not None) else "?"
+        c_data = personal_data.copy()
+        c_data["dist_to_rest"] = display_dist
+
+        await manager.notify_courier(c.id, {"type": "new_order", "data": c_data})
+        
+        if c.fcm_token:
+            await send_push_to_couriers([c.fcm_token], "🔥 Нове замовлення!", f"💰 {job.delivery_fee} грн", job_id=job.id, fee=job.delivery_fee)
+
+    for c in online_couriers:
+        if c.id in busy_ids: continue
+        asyncio.create_task(notify_new_courier_async(c))
+
+    # Рассылка в Telegram
+    res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
+    for c in res_tg.scalars().all():
+        if c.id in busy_ids: continue
+        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {job.delivery_fee} грн\n📍 {partner.name if partner else ''}"))
+
+    return RedirectResponse(f"/admin/delivery?message=Кур'єра відв'язано. Пошук для замовлення #{job.id} розпочато заново.", status_code=302)
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(db: AsyncSession = Depends(get_db), _ = Depends(check_admin_auth)):
