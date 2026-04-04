@@ -1599,6 +1599,10 @@ def get_courier_pwa_html(courier, config):
                     container.innerHTML = html;
                 }} catch(e) {{}}
             }}
+            function openChat() {{
+                document.getElementById('chatModal').classList.add('active');
+                loadChatHistory(); // Одразу підвантажуємо історію повідомлень
+            }}
 
             function closeChat() {{
                 document.getElementById('chatModal').classList.remove('active');
