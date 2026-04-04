@@ -75,7 +75,7 @@ def get_rating_reports_html(
     # Таблиця відгуків
     reviews_rows = ""
     if not reviews:
-        reviews_rows = "<tr><td colspan='5' style='text-align:center;'>Немає відгуків за обраний період.</td></tr>"
+        reviews_rows = "<tr><td colspan='6' style='text-align:center;'>Немає відгуків за обраний період.</td></tr>"
     else:
         for r in reviews:
             stars = "⭐" * r['rating']
@@ -83,6 +83,7 @@ def get_rating_reports_html(
             <tr>
                 <td data-label="Дата">{r['date_str']}</td>
                 <td data-label="Замовлення">#{r['job_id']}</td>
+                <td data-label="Заклад"><b>{r['partner_name']}</b></td>
                 <td data-label="Кур'єр"><b style="color:#f8fafc;">{r['courier_name']}</b></td>
                 <td data-label="Оцінка" style="color: #facc15;">{stars} ({r['rating']})</td>
                 <td data-label="Відгук" style="font-style: italic; color: #cbd5e1;">{r['review']}</td>
@@ -169,6 +170,7 @@ def get_rating_reports_html(
                             <tr>
                                 <th>Дата</th>
                                 <th>Замовлення</th>
+                                <th>Заклад</th>
                                 <th>Кур'єр</th>
                                 <th>Оцінка</th>
                                 <th>Коментар закладу/клієнта</th>
@@ -229,7 +231,7 @@ async def admin_rating_reports_page(
         job_conditions.append(DeliveryJob.courier_id == int(courier_id))
 
     # 4. Витягуємо замовлення
-    jobs_query = select(DeliveryJob).where(and_(*job_conditions))
+    jobs_query = select(DeliveryJob).options(joinedload(DeliveryJob.partner)).where(and_(*job_conditions))
     jobs = (await db.execute(jobs_query)).scalars().all()
 
     # 5. Агрегуємо статистику та відгуки
@@ -265,6 +267,7 @@ async def admin_rating_reports_page(
                 'date_str': format_local_time(j.delivered_at, tz_string),
                 'raw_date': j.delivered_at,
                 'job_id': j.id,
+                'partner_name': j.partner.name if getattr(j, 'partner', None) else "Невідомо",
                 'courier_name': courier_map[cid].name,
                 'rating': j.courier_rating,
                 'review': j.courier_review or "-"
