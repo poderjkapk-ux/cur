@@ -920,9 +920,9 @@ async def get_courier_motivators(
     )
     active_motivators = (await db.execute(query_mot)).scalars().all()
     
+    # ВИПРАВЛЕННЯ: Прибрано фільтр статусів. Тепер завантажуються всі записи (completed, failed, in_progress, reward_active)
     query_prog = select(CourierMotivatorProgress).options(joinedload(CourierMotivatorProgress.motivator)).where(
-        CourierMotivatorProgress.courier_id == courier.id,
-        CourierMotivatorProgress.status.in_(["in_progress", "reward_active"])
+        CourierMotivatorProgress.courier_id == courier.id
     )
     progress_records = (await db.execute(query_prog)).scalars().all()
     progress_dict = {p.motivator_id: p for p in progress_records}
@@ -950,7 +950,7 @@ async def get_courier_motivators(
             "description": mot.description,
             "target_orders": mot.target_orders,
             "current_orders": prog.current_orders,
-            "period_days": mot.period_days,     # <-- ДОДАНО ВИПРАВЛЕННЯ
+            "period_days": mot.period_days,
             "reward_days": mot.reward_days,
             "reward_commission": mot.reward_commission,
             "status": prog.status,
