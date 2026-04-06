@@ -413,6 +413,39 @@ DASHBOARD_CSS = """
     .btn-mini.success:hover { background: #22c55e; }
     .btn-mini.warn:hover { background: #f59e0b; }
 
+    /* Premium Action Buttons */
+    .btn-pro {
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        border: none; border-radius: 12px; padding: 10px 16px; cursor: pointer;
+        font-size: 0.85rem; font-weight: 700; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        text-decoration: none; color: white; white-space: nowrap;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-transform: uppercase; letter-spacing: 0.5px;
+        position: relative; overflow: hidden;
+    }
+    .btn-pro::after {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+        background: linear-gradient(rgba(255,255,255,0.1), transparent);
+        border-radius: inherit; opacity: 0; transition: 0.3s;
+    }
+    .btn-pro:hover::after { opacity: 1; }
+    .btn-pro:hover { transform: translateY(-2px); }
+    .btn-pro:active { transform: scale(0.96); }
+    
+    .btn-pro.info { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+    .btn-pro.info:hover { box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4); }
+    
+    .btn-pro.success { background: linear-gradient(135deg, #10b981, #059669); }
+    .btn-pro.success:hover { box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4); }
+    
+    .btn-pro.danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+    .btn-pro.danger:hover { box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4); }
+    
+    .btn-pro.warn { background: linear-gradient(135deg, #f59e0b, #ea580c); }
+    .btn-pro.warn:hover { box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4); }
+
+    .actions-cell-content { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+    .btn-group-row { display: flex; gap: 8px; }
+
     /* Forms */
     label { color: #94a3b8; font-size: 0.85rem; margin-bottom: 5px; display: block; }
     input, select, textarea {
@@ -465,8 +498,15 @@ DASHBOARD_CSS = """
             border-top: 1px solid rgba(255,255,255,0.1);
         }
         .actions-cell::before { display: none; }
-        .actions-cell > div { justify-content: space-between; width: 100%; }
-        .btn-mini { width: 42px; height: 42px; font-size: 1.1rem; }
+        .actions-cell > div.actions-cell-content { 
+            flex-direction: column; width: 100%; align-items: stretch; gap: 12px;
+        }
+        .btn-group-row { width: 100%; }
+        .btn-group-row > * { flex: 1; }
+        .btn-pro { 
+            padding: 16px 20px; font-size: 1rem; border-radius: 16px; 
+            box-shadow: 0 6px 15px rgba(0,0,0,0.2); 
+        }
         .payment-options { grid-template-columns: 1fr; gap: 8px; }
         .courier-cell { flex-direction: column; align-items: flex-end; text-align: right; }
         .courier-cell::before { align-self: flex-start; }
@@ -906,13 +946,11 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
     active_rows = ""
     for j in active_jobs:
         track_btn = ""
-        
-        # Кнопка отмены скрыта по умолчанию
         cancel_btn = "" 
         
         # Показываем кнопку отмены ТОЛЬКО если курьер еще не найден
         if j.status == 'pending':
-            cancel_btn = f'<button class="btn-mini danger" onclick="cancelOrder({j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i></button>'
+            cancel_btn = f'<button class="btn-pro danger" onclick="cancelOrder({j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i> Скасувати</button>'
             
         comm_btns = ""
         
@@ -1012,8 +1050,10 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
 
             phone_link = f"tel:{c_phone}"
             comm_btns = f"""
-            <a href="{phone_link}" class="btn-mini success" title="Зателефонувати"><i class="fa-solid fa-phone"></i></a>
-            <button class="btn-mini info" onclick="openChat({j.id}, 'Кур\\'єр {j.courier.name}')" title="Чат"><i class="fa-solid fa-comments"></i></button>
+            <div class="btn-group-row">
+                <a href="{phone_link}" class="btn-pro success" title="Зателефонувати"><i class="fa-solid fa-phone"></i> Дзвінок</a>
+                <button class="btn-pro info" onclick="openChat({j.id}, 'Кур\\'єр {j.courier.name}')" title="Чат"><i class="fa-solid fa-comments"></i> Чат</button>
+            </div>
             """
         else:
             # Якщо кур'єра ще немає, показуємо тільки таймлайн "Створено"
@@ -1023,7 +1063,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             status_bg = "rgba(254, 240, 138, 0.2)"
             status_fg = "#fef08a"
             status_text = "Прийнято"
-            track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
+            track_btn = f'<button class="btn-pro info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i> Трекінг</button>'
         
         elif j.status == 'arrived_pickup':
             status_bg = "rgba(250, 204, 21, 0.2)"
@@ -1039,25 +1079,25 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             status_bg = "rgba(191, 219, 254, 0.2)"
             status_fg = "#bfdbfe"
             status_text = "В дорозі"
-            track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
+            track_btn = f'<button class="btn-pro info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i> Трекінг</button>'
             
         elif j.status == 'returning':
             status_bg = "rgba(251, 146, 60, 0.2)"
             status_fg = "#fb923c"
             status_text = "↩️ Повернення"
-            track_btn = f'<button class="btn-mini info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i></button>'
+            track_btn = f'<button class="btn-pro info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i> Трекінг</button>'
 
         # --- КНОПКА ДЕЙСТВИЯ (ACTION BTN) ---
         if j.status == 'pending':
             action_btn = f"""
-            <button class="btn-mini warn" onclick="boostOrder({j.id})" title="Підняти ціну (+10 грн)">
-                <i class="fa-solid fa-fire"></i> +10
+            <button class="btn-pro warn" onclick="boostOrder({j.id})" title="Підняти ціну (+10 грн)">
+                <i class="fa-solid fa-fire"></i> Підняти ціну (+10 грн)
             </button>
             """
         elif j.status == 'returning':
             action_btn = f"""
-            <button class="btn-mini success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей">
-                <i class="fa-solid fa-sack-dollar"></i> Гроші
+            <button class="btn-pro success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей">
+                <i class="fa-solid fa-sack-dollar"></i> Гроші отримано
             </button>
             """
         elif j.status in ['assigned', 'arrived_pickup']:
@@ -1066,25 +1106,25 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             # --- НОВАЯ КНОПКА: Подтверждение оплаты выкупа (только если курьер уже прибыл) ---
             if j.payment_type == 'buyout' and not getattr(j, 'is_return_required', False) and j.status == 'arrived_pickup':
                 action_btn += f"""
-                <button class="btn-mini success" onclick="confirmBuyoutPaid({j.id})" title="Підтвердити оплату від кур'єра">
-                    <i class="fa-solid fa-check-double"></i> Оплачено
+                <button class="btn-pro success" onclick="confirmBuyoutPaid({j.id})" title="Підтвердити оплату від кур'єра" style="margin-bottom: 8px;">
+                    <i class="fa-solid fa-check-double"></i> Кур'єр оплатив
                 </button>
                 """
 
             if not is_ready:
                 t_est_ready = format_local_time(j.estimated_ready_at, tz_string, '%H:%M') if getattr(j, 'estimated_ready_at', None) else None
-                ready_info = f"<div style='color:#facc15; font-size:0.75rem; margin-bottom:5px; text-align:center;'>⏱ Автоматично о {t_est_ready}</div>" if t_est_ready else ""
+                ready_info = f"<div style='color:#facc15; font-size:0.8rem; margin-bottom:8px; text-align:center;'>⏱ Авто-готовність о {t_est_ready}</div>" if t_est_ready else ""
                 
                 action_btn += f"""
-                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                <div style="display:flex; flex-direction:column; width:100%;">
                     {ready_info}
-                    <button class="btn-mini success" onclick="markReady({j.id})" title="Повідомити про готовність РАНІШЕ">
-                        <i class="fa-solid fa-utensils"></i> Готово
+                    <button class="btn-pro success" onclick="markReady({j.id})" title="Повідомити про готовність РАНІШЕ">
+                        <i class="fa-solid fa-utensils"></i> Замовлення готове
                     </button>
                 </div>
                 """
             else:
-                action_btn += '<span style="color:#4ade80; font-size:0.8rem; font-weight:bold; margin-right:5px;">🍳 Готово</span>'
+                action_btn += '<div style="color:#4ade80; font-size:1rem; font-weight:bold; text-align:center; padding:12px; border:2px dashed rgba(74, 222, 128, 0.4); border-radius:14px; background:rgba(74, 222, 128, 0.05);"><i class="fa-solid fa-check"></i> Готово</div>'
         
         payment_badges = {
             "prepaid": "<span style='color:#4ade80'>✅ Оплачено</span>",
@@ -1114,7 +1154,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 {courier_info}
                 {timeline_html} </td>
             <td class="actions-cell">
-                <div style="display:flex; gap:8px; align-items:center; justify-content: flex-end;">
+                <div class="actions-cell-content">
                     {comm_btns}
                     {action_btn}
                     {track_btn}
