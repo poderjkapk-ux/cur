@@ -1727,6 +1727,42 @@ async def get_current_partner(request: Request, db: AsyncSession = Depends(get_d
 # ==========================================
 # НАТИВНІ JSON API ДЛЯ ANDROID ДОДАТКА ПАРТНЕРА
 # ==========================================
+@app.post("/api/partner/reset_password")
+async def reset_partner_password(
+    email: str = Form(...), 
+    db: AsyncSession = Depends(get_db)
+):
+    # Очищаем email от лишних пробелов
+    clean_email = email.strip()
+    
+    # Ищем партнера (заведение) в базе данных
+    result = await db.execute(select(DeliveryPartner).where(DeliveryPartner.email == clean_email))
+    partner = result.scalar_one_or_none()
+    
+    if not partner:
+        return JSONResponse(status_code=404, content={"detail": "Заклад з таким Email не знайдено."})
+    
+    # Проверяем, привязан ли Telegram (туда будет отправлен новый пароль)
+    if not partner.telegram_chat_id:
+        return JSONResponse(status_code=400, content={"detail": "У цього акаунта не підключений Telegram. Скидання неможливе."})
+        
+    # Генерируем новый безопасный пароль
+    new_password = secrets.token_urlsafe(6)
+    
+    # Обновляем хэш пароля в базе данных
+    partner.hashed_password = auth.get_password_hash(new_password)
+    await db.commit()
+    
+    # Отправляем сообщение с новым паролем в Telegram заведения
+    tg_text = (
+        f"🔐 <b>Відновлення пароля</b>\n\n"
+        f"Ваш новий пароль для входу в кабінет закладу:\n"
+        f"👉 <code>{new_password}</code>\n\n"
+        f"<i>Тепер ви можете увійти в систему, використовуючи цей пароль.</i>"
+    )
+    asyncio.create_task(bot_service.send_telegram_message(partner.telegram_chat_id, tg_text))
+    
+    return JSONResponse({"status": "ok"})
 
 @app.post("/api/partner/login_native")
 async def api_partner_login_native(email: str = Form(...), password: str = Form(...), db: AsyncSession = Depends(get_db)):
@@ -2012,7 +2048,7 @@ async def partner_dashboard(request: Request, db: AsyncSession = Depends(get_db)
         .order_by(DeliveryJob.id.desc())
     )
     # Передаємо таймзону (tz) останнім аргументом в шаблон
-    return templates_partner.get_partner_dashboard_html(partner, result.scalars().all(), tz, min_fee, fee_reason)
+    return templates_partner.get_partner_dashboard_html(partner, result.scalars().all(), tz, min_fee, fee_reason, config)
 
 @app.post("/api/partner/confirm_return")
 async def partner_confirm_return(

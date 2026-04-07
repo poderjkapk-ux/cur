@@ -920,10 +920,11 @@ DASHBOARD_SCRIPT = """
 </script>
 """
 
-def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob], tz_string: str = "Europe/Kiev", min_fee: float = 80.0, fee_reason: str = ""):
+def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob], tz_string: str = "Europe/Kiev", min_fee: float = 80.0, fee_reason: str = "", config: dict = None):
     """
     Дашборд партнера з підтримкою часових поясів та візуальним таймлайном.
     """
+    if config is None: config = {}
     
     # Виносимо телефон у безпечну змінну для HTML атрибутів, щоб уникнути конфліктів лапок у f-string
     partner_phone = getattr(partner, 'phone', '')
@@ -1247,7 +1248,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             <div id="addr_results" class="autocomplete-results"></div>
                         </div>
                         
-                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Ви можете уточнити точку на карті (Одеса)</div>
+                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i>Адреса — для кур'єра. </div>
                         <div id="picker-map"></div>
                         
                         <input type="hidden" name="lat" id="form_lat">
@@ -1378,6 +1379,62 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         </div>
 
         {DASHBOARD_SCRIPT}
+
+        <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
+        <script>
+            const firebaseConfig = {{
+                apiKey: "{config.get('firebase_api_key', '')}",
+                projectId: "{config.get('firebase_project_id', '')}",
+                messagingSenderId: "{config.get('firebase_sender_id', '')}",
+                appId: "{config.get('firebase_app_id', '')}"
+            }};
+
+            if(firebaseConfig.apiKey) {{
+                try {{
+                    firebase.initializeApp(firebaseConfig);
+                    const messaging = firebase.messaging();
+                    
+                    async function requestPushPermission() {{
+                        try {{
+                            const currentToken = await messaging.getToken();
+                            if (currentToken) {{
+                                sendTokenToServer(currentToken);
+                            }} else {{
+                                console.log('Немає токена. Дозвольте сповіщення в браузері.');
+                            }}
+                        }} catch (err) {{
+                            console.log('Помилка отримання токена FCM: ', err);
+                        }}
+                    }}
+                    
+                    function sendTokenToServer(token) {{
+                        const fd = new FormData();
+                        fd.append('token', token);
+                        fetch('/api/partner/fcm_token', {{ method: 'POST', body: fd }});
+                    }}
+                    
+                    // Обробка повідомлень, коли сторінка відкрита
+                    messaging.onMessage((payload) => {{
+                        console.log('Push received: ', payload);
+                        const body = payload.data?.body || "Нове повідомлення";
+                        if (typeof showToast !== 'undefined') showToast(body);
+                        if (typeof alertSound !== 'undefined') alertSound.play().catch(e => console.log(e));
+                    }});
+                    
+                    // Реєстрація Service Worker (працює у фоні)
+                    if ('serviceWorker' in navigator) {{
+                        navigator.serviceWorker.register('/firebase-messaging-sw.js')
+                        .then(function(registration) {{
+                            messaging.useServiceWorker(registration);
+                            requestPushPermission();
+                        }});
+                    }} else {{
+                        requestPushPermission(); // Якщо SW не підтримується
+                    }}
+                }} catch(e) {{ console.error("Firebase init error", e); }}
+            }}
+        </script>
     </body>
     </html>
     """
