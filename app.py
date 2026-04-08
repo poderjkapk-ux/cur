@@ -1911,7 +1911,13 @@ async def api_create_order_native(
 
     full_comment = comment
     if change_from:
-        full_comment = f"[СУМА/РЕШТА: {change_from}] {full_comment}".strip()
+        # Очищаем от старых дублей
+        cleaned_comment = full_comment.replace(f"[СУМА/РЕШТА: {change_from}]", "")
+        cleaned_comment = cleaned_comment.replace(f"Решта з {change_from}.", "")
+        cleaned_comment = cleaned_comment.replace(f"Решта з {change_from}", "")
+        
+        # Добавляем чистый текст
+        full_comment = f"Решта з {change_from}. {cleaned_comment}".strip()
         
     if is_return_required:
         full_comment = f"⚠️ ПОВЕРНЕННЯ КОШТІВ! {full_comment}"
@@ -2227,13 +2233,18 @@ async def create_partner_order(
 
     full_comment = comment
     if change_from:
-        full_comment = f"[СУМА/РЕШТА: {change_from}] {full_comment}".strip()
+        # Очищаем от старых дублей
+        cleaned_comment = full_comment.replace(f"[СУМА/РЕШТА: {change_from}]", "")
+        cleaned_comment = cleaned_comment.replace(f"Решта з {change_from}.", "")
+        cleaned_comment = cleaned_comment.replace(f"Решта з {change_from}", "")
+        
+        # Добавляем чистый текст
+        full_comment = f"Решта з {change_from}. {cleaned_comment}".strip()
         
     if is_return_required:
         full_comment = f"⚠️ ПОВЕРНЕННЯ КОШТІВ! {full_comment}"
     if payment_type == 'buyout':
         full_comment = f"💰 ВИКУП ({order_price} грн)! {full_comment}"
-
     estimated_ready_at = datetime.utcnow() + timedelta(minutes=prep_time)
 
     job = DeliveryJob(
