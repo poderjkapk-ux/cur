@@ -696,7 +696,8 @@ DASHBOARD_SCRIPT = """
                                 else if (a.hamlet) cleanParts.push(a.hamlet);
                                 else cleanParts.push(mainName);
                                 
-                                if (a.house_number) cleanParts.push(a.house_number);
+                                // ВЫРЕЗАЕМ: if (a.house_number) cleanParts.push(a.house_number);
+                                // Теперь номер дома мы не пишем в строку улицы
                                 
                                 if (a.city) cleanParts.push(a.city);
                                 else if (a.town) cleanParts.push(a.town);
@@ -704,6 +705,12 @@ DASHBOARD_SCRIPT = """
                                 
                                 addrInput.value = cleanParts.join(', ');
                                 addrResults.style.display = 'none';
+                                
+                                // АВТОЗАПОЛНЕНИЕ: Если геокодер нашел номер дома, сразу подставляем его в нужное поле
+                                const houseInput = document.querySelector('input[name="house_number"]');
+                                if (houseInput && a.house_number) {
+                                    houseInput.value = a.house_number;
+                                }
                                 
                                 const lat = parseFloat(item.lat);
                                 const lon = parseFloat(item.lon);
@@ -729,7 +736,52 @@ DASHBOARD_SCRIPT = """
                 }
             }, 800);
         });
+        
         document.addEventListener('click', (e) => { if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; });
+        
+        // --- ПЕРЕЗАПИС ГЕОКОДИНГУ ПРИ ВВОДІ НОМЕРА БУДИНКУ ---
+        const houseInputNode = document.querySelector('input[name="house_number"]');
+        if (houseInputNode) {
+            let houseTimeout = null;
+            houseInputNode.addEventListener('input', function() {
+                clearTimeout(houseTimeout);
+                const street = addrInput.value.trim();
+                const house = this.value.trim();
+                
+                if (street.length < 3 || house.length === 0) return;
+                
+                houseTimeout = setTimeout(async () => {
+                    const reqId = ++latestReqId;
+                    const query = `${street}, ${house}, Одеса`;
+                    try {
+                        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&limit=1`;
+                        const res = await fetch(url);
+                        
+                        if (reqId !== latestReqId) return;
+                        if (!res.ok) throw new Error("API Error");
+                        
+                        const data = await res.json();
+                        
+                        if (data && data.length > 0) {
+                            const lat = parseFloat(data[0].lat);
+                            const lon = parseFloat(data[0].lon);
+                            
+                            if (latInput) latInput.value = lat; 
+                            if (lonInput) lonInput.value = lon;
+                            
+                            if (pickerMap) { 
+                                pickerMarker.setLatLng([lat, lon]); 
+                                pickerMap.setView([lat, lon], 17); // Зумуємо ближче на будинок
+                            } else { 
+                                initPickerMap(lat, lon); 
+                            }
+                        }
+                    } catch(e) { 
+                        console.error("House search error:", e); 
+                    }
+                }, 800);
+            });
+        }
     }
     
     // --- WEBSOCKET ---
@@ -1243,12 +1295,23 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                         </div>
 
                         <div class="autocomplete-wrapper">
-                            <label>Куди везти (Почніть вводити адресу)</label>
-                            <input type="text" id="addr_input" name="dropoff_address" placeholder="Вулиця, номер будинку..." required autocomplete="off">
+                            <label>Вулиця (Почніть вводити назву)</label>
+                            <input type="text" id="addr_input" name="street" placeholder="Назва вулиці..." required autocomplete="off">
                             <div id="addr_results" class="autocomplete-results"></div>
                         </div>
+
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:15px; margin-bottom:15px;">
+                            <div>
+                                <label>Номер будинку</label>
+                                <input type="text" name="house_number" placeholder="Напр. 10а" required style="margin-bottom:0;">
+                            </div>
+                            <div>
+                                <label>Квартира</label>
+                                <input type="text" name="apartment" placeholder="Напр. 42" style="margin-bottom:0;">
+                            </div>
+                        </div>
                         
-                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i>Адреса — для кур'єра. </div>
+                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті</div>
                         <div id="picker-map"></div>
                         
                         <input type="hidden" name="lat" id="form_lat">
@@ -1285,6 +1348,9 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             </select>
                         </div>
                         
+                        <label>Точна сума або решта з</label>
+                        <input type="text" name="change_from" placeholder="Напр. Точна сума або Здача з 1000">
+
                         <label>Коментар (Під'їзд, поверх, код)</label>
                         <input type="text" name="comment" placeholder="Деталі...">
                         

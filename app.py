@@ -590,6 +590,7 @@ async def admin_force_cancel_order(
             await send_push_to_couriers([courier.fcm_token], "Замовлення скасовано", cancel_msg, job_id=job.id)
 
     return RedirectResponse(f"/admin/delivery?message=Замовлення #{job.id} успішно скасовано.", status_code=302)
+
 @app.post("/admin/delivery/unassign_courier")
 async def admin_unassign_courier(
     job_id: int = Form(...), 
@@ -1867,13 +1868,21 @@ async def api_partner_min_fee_native(db: AsyncSession = Depends(get_db), partner
 
 @app.post("/api/partner/create_order_native")
 async def api_create_order_native(
-    dropoff_address: str = Form(...), customer_phone: str = Form(...), 
+    dropoff_address: str = Form(None), 
+    street: str = Form(None),
+    house_number: str = Form(None),
+    apartment: str = Form(None),
+    change_from: str = Form(""),
+    customer_phone: str = Form(...), 
     customer_name: str = Form(""), 
-    order_price: float = Form(0.0), delivery_fee: float = Form(80.0), 
-    comment: str = Form(""), payment_type: str = Form("prepaid"), 
+    order_price: float = Form(0.0), 
+    delivery_fee: float = Form(80.0), 
+    comment: str = Form(""), 
+    payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
     prep_time: int = Form(15), 
-    db: AsyncSession = Depends(get_db), partner: DeliveryPartner = Depends(get_current_partner)
+    db: AsyncSession = Depends(get_db), 
+    partner: DeliveryPartner = Depends(get_current_partner)
 ):
     try:
         min_fee_from_db = float(await get_setting(db, "min_delivery_fee", 80.0))
@@ -1883,10 +1892,27 @@ async def api_create_order_native(
     if delivery_fee < min_fee_from_db:
         return JSONResponse({"status": "error", "message": f"Мінімальна вартість доставки зараз складає {min_fee_from_db} грн"}, status_code=400)
         
-    client_lat, client_lon = await geocode_address(dropoff_address)
+    search_address = dropoff_address
+    if street and house_number:
+        # Красивый адрес для курьера
+        dropoff_address = f"{street}, буд. {house_number}"
+        if apartment:
+            dropoff_address += f", кв. {apartment}"
+        
+        # Строгий адрес для Nominatim
+        search_address = f"{street}, {house_number}, Одеса"
+    elif not dropoff_address:
+        dropoff_address = "Адреса не вказана"
+        search_address = dropoff_address
+
+    # Ищем координаты по чистой строке
+    client_lat, client_lon = await geocode_address(search_address)
     rest_lat, rest_lon = await geocode_address(partner.address)
 
     full_comment = comment
+    if change_from:
+        full_comment = f"[СУМА/РЕШТА: {change_from}] {full_comment}".strip()
+        
     if is_return_required:
         full_comment = f"⚠️ ПОВЕРНЕННЯ КОШТІВ! {full_comment}"
     if payment_type == 'buyout':
@@ -2152,7 +2178,11 @@ async def partner_confirm_buyout_paid(
 
 @app.post("/api/partner/create_order")
 async def create_partner_order(
-    dropoff_address: str = Form(...), 
+    dropoff_address: str = Form(None), 
+    street: str = Form(None),
+    house_number: str = Form(None),
+    apartment: str = Form(None),
+    change_from: str = Form(""),
     customer_phone: str = Form(...), 
     customer_name: str = Form(""),
     order_price: float = Form(0.0), 
@@ -2174,14 +2204,31 @@ async def create_partner_order(
     if delivery_fee < min_fee_from_db:
         delivery_fee = min_fee_from_db
         
+    search_address = dropoff_address
+    if street and house_number:
+        # Красивый адрес для курьера
+        dropoff_address = f"{street}, буд. {house_number}"
+        if apartment:
+            dropoff_address += f", кв. {apartment}"
+            
+        # Строгий адрес для Nominatim
+        search_address = f"{street}, {house_number}, Одеса"
+    elif not dropoff_address:
+        dropoff_address = "Адреса не вказана"
+        search_address = dropoff_address
+
     client_lat, client_lon = lat, lon
     
     if not client_lat or not client_lon:
-        client_lat, client_lon = await geocode_address(dropoff_address)
+        # Ищем координаты по чистой строке
+        client_lat, client_lon = await geocode_address(search_address)
 
     rest_lat, rest_lon = await geocode_address(partner.address)
 
     full_comment = comment
+    if change_from:
+        full_comment = f"[СУМА/РЕШТА: {change_from}] {full_comment}".strip()
+        
     if is_return_required:
         full_comment = f"⚠️ ПОВЕРНЕННЯ КОШТІВ! {full_comment}"
     if payment_type == 'buyout':
