@@ -900,6 +900,270 @@ def get_settings_page_html(config, message=""):
         </div>
     </body></html>
     """
+def get_instruction_page_html():
+    """HTML для детальної сторінки-інструкції по оновленому додатку закладу"""
+    return f"""
+    <!DOCTYPE html><html lang="uk">
+    <head>
+        <title>Детальна інструкція: Панель Закладу Restify</title>
+        {GLOBAL_STYLES}
+        <style>
+            body {{ display: block; padding: 20px; background-color: var(--bg-body); color: var(--text-main); line-height: 1.6; }}
+            .content-container {{ 
+                max-width: 900px; margin: 20px auto; padding: 50px; 
+                background: var(--bg-card); border-radius: var(--radius); 
+                border: 1px solid var(--border); box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            }}
+            .back-link {{ display: inline-flex; align-items: center; gap: 8px; margin-bottom: 20px; color: var(--primary); text-decoration: none; font-weight: 600; font-size: 1.1rem; transition: 0.2s; }}
+            .back-link:hover {{ transform: translateX(-5px); color: var(--primary-hover); }}
+            
+            h1 {{ font-size: 2.5rem; margin-top: 0; margin-bottom: 10px; color: white; }}
+            .subtitle {{ color: var(--text-muted); font-size: 1.15rem; margin-bottom: 40px; border-bottom: 1px solid var(--border); padding-bottom: 30px; }}
+            
+            .toc {{ background: rgba(0,0,0,0.2); padding: 25px; border-radius: 12px; margin-bottom: 40px; border: 1px solid rgba(255,255,255,0.05); }}
+            .toc h3 {{ margin-top: 0; color: var(--accent); margin-bottom: 15px; }}
+            .toc ul {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }}
+            .toc a {{ color: #e2e8f0; text-decoration: none; font-weight: 500; display: flex; align-items: center; gap: 10px; }}
+            .toc a:hover {{ color: var(--primary); }}
+            
+            .section {{ margin-bottom: 60px; scroll-margin-top: 80px; }}
+            .section h2 {{ color: white; font-size: 1.8rem; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 15px; }}
+            .section h2 i {{ color: var(--primary); background: rgba(99, 102, 241, 0.1); padding: 12px; border-radius: 12px; font-size: 1.2rem; }}
+            
+            .info-block {{ background: rgba(99, 102, 241, 0.05); border-left: 4px solid var(--primary); padding: 20px; border-radius: 0 12px 12px 0; margin: 25px 0; }}
+            .info-block.warning {{ background: rgba(250, 204, 21, 0.05); border-left-color: var(--accent); }}
+            .info-block h4 {{ margin-top: 0; margin-bottom: 10px; color: white; }}
+            .info-block p {{ margin: 0; color: var(--text-muted); font-size: 0.95rem; }}
+
+            .feature-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }}
+            .feature-item {{ background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px; border: 1px solid var(--border); }}
+            .feature-item h4 {{ margin-top: 0; color: #e2e8f0; margin-bottom: 10px; font-size: 1.1rem; }}
+            .feature-item p {{ margin: 0; font-size: 0.95rem; color: var(--text-muted); }}
+            .feature-item .badge {{ display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; margin-bottom: 10px; }}
+            
+            .badge-prepaid {{ background: rgba(74, 222, 128, 0.2); color: #4ade80; }}
+            .badge-buyout {{ background: rgba(250, 204, 21, 0.2); color: var(--accent); }}
+            
+            .img-placeholder {{ width: 100%; height: auto; background: #0f172a; border-radius: 12px; border: 1px solid var(--border); margin: 25px 0; display: block; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 1.2rem; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }}
+            
+            .email-form-box {{ background: linear-gradient(145deg, rgba(99, 102, 241, 0.1) 0%, rgba(236, 72, 153, 0.05) 100%); padding: 40px; border-radius: 16px; text-align: center; border: 1px solid rgba(99, 102, 241, 0.3); margin-top: 80px; }}
+            .email-form-box h3 {{ font-size: 1.8rem; margin-top: 0; margin-bottom: 15px; color: white; }}
+            
+            .contact-form-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 25px; text-align: left; }}
+            .contact-form-grid input {{ width: 100%; background: rgba(0,0,0,0.3); margin-bottom: 0; }}
+            .contact-form-grid .full-width {{ grid-column: 1 / -1; }}
+            .contact-form-grid button {{ padding: 16px; font-size: 1.1rem; width: 100%; grid-column: 1 / -1; margin-top: 10px; }}
+            
+            @media (max-width: 768px) {{
+                .content-container {{ padding: 25px; }}
+                .feature-grid {{ grid-template-columns: 1fr; }}
+                .contact-form-grid {{ grid-template-columns: 1fr; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="content-container">
+            <a href="/" class="back-link"><i class="fa-solid fa-arrow-left"></i> Повернутися на головну</a>
+            
+            <h1>Керівництво Закладу (Партнера)</h1>
+            <p class="subtitle">Повна покрокова інструкція по оновленому додатку: розумний пошук адрес, фільтрація історії, таймлайн та фінансові розрахунки.</p>
+            
+            <div class="toc">
+                <h3>Зміст інструкції</h3>
+                <ul>
+                    <li><a href="#auth"><i class="fa-solid fa-circle-user"></i> 1. Реєстрація, Відновлення пароля та Telegram</a></li>
+                    <li><a href="#create-order"><i class="fa-solid fa-plus"></i> 2. Створення замовлення (Smart-адреси та Карта)</a></li>
+                    <li><a href="#payment-types"><i class="fa-solid fa-wallet"></i> 3. Типи оплати (Викуп vs Повернення)</a></li>
+                    <li><a href="#tracking"><i class="fa-solid fa-route"></i> 4. Активні та Виконані замовлення, Хронологія</a></li>
+                    <li><a href="#actions"><i class="fa-solid fa-bolt"></i> 5. Підняття ціни (Boost) та Керування статусами</a></li>
+                    <li><a href="#finish"><i class="fa-solid fa-star"></i> 6. Повернення коштів та Оцінка</a></li>
+                </ul>
+            </div>
+
+            <div id="auth" class="section">
+                <h2><i class="fa-solid fa-shield-halved"></i> 1. Реєстрація та Авторизація</h2>
+                <p>Додаток працює на телефонах та планшетах. Для безпеки платформи використовується обов'язкова прив'язка Telegram.</p>
+                
+                <ol style="padding-left: 20px; display: grid; gap: 15px;">
+                    <li>Натисніть <b>"Зареєструватися"</b> на екрані входу.</li>
+                    <li>Введіть назву вашого закладу, адресу, Email та придумайте пароль.</li>
+                    <li>Натисніть кнопку <b>"Підтвердити в Telegram"</b>. Вас перекине у нашого бота. Натисніть "Start" і поділіться номером телефону (кнопка "Надіслати контакт").</li>
+                    <li>Поверніться в додаток — ваш акаунт готовий!</li>
+                </ol>
+
+                <div class="info-block">
+                    <h4>Забули пароль?</h4>
+                    <p>На екрані входу є кнопка <b>"Забули пароль?"</b>. Просто введіть свій Email, і система миттєво згенерує новий пароль та відправить його у ваш прив'язаний Telegram-чат.</p>
+                </div>
+            </div>
+
+            <div id="create-order" class="section">
+                <h2><i class="fa-solid fa-motorcycle"></i> 2. Створення замовлення (Нова форма)</h2>
+                <p>Ми оновили форму створення замовлення, додавши розумні підказки та карту.</p>
+                
+                <div class="feature-grid">
+                    <div class="feature-item">
+                        <h4>Розумна адреса та Карта</h4>
+                        <p>Почніть вводити назву <b>Вулиці</b>, і додаток запропонує варіанти. Потім вкажіть <b>Будинок</b> та Квартиру. Вбудована карта автоматично переміститься на потрібну точку!</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>Динамічна ціна доставки</h4>
+                        <p>Вкажіть <b>Суму</b> (ціна їжі) та <b>Доставку</b>. Додаток автоматично показує <i>мінімальну ціну доставки у місті</i>. Якщо погодні умови складні, система може рекомендувати вищу ставку.</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>Час приготування (Таймер)</h4>
+                        <p>Виберіть зручний час (10, 15, 20, 30 хв). Кур'єр отримає точний час "Готово через ...", щоб приїхати ідеально гарячим!</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>Решта та Коментарі</h4>
+                        <p>Якщо клієнт платить великою купюрою, впишіть це в поле <b>"Решта з (₴)"</b>. Також є поле для коментарів (код домофону, тощо).</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="payment-types" class="section">
+                <h2><i class="fa-solid fa-money-bill-wave"></i> 3. Типи оплати (Оплачено чи Викуп)</h2>
+                <p>Тепер інтерфейс оплат став максимально простим. Виберіть одну з двох опцій при створенні замовлення:</p>
+                
+                <div class="feature-grid">
+                    <div class="feature-item" style="grid-column: 1 / -1;">
+                        <span class="badge badge-prepaid">✅ Оплачено онлайн</span>
+                        <p>Клієнт вже оплатив замовлення карткою онлайн. Кур'єр просто забирає пакунок і віддає клієнту. Ніяких фінансових розрахунків на касі.</p>
+                    </div>
+                    <div class="feature-item" style="border-color: var(--accent); grid-column: 1 / -1;">
+                        <span class="badge badge-buyout">💰 Готівка (Викуп або Повернення)</span>
+                        <p style="margin-bottom: 10px;">Для замовлень з оплатою готівкою є два можливі сценарії роботи з кур'єром:</p>
+                        <ul style="padding-left: 20px; color: var(--text-muted); font-size: 0.95rem; margin: 0;">
+                            <li style="margin-bottom: 8px;"><b style="color: #e2e8f0;">1. Оплата в закладі (Викуп):</b> Кур'єр приїжджає у ваш заклад і оплачує вартість їжі <b>своїми власними грошима</b> на касі. Потім він їде до клієнта і забирає ці гроші собі.</li>
+                            <li><b style="color: #e2e8f0;">2. Повернення коштів:</b> Якщо кур'єр не має змоги викупити замовлення відразу на касі, він відвозить його, бере гроші у клієнта і <b>зобов'язаний повернутися назад</b> у ваш заклад, щоб віддати цю готівку вам.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="info-block warning">
+                    <h4>Підтвердження Викупу</h4>
+                    <p>Коли кур'єр прибуває до вас і віддає вам гроші за "Викуп", у вашій картці замовлення з'явиться зелена кнопка <b>"ОПЛАЧЕНО"</b>. Обов'язково натисніть її, щоб підтвердити, що ви отримали кошти, і кур'єр міг поїхати до клієнта.</p>
+                </div>
+            </div>
+
+            <div id="tracking" class="section">
+                <h2><i class="fa-solid fa-route"></i> 4. Активні та Виконані замовлення</h2>
+                <p>Ваш Дашборд тепер розділений на зручні вкладки.</p>
+                
+                <ul style="padding-left: 20px; display: grid; gap: 10px;">
+                    <li>📋 <b>Активні:</b> Тут знаходяться всі замовлення, які зараз в роботі (шукають кур'єра або доставляються).</li>
+                    <li>📅 <b>Виконані:</b> Вкладка з історією. Зверху є зручний <b>фільтр по датах</b>: "Сьогодні", "Вчора" або вбудований календар для пошуку старих замовлень.</li>
+                    <li>⏳ <b>Хронологія (Таймлайн):</b> У кожній картці активного замовлення відображається покрокова шкала з часом: "Створено" → "Прийняв" → "Прибув" → "Забрав" → "Доставлено". Система автоматично рахує <b>скільки хвилин пройшло між етапами!</b></li>
+                </ul>
+
+                <p>💬 <b>Внутрішній чат:</b> Якщо у кур'єра є питання, на картці з'явиться червона крапка (badge). Натисніть на іконку конверта, щоб відкрити чат.</p>
+            </div>
+
+            <div id="actions" class="section">
+                <h2><i class="fa-solid fa-arrow-trend-up"></i> 5. Пошук, Підняття ціни (Boost) та Скасування</h2>
+                
+                <p>Поки замовлення очікує кур'єра, картка відображає красиву анімацію пульсуючого "радара". У цей час вам доступні дві дії:</p>
+                
+                <div class="feature-grid">
+                    <div class="feature-item">
+                        <h4><i class="fa-solid fa-fire" style="color: #f97316;"></i> Кнопка "+10 ГРН" (Boost)</h4>
+                        <p>Якщо на вулиці дощ або пікове навантаження і кур'єри не приймають замовлення, натисніть цю помаранчеву кнопку. Ціна доставки миттєво зросте, а всі кур'єри в місті отримають екстрене Push-сповіщення.</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4><i class="fa-solid fa-xmark" style="color: #ef4444;"></i> Кнопка "СКАСУВАТИ"</h4>
+                        <p>Доступна, <b>лише доки замовлення в пошуку</b>. Натисніть її, якщо клієнт передумав. Після того як кур'єр прийняв замовлення, скасувати його можна лише через службу підтримки.</p>
+                    </div>
+                </div>
+
+                <div class="info-block">
+                    <h4><i class="fa-solid fa-check-double" style="color: #4ade80;"></i> Кнопка "ЗАМОВЛЕННЯ ГОТОВЕ"</h4>
+                    <p>Коли кухар закінчив пакувати страву, натисніть цю кнопку. Кур'єр миттєво отримає повідомлення на свій телефон, що він може заходити і забирати пакунок.</p>
+                </div>
+            </div>
+
+            <div id="finish" class="section">
+                <h2><i class="fa-solid fa-flag-checkered"></i> 6. Повернення коштів та Оцінка</h2>
+                
+                <p><b>Режим "Повернення готівки":</b> Якщо ви не використовуєте функцію "Викуп" (тобто клієнт розраховується готівкою при отриманні), після успішного вручення замовлення кур'єр <b>зобов'язаний повернутися у ваш заклад</b>, щоб віддати вам гроші. Це стандартний процес для готівкових замовлень.</p>
+                
+                <p>В цей момент картка замовлення стане помаранчевою, а статус зміниться на <b>"Повернення коштів"</b>. Коли кур'єр фізично приїде і віддасть вам готівку в руки, обов'язково натисніть зелену кнопку <b>"ПІДТВЕРДИТИ ПОВЕРНЕННЯ"</b>. Тільки після вашого підтвердження замовлення буде остаточно закрите, і кур'єр зможе отримувати нові виклики!</p>
+                
+                <div class="info-block">
+                    <h4>Оцінка кур'єра</h4>
+                    <p>Після завершення доставки на картці з'явиться жовта кнопка <b>"ОЦІНИТИ КУР'ЄРА"</b>. Ви можете поставити від 1 до 5 зірок і залишити текстовий коментар. Це впливає на пріоритет отримання замовлень цим кур'єром у майбутньому!</p>
+                </div>
+            </div>
+
+            <div class="email-form-box">
+                <h3>Залишилися питання? Бажаєте підключити заклад?</h3>
+                <p>Заповніть форму нижче</p>
+                
+                <form id="instructionEmailForm" class="contact-form-grid">
+                    <div>
+                        <label style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 5px; display: block;">Назва вашого закладу:</label>
+                        <input type="text" name="restaurant_name" placeholder="Наприклад: Кафе Смак..." required>
+                    </div>
+                    <div>
+                        <label style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 5px; display: block;">Ваше ім'я:</label>
+                        <input type="text" name="contact_name" placeholder="Як до вас звертатися?..." required>
+                    </div>
+                    <div>
+                        <label style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 5px; display: block;">Контактний телефон:</label>
+                        <input type="tel" name="phone" placeholder="+38 (0XX) XXX-XX-XX..." required>
+                    </div>
+                    <div>
+                        <label style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 5px; display: block;">Ваш Email:</label>
+                        <input type="email" name="email" placeholder="info@cafe.ua..." required>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" id="submitEmailBtn">Зв'яжіться зі мною</button>
+                </form>
+                <div id="emailResponseMsg" class="message full-width" style="display: none; margin-top: 15px;"></div>
+            </div>
+
+        </div>
+
+        <script>
+            document.getElementById('instructionEmailForm').addEventListener('submit', async (e) => {{
+                e.preventDefault();
+                const form = e.target;
+                const btn = document.getElementById('submitEmailBtn');
+                const msgEl = document.getElementById('emailResponseMsg');
+                
+                const originalText = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Відправка...';
+                msgEl.style.display = 'none';
+
+                try {{
+                    const response = await fetch('/api/instruction-email', {{
+                        method: 'POST',
+                        body: new FormData(form)
+                    }});
+                    const result = await response.json();
+
+                    msgEl.style.display = 'block';
+                    if (response.ok) {{
+                        msgEl.className = 'message success';
+                        msgEl.innerHTML = `✅ ${{result.message}}`;
+                        form.reset();
+                    }} else {{
+                        msgEl.className = 'message error';
+                        msgEl.textContent = 'Сталася помилка при відправці. Спробуйте пізніше.';
+                    }}
+                }} catch (err) {{
+                    msgEl.style.display = 'block';
+                    msgEl.className = 'message error';
+                    msgEl.textContent = 'Мережева помилка. Перевірте з`єднання.';
+                }} finally {{
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
 
 # --- 5. ПРОФЕСІЙНА ГОЛОВНА СТОРІНКА (Тільки Кур'єри та Ресторани) ---
 
@@ -1299,6 +1563,7 @@ def get_landing_page_html(config: Dict[str, str]):
             <div class="footer-links">
                 <a href="/partner/register">Підключити ресторан</a>
                 <a href="/courier/register">Робота для кур'єрів</a>
+                <a href="/instruction">Інструкція користувача</a>
                 {custom_button_html}
             </div>
             

@@ -392,6 +392,35 @@ async def handle_registration(
     await db.refresh(new_user)
     
     return JSONResponse(content={"detail": "User created successfully."})
+# ==============================================================================
+# ИНСТРУКЦИЯ И СБОР EMAIL
+# ==============================================================================
+
+@app.get("/instruction", response_class=HTMLResponse)
+async def get_instruction_page():
+    """Возвращает отдельную страницу с инструкцией"""
+    return HTMLResponse(content=templates_saas.get_instruction_page_html())
+
+@app.post("/api/instruction-email")
+async def submit_instruction_email(
+    email: str = Form(...),
+    restaurant_name: str = Form(...),
+    contact_name: str = Form(...),
+    phone: str = Form(...)
+):
+    """Принимает данные со страницы инструкций и отправляет в админский TG-канал"""
+    if TG_CHAT_ID:
+        admin_msg = (
+            f"📩 <b>Нова заявка на підключення (З інструкції)</b>\n\n"
+            f"🏪 <b>Заклад:</b> <code>{restaurant_name}</code>\n"
+            f"👤 <b>Ім'я:</b> {contact_name}\n"
+            f"📞 <b>Телефон:</b> <code>{phone}</code>\n"
+            f"📧 <b>Email:</b> <code>{email}</code>"
+        )
+        # Отправляем сообщение в тот же чат, куда идут заявки
+        asyncio.create_task(bot_service.send_telegram_message(TG_CHAT_ID, admin_msg))
+        
+    return JSONResponse({"status": "ok", "message": "Дякуємо! Ми зв'яжемося з вами найближчим часом."})
 
 # ==============================================================================
 # FEEDBACK API (ДЛЯ PWA ТА NATIVE ANDROID)
