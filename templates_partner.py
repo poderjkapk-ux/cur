@@ -563,6 +563,23 @@ DASHBOARD_CSS = """
 DASHBOARD_SCRIPT = """
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+    // --- ЗАЩИТА ФОРМЫ СОЗДАНИЯ ЗАКАЗА ---
+    document.addEventListener("DOMContentLoaded", () => {
+        const orderForm = document.getElementById("orderForm");
+        if (orderForm) {
+            orderForm.addEventListener("submit", function(e) {
+                const btn = this.querySelector('button[type="submit"]');
+                if (btn.disabled) {
+                    e.preventDefault();
+                    return;
+                }
+                btn.disabled = true;
+                btn.style.opacity = '0.7';
+                btn.innerHTML = '<span class="spinner" style="display:inline-block; width:15px; height:15px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 1s infinite linear;"></span> Завантаження...';
+            });
+        }
+    });
+
     // --- ЛОГИКА ОПЛАТЫ ---
     const baseFee = 80; 
     const returnFee = 40; 
@@ -585,18 +602,6 @@ DASHBOARD_SCRIPT = """
         toast.innerHTML = `<i class="fa-solid fa-bell" style="color:#6366f1"></i> <div>${text}</div>`;
         container.appendChild(toast);
         setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 5000);
-    }
-
-    // --- BOOST ---
-    async function boostOrder(id) {
-        if(!confirm("Підняти ціну доставки на 10 грн, щоб пришвидшити пошук?")) return;
-        const fd = new FormData(); fd.append('job_id', id); fd.append('amount', 10);
-        try {
-            const res = await fetch('/api/partner/boost_order', {method:'POST', body:fd});
-            const data = await res.json();
-            if(res.ok) { showToast(`💸 Ціну піднято! Нова сума: ${data.new_fee} грн`); setTimeout(() => location.reload(), 1500); }
-            else { alert(data.message || "Помилка"); }
-        } catch(e) { alert("Помилка з'єднання"); }
     }
 
     // ==========================================
@@ -899,11 +904,46 @@ DASHBOARD_SCRIPT = """
         await fetch('/api/chat/send', {method: 'POST', body: fd});
     }
 
-    // --- ACTIONS ---
-    async function cancelOrder(jobId) { if(!confirm("Скасувати це замовлення?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/cancel_order', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
-    async function markReady(jobId) { if(!confirm("Підтвердити готовність?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/order_ready', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
-    async function confirmReturn(jobId) { if(!confirm("Гроші отримано?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/confirm_return', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
-    async function confirmBuyoutPaid(jobId) { if(!confirm("Підтвердити, що кур'єр оплатив своє замовлення на касі?")) return; const fd = new FormData(); fd.append('job_id', jobId); try { await fetch('/api/partner/confirm_buyout_paid', {method:'POST', body:fd}); location.reload(); } catch(e) {} }
+    // --- ACTIONS (с защитой от двойного клика) ---
+    async function cancelOrder(e, jobId) { 
+        if(!confirm("Скасувати це замовлення?")) return; 
+        const btn = e.currentTarget; btn.disabled = true; btn.style.opacity = '0.5'; 
+        const fd = new FormData(); fd.append('job_id', jobId); 
+        try { await fetch('/api/partner/cancel_order', {method:'POST', body:fd}); location.reload(); } 
+        catch(err) { btn.disabled = false; btn.style.opacity = '1'; } 
+    }
+    async function markReady(e, jobId) { 
+        if(!confirm("Підтвердити готовність?")) return; 
+        const btn = e.currentTarget; btn.disabled = true; btn.style.opacity = '0.5'; 
+        const fd = new FormData(); fd.append('job_id', jobId); 
+        try { await fetch('/api/partner/order_ready', {method:'POST', body:fd}); location.reload(); } 
+        catch(err) { btn.disabled = false; btn.style.opacity = '1'; } 
+    }
+    async function confirmReturn(e, jobId) { 
+        if(!confirm("Гроші отримано?")) return; 
+        const btn = e.currentTarget; btn.disabled = true; btn.style.opacity = '0.5'; 
+        const fd = new FormData(); fd.append('job_id', jobId); 
+        try { await fetch('/api/partner/confirm_return', {method:'POST', body:fd}); location.reload(); } 
+        catch(err) { btn.disabled = false; btn.style.opacity = '1'; } 
+    }
+    async function confirmBuyoutPaid(e, jobId) { 
+        if(!confirm("Підтвердити, що кур'єр оплатив своє замовлення на касі?")) return; 
+        const btn = e.currentTarget; btn.disabled = true; btn.style.opacity = '0.5'; 
+        const fd = new FormData(); fd.append('job_id', jobId); 
+        try { await fetch('/api/partner/confirm_buyout_paid', {method:'POST', body:fd}); location.reload(); } 
+        catch(err) { btn.disabled = false; btn.style.opacity = '1'; } 
+    }
+    async function boostOrder(e, id) { 
+        if(!confirm("Підняти ціну доставки на 10 грн, щоб пришвидшити пошук?")) return; 
+        const btn = e.currentTarget; btn.disabled = true; btn.style.opacity = '0.5'; 
+        const fd = new FormData(); fd.append('job_id', id); fd.append('amount', 10); 
+        try { 
+            const res = await fetch('/api/partner/boost_order', {method:'POST', body:fd}); 
+            const data = await res.json(); 
+            if(res.ok) { showToast(`💸 Ціну піднято! Нова сума: ${data.new_fee} грн`); setTimeout(() => location.reload(), 1500); } 
+            else { alert(data.message || "Помилка"); btn.disabled = false; btn.style.opacity = '1'; } 
+        } catch(err) { alert("Помилка з'єднання"); btn.disabled = false; btn.style.opacity = '1'; } 
+    }
 
     // --- RATING & TRACKING ---
     function openRateModal(jobId) { document.getElementById('rate_job_id').value = jobId; document.getElementById('rateModal').style.display = 'flex'; }
@@ -1002,7 +1042,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         
         # Показываем кнопку отмены ТОЛЬКО если курьер еще не найден
         if j.status == 'pending':
-            cancel_btn = f'<button class="btn-pro danger" onclick="cancelOrder({j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i> Скасувати</button>'
+            cancel_btn = f'<button class="btn-pro danger" onclick="cancelOrder(event, {j.id})" title="Скасувати"><i class="fa-solid fa-ban"></i> Скасувати</button>'
             
         comm_btns = ""
         
@@ -1142,13 +1182,13 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
         # --- КНОПКА ДЕЙСТВИЯ (ACTION BTN) ---
         if j.status == 'pending':
             action_btn = f"""
-            <button class="btn-pro warn" onclick="boostOrder({j.id})" title="Підняти ціну (+10 грн)">
+            <button class="btn-pro warn" onclick="boostOrder(event, {j.id})" title="Підняти ціну (+10 грн)">
                 <i class="fa-solid fa-fire"></i> Підняти ціну (+10 грн)
             </button>
             """
         elif j.status == 'returning':
             action_btn = f"""
-            <button class="btn-pro success" onclick="confirmReturn({j.id})" title="Підтвердити отримання грошей">
+            <button class="btn-pro success" onclick="confirmReturn(event, {j.id})" title="Підтвердити отримання грошей">
                 <i class="fa-solid fa-sack-dollar"></i> Гроші отримано
             </button>
             """
@@ -1158,7 +1198,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             # --- НОВАЯ КНОПКА: Подтверждение оплаты выкупа (только если курьер уже прибыл) ---
             if j.payment_type == 'buyout' and not getattr(j, 'is_return_required', False) and j.status == 'arrived_pickup':
                 action_btn += f"""
-                <button class="btn-pro success" onclick="confirmBuyoutPaid({j.id})" title="Підтвердити оплату від кур'єра" style="margin-bottom: 8px;">
+                <button class="btn-pro success" onclick="confirmBuyoutPaid(event, {j.id})" title="Підтвердити оплату від кур'єра" style="margin-bottom: 8px;">
                     <i class="fa-solid fa-check-double"></i> Кур'єр оплатив
                 </button>
                 """
@@ -1170,7 +1210,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 action_btn += f"""
                 <div style="display:flex; flex-direction:column; width:100%;">
                     {ready_info}
-                    <button class="btn-pro success" onclick="markReady({j.id})" title="Повідомити про готовність РАНІШЕ">
+                    <button class="btn-pro success" onclick="markReady(event, {j.id})" title="Повідомити про готовність РАНІШЕ">
                         <i class="fa-solid fa-utensils"></i> Замовлення готове
                     </button>
                 </div>
