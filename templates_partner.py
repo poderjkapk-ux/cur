@@ -102,8 +102,8 @@ def get_partner_auth_html(is_register=False, message=""):
         </div>
         <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті (Одеса)</div>
         <div id="picker-map"></div>
-        <input type="hidden" id="form_lat">
-        <input type="hidden" id="form_lon">
+        <input type="hidden" name="lat" id="form_lat">
+        <input type="hidden" name="lon" id="form_lon">
         """
 
         verify_script = """
@@ -261,7 +261,7 @@ def get_partner_auth_html(is_register=False, message=""):
                                         
                                         if(pickerMap) {
                                             pickerMarker.setLatLng([lat, lon]);
-                                            pickerMap.setView([lat, lon], 16);
+                                            pickerMap.flyTo([lat, lon], 17, { animate: true, duration: 1 }); // Плавно летимо
                                         } else {
                                             initPickerMap(lat, lon);
                                         }
@@ -557,7 +557,6 @@ DASHBOARD_CSS = """
 
     #picker-map { width: 100%; height: 250px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); z-index: 1; display:none; }
     #picker-map.visible { display: block; }
-    .map-hint { font-size: 0.85rem; color: #facc15; margin-bottom: 10px; display:none; background: rgba(250, 204, 21, 0.1); padding: 8px; border-radius: 6px; }
 </style>
 """
 
@@ -608,7 +607,6 @@ DASHBOARD_SCRIPT = """
     const latInput = document.getElementById('form_lat');
     const lonInput = document.getElementById('form_lon');
     const pickerMapDiv = document.getElementById('picker-map');
-    const mapHint = document.getElementById('map-hint');
     
     let pickerMap, pickerMarker;
     let searchTimeout = null;
@@ -622,7 +620,6 @@ DASHBOARD_SCRIPT = """
         if (pickerMap) return;
         try {
             pickerMapDiv.classList.add('visible');
-            mapHint.style.display = 'block';
             const startPos = (lat && lon) ? [lat, lon] : [ODESA_LAT, ODESA_LON];
             
             pickerMap = L.map('picker-map').setView(startPos, 13);
@@ -631,16 +628,8 @@ DASHBOARD_SCRIPT = """
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(pickerMap);
 
-            pickerMarker = L.marker(startPos, {draggable: true}).addTo(pickerMap);
-            
-            pickerMarker.on('dragend', function(e) {
-                const pos = e.target.getLatLng();
-                latInput.value = pos.lat; lonInput.value = pos.lng;
-            });
-            pickerMap.on('click', function(e) {
-                pickerMarker.setLatLng(e.latlng);
-                latInput.value = e.latlng.lat; lonInput.value = e.latlng.lng;
-            });
+            pickerMarker = L.marker(startPos).addTo(pickerMap);
+
             setTimeout(() => pickerMap.invalidateSize(), 200);
         } catch(e) { console.error("Leaflet init error:", e); }
     }
@@ -696,17 +685,16 @@ DASHBOARD_SCRIPT = """
                                 else if (a.hamlet) cleanParts.push(a.hamlet);
                                 else cleanParts.push(mainName);
                                 
-                                // ВЫРЕЗАЕМ: if (a.house_number) cleanParts.push(a.house_number);
-                                // Теперь номер дома мы не пишем в строку улицы
+                                // ЗАМЕТЬТЕ: мы убрали отсюда добавление house_number в cleanParts
                                 
                                 if (a.city) cleanParts.push(a.city);
                                 else if (a.town) cleanParts.push(a.town);
                                 else if (a.village) cleanParts.push(a.village);
                                 
-                                addrInput.value = cleanParts.join(', ');
+                                addrInput.value = cleanParts.join(', '); // Тут будет только "Улица, Город"
                                 addrResults.style.display = 'none';
                                 
-                                // АВТОЗАПОЛНЕНИЕ: Если геокодер нашел номер дома, сразу подставляем его в нужное поле
+                                // АВТОЗАПОЛНЕНИЕ: Номер дома летит ТОЛЬКО в отдельное поле
                                 const houseInput = document.querySelector('input[name="house_number"]');
                                 if (houseInput && a.house_number) {
                                     houseInput.value = a.house_number;
@@ -717,10 +705,11 @@ DASHBOARD_SCRIPT = """
                                 
                                 latInput.value = lat; lonInput.value = lon;
                                 if(pickerMap) { 
-                                    pickerMarker.setLatLng([lat, lon]); 
-                                    pickerMap.setView([lat, lon], 16); 
+                                    pickerMarker.setLatLng([lat, lon]);
+                                    pickerMap.flyTo([lat, lon], 17, { animate: true, duration: 1.5 });
                                 } else { 
                                     initPickerMap(lat, lon); 
+                                    if(pickerMap) pickerMap.setZoom(17);
                                 }
                             };
                             addrResults.appendChild(div);
@@ -740,19 +729,25 @@ DASHBOARD_SCRIPT = """
         document.addEventListener('click', (e) => { if(!addrInput.contains(e.target) && !addrResults.contains(e.target)) addrResults.style.display = 'none'; });
         
         // --- ПЕРЕЗАПИС ГЕОКОДИНГУ ПРИ ВВОДІ НОМЕРА БУДИНКУ ---
+        // --- ПЕРЕЗАПИС ГЕОКОДИНГУ ПРИ ВВОДІ НОМЕРА БУДИНКУ ---
         const houseInputNode = document.querySelector('input[name="house_number"]');
         if (houseInputNode) {
             let houseTimeout = null;
             houseInputNode.addEventListener('input', function() {
                 clearTimeout(houseTimeout);
-                const street = addrInput.value.trim();
+                
+                // БЕРЕМ ТОЛЬКО УЛИЦУ (обрезаем по первой запятой, чтобы отсечь город и мусор)
+                const street = addrInput.value.split(',')[0].trim();
                 const house = this.value.trim();
                 
                 if (street.length < 3 || house.length === 0) return;
                 
                 houseTimeout = setTimeout(async () => {
                     const reqId = ++latestReqId;
+                    
+                    // Теперь запрос к карте всегда чистый: "Улица, Номер, Одесса"
                     const query = `${street}, ${house}, Одеса`;
+                    
                     try {
                         const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=uk&limit=1`;
                         const res = await fetch(url);
@@ -766,14 +761,17 @@ DASHBOARD_SCRIPT = """
                             const lat = parseFloat(data[0].lat);
                             const lon = parseFloat(data[0].lon);
                             
+                            // Обновляем скрытые инпуты для базы данных
                             if (latInput) latInput.value = lat; 
                             if (lonInput) lonInput.value = lon;
                             
                             if (pickerMap) { 
-                                pickerMarker.setLatLng([lat, lon]); 
-                                pickerMap.setView([lat, lon], 17); // Зумуємо ближче на будинок
+                                pickerMarker.setLatLng([lat, lon]);
+                                // КАРТА ПЕРЕЛЕТАЕТ ТОЧНО НА НОВЫЙ НОМЕР ДОМА
+                                pickerMap.flyTo([lat, lon], 18, { animate: true, duration: 1.5 });
                             } else { 
                                 initPickerMap(lat, lon); 
+                                if(pickerMap) pickerMap.setZoom(18);
                             }
                         }
                     } catch(e) { 
@@ -920,6 +918,7 @@ DASHBOARD_SCRIPT = """
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
         }
+        setTimeout(() => map.invalidateSize(), 150);
         fetchLocation(jobId);
         trackInterval = setInterval(() => fetchLocation(jobId), 5000);
     }
@@ -1311,7 +1310,6 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             </div>
                         </div>
                         
-                        <div class="map-hint" id="map-hint"><i class="fa-solid fa-hand-pointer"></i> Уточніть точку на карті</div>
                         <div id="picker-map"></div>
                         
                         <input type="hidden" name="lat" id="form_lat">
@@ -1348,8 +1346,8 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             </select>
                         </div>
                         
-                        <label>Точна сума або решта з</label>
-                        <input type="text" name="change_from" placeholder="Напр. Точна сума або Здача з 1000">
+                        <label>Решта з</label>
+                        <input type="text" name="change_from" placeholder="Напр. 1000">
 
                         <label>Коментар (Під'їзд, поверх, код)</label>
                         <input type="text" name="comment" placeholder="Деталі...">

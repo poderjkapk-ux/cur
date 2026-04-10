@@ -430,6 +430,22 @@ def get_courier_pwa_html(courier, config):
     
     @keyframes slideDownAnn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
+    /* --- СМАРТ-БАННЕР ANDROID --- */
+    .android-banner {
+        display: none; /* Приховано за замовчуванням */
+        position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+        background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px);
+        color: white; padding: 12px 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        align-items: center; justify-content: space-between;
+        border-bottom: 1px solid var(--primary);
+    }
+    .android-banner-content { display: flex; align-items: center; gap: 12px; flex: 1; }
+    .android-banner-icon { width: 40px; height: 40px; background: var(--primary); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
+    .android-banner-text { font-size: 0.9rem; line-height: 1.2; }
+    .android-banner-btn { background: var(--success); color: white; border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; text-decoration: none; font-size: 0.9rem; }
+    .android-banner-close { background: none; border: none; color: #94a3b8; font-size: 1.2rem; padding: 0 0 0 10px; cursor: pointer; }
+
     #map {
         position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 1;
         background-color: #0f172a;
@@ -600,6 +616,18 @@ def get_courier_pwa_html(courier, config):
         </style>
     </head>
     <body>
+
+        <div class="android-banner" id="androidAppBanner">
+            <div class="android-banner-content">
+                <div class="android-banner-icon"><i class="fa-solid fa-motorcycle"></i></div>
+                <div class="android-banner-text">
+                    <b>Restify Кур'єр</b><br>
+                    <span style="color: #cbd5e1;">Швидше та зручніше у додатку</span>
+                </div>
+            </div>
+            <a href="intent://#Intent;package=com.restify.courierapp;end;" class="android-banner-btn">Відкрити</a>
+            <button class="android-banner-close" onclick="closeAndroidBanner()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
 
         <div class="app-header">
             <div class="header-title"><i class="fa-solid fa-motorcycle"></i> Restify</div>
@@ -816,10 +844,41 @@ def get_courier_pwa_html(courier, config):
                 checkActiveJob();
                 fetchHistory();
                 fetchAnnouncements(); 
+                checkAndroidBanner();
                 
                 // Запуск таймера щосекунди
                 setInterval(updateTimers, 1000);
             }});
+
+            // --- ЛОГІКА СМАРТ-БАННЕРА ANDROID ---
+            function checkAndroidBanner() {{
+                const isAndroid = /Android/i.test(navigator.userAgent);
+                // Перевіряємо, чи не відкрито вже PWA як окремий додаток
+                const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+                const bannerClosed = localStorage.getItem('androidBannerClosed');
+
+                // Показуємо тільки якщо це Android, відкрито в звичайному браузері і банер не був закритий
+                if (isAndroid && !isStandalone && !bannerClosed) {{
+                    document.getElementById('androidAppBanner').style.display = 'flex';
+                    
+                    // Зсуваємо хедер та сповіщення вниз, щоб баннер їх не перекривав
+                    document.querySelector('.app-header').style.top = '65px';
+                    const annWrapper = document.getElementById('announcements-wrapper');
+                    if (annWrapper) annWrapper.style.top = '125px';
+                }}
+            }}
+
+            function closeAndroidBanner() {{
+                document.getElementById('androidAppBanner').style.display = 'none';
+                
+                // Повертаємо елементи на місце
+                document.querySelector('.app-header').style.top = '0';
+                const annWrapper = document.getElementById('announcements-wrapper');
+                if (annWrapper) annWrapper.style.top = '60px';
+                
+                // Запам'ятовуємо, що користувач закрив баннер, щоб не набридати
+                localStorage.setItem('androidBannerClosed', 'true');
+            }}
 
             // --- НОВА ФУНКЦІЯ: ТАЙМЕРИ ---
             function updateTimers() {{
