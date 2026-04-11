@@ -62,7 +62,38 @@ async def monitor_stale_orders(ws_manager):
                 # --- ВИКЛИК МОНІТОРИНГУ МОТИВАТОРІВ ---
                 await monitor_expired_motivators(db)
                 # --------------------------------------
+
+                # =======================================================
+                # СЦЕНАРИЙ 0: ТАЙМАУТ ПЕРСОНАЛЬНОГО ЗАКАЗА (1 МИНУТА)
+                # =======================================================
+                # Локальний імпорт для уникнення помилки циркулярної залежності
+                from app import broadcast_order_to_all
                 
+                time_1_min_ago = now - timedelta(minutes=1)
+                query_direct = select(DeliveryJob).options(joinedload(DeliveryJob.partner)).where(
+                    DeliveryJob.status == "pending",
+                    DeliveryJob.target_courier_id.is_not(None),
+                    DeliveryJob.created_at <= time_1_min_ago
+                )
+                ignored_jobs = (await db.execute(query_direct)).scalars().all()
+                
+                for job in ignored_jobs:
+                    target_c_id = job.target_courier_id
+                    job.target_courier_id = None
+                    await db.commit() # Зберігаємо зняття таргета
+                    
+                    # Закриваємо модалку у кур'єра (якщо він просто дивився і не натискав)
+                    await ws_manager.notify_courier(target_c_id, {"type": "direct_offer_timeout", "job_id": job.id})
+                    
+                    # Сповіщаємо заклад
+                    if job.partner:
+                        await ws_manager.notify_partner(job.partner_id, {
+                            "type": "order_update", "job_id": job.id, "status": "pending",
+                            "message": f"⏳ Кур'єр не відповів на персональне замовлення. Розпочато загальний пошук."
+                        })
+                        # Відправляємо замовлення усім іншим кур'єрам
+                        asyncio.create_task(broadcast_order_to_all(db, job, job.partner))
+
                 # =======================================================
                 # СЦЕНАРИЙ 1: 5 МИНУТ -> "ГОРЯЧИЙ ЗАКАЗ" КУРЬЕРАМ
                 # =======================================================

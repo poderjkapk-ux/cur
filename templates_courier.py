@@ -610,6 +610,7 @@ def get_courier_pwa_html(courier, config):
         
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
         
         <style>
             {PWA_STYLES}
@@ -665,6 +666,7 @@ def get_courier_pwa_html(courier, config):
             </div>
             
             <div class="tab-content" id="content-active">
+                <div id="multi-order-tabs" style="display: none; overflow-x: auto; gap: 10px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border);"></div>
                 <div id="activeJobContent"></div>
             </div>
             
@@ -1064,6 +1066,68 @@ def get_courier_pwa_html(courier, config):
                 }} catch(e) {{ console.error(e); }}
             }}
 
+            // --- ПЕРСОНАЛЬНІ ЗАМОВЛЕННЯ ---
+            let currentOfferJobId = null;
+
+            function showDirectOfferModal(offer) {{
+                currentOfferJobId = offer.id;
+                Swal.fire({{
+                    title: '⚡ Додаткове замовлення!',
+                    html: `
+                        <p>Заклад <b>${{escapeHTML(offer.restaurant)}}</b> пропонує вам взяти ще одне замовлення попутно!</p>
+                        <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; margin: 15px 0; text-align: left; color: white;">
+                            📍 <b>Адреса:</b> ${{escapeHTML(offer.address)}}<br>
+                            💰 <b>Доставка:</b> <span style="color:#4ade80; font-weight:bold; font-size:1.2rem;">${{offer.fee}} грн</span>
+                        </div>
+                        <p style="font-size: 0.85rem; color: #888;">У вас є 60 секунд на прийняття рішення.</p>
+                    `,
+                    icon: 'info',
+                    background: '#1e293b',
+                    color: '#f8fafc',
+                    showCancelButton: true,
+                    confirmButtonColor: '#3b82f6',
+                    cancelButtonColor: '#ef4444',
+                    confirmButtonText: 'Прийняти',
+                    cancelButtonText: 'Відмовитись',
+                    allowOutsideClick: false
+                }}).then((result) => {{
+                    if (result.isConfirmed) {{
+                        acceptDirectOrder(offer.id);
+                    }} else if (result.dismiss === Swal.DismissReason.cancel) {{
+                        declineDirectOrder(offer.id);
+                    }}
+                }});
+            }}
+
+            function closeDirectOfferModal(jobId) {{
+                if (currentOfferJobId === jobId) {{
+                    Swal.close();
+                    Swal.fire({{
+                        title: 'Час вийшов', 
+                        text: "Замовлення передано іншому кур'єру", 
+                        icon: 'warning',
+                        background: '#1e293b',
+                        color: '#f8fafc'
+                    }});
+                }}
+            }}
+
+            async function acceptDirectOrder(jobId) {{
+                const formData = new FormData(); formData.append('job_id', jobId);
+                const res = await fetch('/api/courier/accept_order', {{ method: 'POST', body: formData }});
+                if (res.ok) {{
+                    Swal.fire({{title: 'Успіх!', text: 'Замовлення додано до ваших активних', icon: 'success', background: '#1e293b', color: '#f8fafc', timer: 2000, showConfirmButton: false}});
+                    checkActiveJob(); 
+                }} else {{
+                    Swal.fire({{title: 'Помилка', text: 'Не вдалося прийняти замовлення', icon: 'error', background: '#1e293b', color: '#f8fafc'}});
+                }}
+            }}
+
+            async function declineDirectOrder(jobId) {{
+                const formData = new FormData(); formData.append('job_id', jobId);
+                await fetch('/api/courier/decline_direct_order', {{ method: 'POST', body: formData }});
+            }}
+
             // --- WEBSOCKET ТА ОНОВЛЕННЯ ДАНИХ ---
             let pingInterval;
 
@@ -1103,6 +1167,14 @@ def get_courier_pwa_html(courier, config):
                                 if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
                             }}
                         }}
+                        else if(msg.type === 'direct_offer') {{
+                            showDirectOfferModal(msg.data);
+                            playNotifySound();
+                            if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                        }}
+                        else if(msg.type === 'direct_offer_timeout') {{
+                            closeDirectOfferModal(msg.job_id);
+                        }}
                         else if(msg.type === 'order_removed') {{
                             if(!activeJobId) fetchOpenOrders();
                         }}
@@ -1115,11 +1187,7 @@ def get_courier_pwa_html(courier, config):
                             playNotifySound();
                             if(msg.status === 'cancelled' || msg.status === 'delivered') {{
                                 alert(msg.message);
-                                activeJobId = null;
-                                activeJobData = null;
-                                clearMap();
-                                document.getElementById('tab-active').style.display = 'none';
-                                switchTab('orders');
+                                checkActiveJob();
                             }} else {{
                                 checkActiveJob();
                             }}
@@ -1394,25 +1462,50 @@ def get_courier_pwa_html(courier, config):
                 }}
             }}
 
-            // --- АКТИВНЕ ЗАМОВЛЕННЯ ---
+            // --- АКТИВНЕ ЗАМОВЛЕННЯ ТА ВКЛАДКИ (TABS) ---
+            let currentViewedJobId = null;
+
             async function checkActiveJob() {{
                 try {{
-                    const res = await fetch('/api/courier/active_job');
+                    const res = await fetch('/api/courier/active_jobs');
                     const data = await res.json();
                     
                     const tabActive = document.getElementById('tab-active');
                     const tabOrders = document.getElementById('tab-orders');
+                    const tabsContainer = document.getElementById('multi-order-tabs');
                     
-                    if(data.active) {{
-                        activeJobId = data.job.id;
-                        activeJobData = data.job;
+                    if(data.active && data.jobs && data.jobs.length > 0) {{
                         tabActive.style.display = 'block';
                         tabOrders.style.display = 'none';
-                        renderActiveJob(data.job);
-                        switchTab('active');
-                        drawRoute(data.job);
-                        setTimeout(updateTimers, 50);
+                        
+                        if (!currentViewedJobId || !data.jobs.find(j => j.id === currentViewedJobId)) {{
+                            currentViewedJobId = data.jobs[0].id;
+                        }}
+                        
+                        if (data.jobs.length > 1) {{
+                            tabsContainer.style.display = 'flex';
+                            tabsContainer.innerHTML = '';
+                            data.jobs.forEach((job) => {{
+                                const isActive = job.id === currentViewedJobId;
+                                const tabHtml = `
+                                    <button onclick="switchActiveJobTab(${{job.id}})" 
+                                            style="flex-shrink: 0; white-space: nowrap; padding: 8px 15px; border-radius: 20px; border: 1px solid ${{isActive ? 'var(--primary)' : 'var(--border)'}}; background: ${{isActive ? 'rgba(59, 130, 246, 0.2)' : 'transparent'}}; color: ${{isActive ? 'white' : 'var(--text-muted)'}}; cursor: pointer; transition: 0.2s;">
+                                        Замовлення #${{job.id}} <br><small>${{escapeHTML(job.partner_name)}}</small>
+                                    </button>
+                                `;
+                                tabsContainer.innerHTML += tabHtml;
+                            }});
+                        }} else {{
+                            tabsContainer.style.display = 'none';
+                        }}
+                        
+                        await loadSpecificActiveJob(currentViewedJobId);
+                        
+                        if(!document.getElementById('content-active').classList.contains('active')) {{
+                            switchTab('active');
+                        }}
                     }} else {{
+                        currentViewedJobId = null;
                         activeJobId = null;
                         activeJobData = null;
                         tabActive.style.display = 'none';
@@ -1421,6 +1514,25 @@ def get_courier_pwa_html(courier, config):
                         if(document.getElementById('content-active').classList.contains('active')) {{
                             switchTab('orders');
                         }}
+                    }}
+                }} catch(e) {{ console.error(e); }}
+            }}
+
+            function switchActiveJobTab(jobId) {{
+                currentViewedJobId = jobId;
+                checkActiveJob(); 
+            }}
+
+            async function loadSpecificActiveJob(jobId) {{
+                try {{
+                    const res = await fetch(`/api/courier/active_job?job_id=${{jobId}}`);
+                    const data = await res.json();
+                    if(data.active) {{
+                        activeJobId = data.job.id;
+                        activeJobData = data.job;
+                        renderActiveJob(data.job);
+                        drawRoute(data.job);
+                        setTimeout(updateTimers, 50);
                     }}
                 }} catch(e) {{ console.error(e); }}
             }}

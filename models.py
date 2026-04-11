@@ -198,6 +198,10 @@ class DeliveryJob(Base):
     # Прив'язка кур'єра
     courier_id = Column(Integer, ForeignKey("couriers.id"), nullable=True)
     
+    # --- НОВЕ ПОЛЕ ДЛЯ ПЕРСОНАЛЬНОГО ПРИЗНАЧЕННЯ ---
+    target_courier_id = Column(Integer, ForeignKey("couriers.id", ondelete="SET NULL"), nullable=True)
+    # -----------------------------------------------
+    
     # --- ЧАСОВІ МІТКИ (TIMESTAMPS) ---
     created_at = Column(DateTime, default=datetime.utcnow)
     accepted_at = Column(DateTime, nullable=True)  # Коли кур'єр прийняв
@@ -215,7 +219,8 @@ class DeliveryJob(Base):
     courier_review = Column(String(500), nullable=True) # Текст відгуку
     
     partner = relationship("DeliveryPartner", back_populates="jobs")
-    courier = relationship("Courier")
+    courier = relationship("Courier", foreign_keys=[courier_id])
+    target_courier = relationship("Courier", foreign_keys=[target_courier_id])
     
     # --- НОВЕ: ЧАТ ---
     messages = relationship("ChatMessage", back_populates="job", cascade="all, delete-orphan")

@@ -178,7 +178,6 @@ app.include_router(admin_rating_reports.router)
 app.include_router(account_deletion.router)
 
 
-
 # ==============================================================================
 # ЗАХИСТ ДОКУМЕНТІВ: ПЕРЕХОПЛЮЄМО РОУТ ДО МОНТУВАННЯ СТАТИКИ
 # ==============================================================================
@@ -693,68 +692,7 @@ async def admin_unassign_courier(
             await send_push_to_partners([partner.fcm_token], "Пошук нового кур'єра", msg_to_partner, job_id=job.id)
 
     # 4. Отправляем заказ заново в пул (оповещаем всех свободных курьеров)
-    rest_lat, rest_lon = None, None
-    if partner:
-        rest_lat, rest_lon = await geocode_address(partner.address)
-
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
-    
-    personal_data = {
-        "id": job.id, "address": job.dropoff_address, 
-        "customer_name": job.customer_name, 
-        "restaurant": partner.name if partner else "", 
-        "restaurant_address": partner.address if partner else "",
-        "fee": job.delivery_fee, "price": job.order_price, 
-        "comment": job.comment if job.comment else "",
-        "dist_to_rest": "?",
-        "is_return": job.is_return_required,
-        "payment_type": job.payment_type,
-        "estimated_ready_at": job.estimated_ready_at.isoformat() + "Z" if job.estimated_ready_at else None
-    }
-
-    # Находим занятых курьеров
-    busy_couriers_res = await db.execute(
-        select(DeliveryJob.courier_id)
-        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
-        .where(DeliveryJob.courier_id.is_not(None))
-    )
-    busy_ids = set(busy_couriers_res.scalars().all())
-
-    # Находим онлайн курьеров
-    online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
-
-    async def notify_new_courier_async(c):
-        is_location_fresh = True
-        if c.last_seen:
-            diff = datetime.utcnow() - c.last_seen
-            if diff.total_seconds() > 1800: 
-                is_location_fresh = False
-        
-        dist_to_rest = None
-        if is_location_fresh and c.lat and c.lon and rest_lat and rest_lon:
-            dist_to_rest = calculate_distance(c.lat, c.lon, rest_lat, rest_lon)
-        
-        if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
-            return 
-            
-        display_dist = dist_to_rest if (is_location_fresh and dist_to_rest is not None) else "?"
-        c_data = personal_data.copy()
-        c_data["dist_to_rest"] = display_dist
-
-        await manager.notify_courier(c.id, {"type": "new_order", "data": c_data})
-        
-        if c.fcm_token:
-            await send_push_to_couriers([c.fcm_token], "🔥 Нове замовлення!", f"💰 {job.delivery_fee} грн", job_id=job.id, fee=job.delivery_fee)
-
-    for c in online_couriers:
-        if c.id in busy_ids: continue
-        asyncio.create_task(notify_new_courier_async(c))
-
-    # Рассылка в Telegram
-    res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
-    for c in res_tg.scalars().all():
-        if c.id in busy_ids: continue
-        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {job.delivery_fee} грн\n📍 {partner.name if partner else ''}"))
+    await broadcast_order_to_all(db, job, partner)
 
     return RedirectResponse(f"/admin/delivery?message=Кур'єра відв'язано. Пошук для замовлення #{job.id} розпочато заново.", status_code=302)
 
@@ -1313,6 +1251,7 @@ async def get_open_orders(
         select(DeliveryJob)
         .options(joinedload(DeliveryJob.partner))
         .where(DeliveryJob.status == "pending")
+        .where(DeliveryJob.target_courier_id == None)  # ТІЛЬКИ ТІ, ЩО БЕЗ ПЕРСОНАЛЬНОГО ПРИЗНАЧЕННЯ
     )
     jobs = result.scalars().all()
     
@@ -1408,13 +1347,17 @@ async def get_courier_history(
 
 @app.get("/api/courier/active_job")
 async def get_active_job(
-    courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)
+    courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db), job_id: int = None
 ):
-    result = await db.execute(
-        select(DeliveryJob).options(joinedload(DeliveryJob.partner))
-        .where(DeliveryJob.courier_id == courier.id)
-        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+    query = select(DeliveryJob).options(joinedload(DeliveryJob.partner)).where(
+        DeliveryJob.courier_id == courier.id,
+        DeliveryJob.status.notin_(["delivered", "cancelled"])
     )
+    
+    if job_id:
+        query = query.where(DeliveryJob.id == job_id)
+        
+    result = await db.execute(query)
     job = result.scalars().first()
     
     if not job:
@@ -1636,6 +1579,47 @@ async def courier_accept_order(
 
     return JSONResponse({"status": "ok", "message": "Замовлення прийнято!"})
 
+
+@app.post("/api/courier/decline_direct_order")
+async def decline_direct_order(job_id: int = Form(...), courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)):
+    """Якщо кур'єр відмовився від персонального замовлення - кидаємо його в загальний пул"""
+    job = await db.get(DeliveryJob, job_id)
+    if job and job.target_courier_id == courier.id and job.status == "pending":
+        job.target_courier_id = None
+        await db.commit()
+        partner = await db.get(DeliveryPartner, job.partner_id)
+        # Сповіщаємо всіх інших
+        asyncio.create_task(broadcast_order_to_all(db, job, partner))
+        
+        # Сповіщаємо заклад, що кур'єр відмовився
+        await manager.notify_partner(job.partner_id, {
+            "type": "order_update", "job_id": job.id, "status": "pending",
+            "message": f"⚠️ Кур'єр {courier.name} відхилив додаткове замовлення. Розпочато загальний пошук."
+        })
+    return JSONResponse({"status": "ok"})
+
+
+@app.get("/api/courier/active_jobs")
+async def get_all_active_jobs(courier: Courier = Depends(auth.get_current_courier), db: AsyncSession = Depends(get_db)):
+    """Повертає список УСІХ активних замовлень кур'єра для системи вкладок (Tabs)"""
+    result = await db.execute(
+        select(DeliveryJob).options(joinedload(DeliveryJob.partner))
+        .where(DeliveryJob.courier_id == courier.id)
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        .order_by(DeliveryJob.accepted_at.asc())
+    )
+    jobs = result.scalars().all()
+    
+    response = []
+    for job in jobs:
+        partner_name = job.partner.name if job.partner else "Невідомий заклад"
+        response.append({
+            "id": job.id, "status": job.status, "partner_name": partner_name,
+            "customer_address": job.dropoff_address, "delivery_fee": job.delivery_fee,
+            "order_price": job.order_price, "payment_type": job.payment_type
+        })
+    return JSONResponse({"active": len(response) > 0, "jobs": response})
+
 # ==============================================================================
 # CHAT API
 # ==============================================================================
@@ -1757,6 +1741,19 @@ async def get_current_partner(request: Request, db: AsyncSession = Depends(get_d
 # ==========================================
 # НАТИВНІ JSON API ДЛЯ ANDROID ДОДАТКА ПАРТНЕРА
 # ==========================================
+
+@app.get("/api/partner/active_couriers")
+async def get_partner_active_couriers(partner: DeliveryPartner = Depends(get_current_partner), db: AsyncSession = Depends(get_db)):
+    """Повертає курьерів, які ЗАРАЗ виконують замовлення цього закладу (для селектора)"""
+    query = select(Courier).join(DeliveryJob, DeliveryJob.courier_id == Courier.id).where(
+        DeliveryJob.partner_id == partner.id,
+        DeliveryJob.status.in_(["assigned", "arrived_pickup", "picked_up"])
+    ).distinct()
+    
+    couriers = (await db.execute(query)).scalars().all()
+    return JSONResponse([{"id": c.id, "name": c.name, "phone": c.phone} for c in couriers])
+
+
 @app.post("/api/partner/reset_password")
 async def reset_partner_password(
     email: str = Form(...), 
@@ -1895,6 +1892,63 @@ async def api_partner_min_fee_native(db: AsyncSession = Depends(get_db), partner
         "reason": fee_reason
     })
 
+# --- ХЕЛПЕР ДЛЯ РОЗСИЛКИ ЗАМОВЛЕННЯ ВСІМ КУР'ЄРАМ ---
+async def broadcast_order_to_all(db: AsyncSession, job: DeliveryJob, partner: DeliveryPartner):
+    rest_lat, rest_lon = await geocode_address(partner.address)
+    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
+
+    busy_couriers_res = await db.execute(
+        select(DeliveryJob.courier_id)
+        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+        .where(DeliveryJob.courier_id.is_not(None))
+    )
+    busy_ids = set(busy_couriers_res.scalars().all())
+
+    res = await db.execute(select(Courier).where(Courier.is_online == True))
+    online_couriers = res.scalars().all()
+
+    async def notify_courier_async(courier):
+        is_location_fresh = True
+        if courier.last_seen:
+            diff = datetime.utcnow() - courier.last_seen
+            if diff.total_seconds() > 1800: 
+                is_location_fresh = False
+        
+        dist_to_rest = None
+        if is_location_fresh and courier.lat and courier.lon and rest_lat and rest_lon:
+            dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
+        
+        if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
+            return 
+            
+        display_dist = dist_to_rest if (is_location_fresh and dist_to_rest is not None) else "?"
+
+        personal_data = {
+            "id": job.id, "address": job.dropoff_address, 
+            "customer_name": job.customer_name, 
+            "restaurant": partner.name if partner else "", 
+            "restaurant_address": partner.address if partner else "",
+            "fee": job.delivery_fee, "price": job.order_price, "comment": f"[{payment_label}] {job.comment}",
+            "dist_to_rest": display_dist,
+            "is_return": job.is_return_required,
+            "payment_type": job.payment_type,
+            "estimated_ready_at": job.estimated_ready_at.isoformat() + "Z" if job.estimated_ready_at else None
+        }
+        
+        await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
+        
+        if courier.fcm_token:
+            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {job.delivery_fee} грн", job_id=job.id, fee=job.delivery_fee)
+
+    for c in online_couriers:
+        if c.id in busy_ids: continue
+        asyncio.create_task(notify_courier_async(c))
+
+    res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
+    for c in res_tg.scalars().all():
+        if c.id in busy_ids: continue
+        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {job.delivery_fee} грн\n📍 {partner.name}"))
+
 @app.post("/api/partner/create_order_native")
 async def api_create_order_native(
     dropoff_address: str = Form(None), 
@@ -1910,6 +1964,7 @@ async def api_create_order_native(
     payment_type: str = Form("prepaid"), 
     is_return_required: bool = Form(False),
     prep_time: int = Form(15), 
+    target_courier_id: int = Form(None),
     db: AsyncSession = Depends(get_db), 
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
@@ -1936,7 +1991,6 @@ async def api_create_order_native(
 
     # Ищем координаты по чистой строке
     client_lat, client_lon = await geocode_address(search_address)
-    rest_lat, rest_lon = await geocode_address(partner.address)
 
     full_comment = comment
     if change_from:
@@ -1963,64 +2017,27 @@ async def api_create_order_native(
         comment=full_comment, payment_type=payment_type,
         is_return_required=is_return_required, 
         estimated_ready_at=estimated_ready_at,
-        status="pending"
+        status="pending",
+        target_courier_id=target_courier_id
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    busy_couriers_res = await db.execute(
-        select(DeliveryJob.courier_id)
-        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
-        .where(DeliveryJob.courier_id.is_not(None))
-    )
-    busy_ids = set(busy_couriers_res.scalars().all())
-
-    res = await db.execute(select(Courier).where(Courier.is_online == True))
-    online_couriers = res.scalars().all()
-    
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(payment_type, "Оплата")
-
-    async def notify_courier_async(courier):
-        is_location_fresh = True
-        if courier.last_seen:
-            diff = datetime.utcnow() - courier.last_seen
-            if diff.total_seconds() > 1800: 
-                is_location_fresh = False
-        
-        dist_to_rest = None
-        if is_location_fresh and courier.lat and courier.lon and rest_lat and rest_lon:
-            dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
-        
-        if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
-            return 
+    if target_courier_id:
+        target_courier = await db.get(Courier, target_courier_id)
+        if target_courier:
+            offer_data = {
+                "id": job.id, "address": job.dropoff_address,
+                "restaurant": partner.name, "fee": delivery_fee, 
+                "price": order_price, "estimated_ready_at": estimated_ready_at.isoformat() + "Z" if estimated_ready_at else None
+            }
+            await manager.notify_courier(target_courier_id, {"type": "direct_offer", "data": offer_data})
             
-        display_dist = dist_to_rest if (is_location_fresh and dist_to_rest is not None) else "?"
-
-        personal_data = {
-            "id": job.id, "address": dropoff_address, 
-            "customer_name": job.customer_name, 
-            "restaurant": partner.name, "restaurant_address": partner.address,
-            "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
-            "dist_to_rest": display_dist,
-            "is_return": is_return_required,
-            "payment_type": payment_type,
-            "estimated_ready_at": estimated_ready_at.isoformat() + "Z"
-        }
-        
-        await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
-        
-        if courier.fcm_token:
-            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн", job_id=job.id, fee=delivery_fee)
-
-    for c in online_couriers:
-        if c.id in busy_ids: continue
-        asyncio.create_task(notify_courier_async(c))
-
-    res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
-    for c in res_tg.scalars().all():
-        if c.id in busy_ids: continue
-        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {delivery_fee} грн\n📍 {partner.name}"))
+            if target_courier.fcm_token:
+                await send_push_to_couriers([target_courier.fcm_token], "⚡ Персональне замовлення!", f"Заклад {partner.name} пропонує вам ще одне замовлення попутно.", job_id=job.id)
+    else:
+        await broadcast_order_to_all(db, job, partner)
 
     return JSONResponse({"status": "ok", "job_id": job.id})
 
@@ -2228,6 +2245,7 @@ async def create_partner_order(
     prep_time: int = Form(15), 
     lat: float = Form(None),
     lon: float = Form(None),
+    target_courier_id: int = Form(None),
     db: AsyncSession = Depends(get_db), 
     partner: DeliveryPartner = Depends(get_current_partner)
 ):
@@ -2258,8 +2276,6 @@ async def create_partner_order(
         # Ищем координаты по чистой строке
         client_lat, client_lon = await geocode_address(search_address)
 
-    rest_lat, rest_lon = await geocode_address(partner.address)
-
     full_comment = comment
     if change_from:
         # Очищаем от старых дублей
@@ -2284,64 +2300,27 @@ async def create_partner_order(
         comment=full_comment, payment_type=payment_type,
         is_return_required=is_return_required,
         estimated_ready_at=estimated_ready_at,
-        status="pending"
+        status="pending",
+        target_courier_id=target_courier_id
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    busy_couriers_res = await db.execute(
-        select(DeliveryJob.courier_id)
-        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
-        .where(DeliveryJob.courier_id.is_not(None))
-    )
-    busy_ids = set(busy_couriers_res.scalars().all())
-
-    res = await db.execute(select(Courier).where(Courier.is_online == True))
-    online_couriers = res.scalars().all()
-    
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(payment_type, "Оплата")
-
-    async def notify_courier_async(courier):
-        is_location_fresh = True
-        if courier.last_seen:
-            diff = datetime.utcnow() - courier.last_seen
-            if diff.total_seconds() > 1800: 
-                is_location_fresh = False
-        
-        dist_to_rest = None
-        if is_location_fresh and courier.lat and courier.lon and rest_lat and rest_lon:
-            dist_to_rest = calculate_distance(courier.lat, courier.lon, rest_lat, rest_lon)
-        
-        if is_location_fresh and dist_to_rest is not None and dist_to_rest > 20: 
-            return 
+    if target_courier_id:
+        target_courier = await db.get(Courier, target_courier_id)
+        if target_courier:
+            offer_data = {
+                "id": job.id, "address": job.dropoff_address,
+                "restaurant": partner.name, "fee": delivery_fee, 
+                "price": order_price, "estimated_ready_at": estimated_ready_at.isoformat() + "Z" if estimated_ready_at else None
+            }
+            await manager.notify_courier(target_courier_id, {"type": "direct_offer", "data": offer_data})
             
-        display_dist = dist_to_rest if (is_location_fresh and dist_to_rest is not None) else "?"
-
-        personal_data = {
-            "id": job.id, "address": dropoff_address, 
-            "customer_name": job.customer_name, 
-            "restaurant": partner.name, "restaurant_address": partner.address,
-            "fee": delivery_fee, "price": order_price, "comment": f"[{payment_label}] {full_comment}",
-            "dist_to_rest": display_dist,
-            "is_return": is_return_required,
-            "payment_type": payment_type,
-            "estimated_ready_at": estimated_ready_at.isoformat() + "Z"
-        }
-        
-        await manager.notify_courier(courier.id, {"type": "new_order", "data": personal_data})
-        
-        if courier.fcm_token:
-            await send_push_to_couriers([courier.fcm_token], "🔥 Нове замовлення!", f"💰 {delivery_fee} грн", job_id=job.id, fee=delivery_fee)
-
-    for c in online_couriers:
-        if c.id in busy_ids: continue
-        asyncio.create_task(notify_courier_async(c))
-
-    res_tg = await db.execute(select(Courier).where(Courier.is_online == True, Courier.telegram_chat_id != None))
-    for c in res_tg.scalars().all():
-        if c.id in busy_ids: continue
-        asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, f"🔥 <b>Нове замовлення!</b>\n💰 {delivery_fee} грн\n📍 {partner.name}"))
+            if target_courier.fcm_token:
+                await send_push_to_couriers([target_courier.fcm_token], "⚡ Персональне замовлення!", f"Заклад {partner.name} пропонує вам ще одне замовлення попутно.", job_id=job.id)
+    else:
+        await broadcast_order_to_all(db, job, partner)
 
     return RedirectResponse("/partner/dashboard", status_code=303)
 

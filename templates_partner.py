@@ -578,7 +578,34 @@ DASHBOARD_SCRIPT = """
                 btn.innerHTML = '<span class="spinner" style="display:inline-block; width:15px; height:15px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 1s infinite linear;"></span> Завантаження...';
             });
         }
+        
+        // Завантажуємо кур'єрів для персонального призначення
+        loadActiveCouriersForAssignment();
     });
+
+    // Завантаження активних кур'єрів при відкритті форми
+    async function loadActiveCouriersForAssignment() {
+        try {
+            const res = await fetch('/api/partner/active_couriers');
+            const couriers = await res.json();
+            
+            const container = document.getElementById('direct-assign-container');
+            const select = document.getElementById('target_courier_id');
+            
+            if (couriers.length > 0) {
+                container.style.display = 'block';
+                select.innerHTML = '<option value="">Не призначати (Шукати нового)</option>';
+                couriers.forEach(c => {
+                    select.innerHTML += `<option value="${c.id}">${c.name} (${c.phone})</option>`;
+                });
+            } else {
+                container.style.display = 'none';
+                select.innerHTML = '<option value="">Не призначати</option>';
+            }
+        } catch (e) {
+            console.error("Помилка завантаження активних кур'єрів", e);
+        }
+    }
 
     // --- ЛОГИКА ОПЛАТЫ ---
     const baseFee = 80; 
@@ -1331,6 +1358,14 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                             <div style="color:#f472b6; font-size:0.85rem;">
                                 <i class="fa-solid fa-circle-info"></i> <b>Увага:</b> Якщо ви не натиснете кнопку "Оплачено" під час передачі замовлення кур'єру, то після доставки клієнту автоматично увімкнеться логіка повернення грошей — кур'єр буде зобов'язаний повернутися і віддати вам гроші (статус "Повернення").
                             </div>
+                        </div>
+                        
+                        <div id="direct-assign-container" style="display: none; background: rgba(99, 102, 241, 0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid rgba(99,102,241,0.3);">
+                            <label style="color: #6366f1; font-weight: bold;"><i class="fa-solid fa-bolt"></i> Віддати активному кур'єру (Попутно)</label>
+                            <select name="target_courier_id" id="target_courier_id" style="margin-top: 5px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 12px 15px; border-radius: 10px; width: 100%; transition: 0.3s;">
+                                <option value="">Не призначати (Шукати нового)</option>
+                            </select>
+                            <p style="font-size: 0.8rem; color: #94a3b8; margin-top: 5px; margin-bottom: 0;">Кур'єр отримає ексклюзивну пропозицію. Якщо він відмовиться, замовлення автоматично піде в загальний пошук.</p>
                         </div>
 
                         <div class="autocomplete-wrapper">
