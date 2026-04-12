@@ -2027,15 +2027,42 @@ async def api_create_order_native(
     if target_courier_id:
         target_courier = await db.get(Courier, target_courier_id)
         if target_courier:
+            # Формуємо мітку оплати для коментаря (важливо для Android)
+            payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(payment_type, "Оплата")
+            formatted_comment = f"[{payment_label}] {full_comment}" if full_comment else f"[{payment_label}]"
+
+            # УНІВЕРСАЛЬНИЙ СЛОВНИК (Працює і для Android, і для PWA)
             offer_data = {
-                "id": job.id, "address": job.dropoff_address,
-                "restaurant": partner.name, "fee": delivery_fee, 
-                "price": order_price, "estimated_ready_at": estimated_ready_at.isoformat() + "Z" if estimated_ready_at else None
+                "id": job.id, 
+                "fee": delivery_fee, 
+                "price": order_price, 
+                "estimated_ready_at": estimated_ready_at.isoformat() + "Z" if estimated_ready_at else None,
+                "payment_type": payment_type,
+                "is_return": is_return_required,
+                "comment": formatted_comment,
+                "dist_to_rest": None, 
+                "dist_trip": None,
+                
+                # --- КЛЮЧІ ДЛЯ ANDROID (Строга модель OpenOrder) ---
+                "restaurant_name": partner.name,
+                "restaurant_address": partner.address if partner.address else "Адреса не вказана",
+                "dropoff_address": job.dropoff_address,
+                
+                # --- КЛЮЧІ ДЛЯ PWA (Щоб не зламати веб-версію кур'єра) ---
+                "restaurant": partner.name,
+                "address": job.dropoff_address
             }
+            
             await manager.notify_courier(target_courier_id, {"type": "direct_offer", "data": offer_data})
             
             if target_courier.fcm_token:
-                await send_push_to_couriers([target_courier.fcm_token], "⚡ Персональне замовлення!", f"Заклад {partner.name} пропонує вам ще одне замовлення попутно.", job_id=job.id)
+                await send_push_to_couriers(
+                    [target_courier.fcm_token], 
+                    "⚡ Персональне замовлення!", 
+                    f"Заклад {partner.name} пропонує вам ще одне замовлення попутно.", 
+                    job_id=job.id,
+                    fee=delivery_fee
+                )
     else:
         await broadcast_order_to_all(db, job, partner)
 
@@ -2310,15 +2337,42 @@ async def create_partner_order(
     if target_courier_id:
         target_courier = await db.get(Courier, target_courier_id)
         if target_courier:
+            # Формуємо мітку оплати для коментаря (важливо для Android)
+            payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(payment_type, "Оплата")
+            formatted_comment = f"[{payment_label}] {full_comment}" if full_comment else f"[{payment_label}]"
+
+            # УНІВЕРСАЛЬНИЙ СЛОВНИК (Працює і для Android, і для PWA)
             offer_data = {
-                "id": job.id, "address": job.dropoff_address,
-                "restaurant": partner.name, "fee": delivery_fee, 
-                "price": order_price, "estimated_ready_at": estimated_ready_at.isoformat() + "Z" if estimated_ready_at else None
+                "id": job.id, 
+                "fee": delivery_fee, 
+                "price": order_price, 
+                "estimated_ready_at": estimated_ready_at.isoformat() + "Z" if estimated_ready_at else None,
+                "payment_type": payment_type,
+                "is_return": is_return_required,
+                "comment": formatted_comment,
+                "dist_to_rest": None, 
+                "dist_trip": None,
+                
+                # --- КЛЮЧІ ДЛЯ ANDROID (Строга модель OpenOrder) ---
+                "restaurant_name": partner.name,
+                "restaurant_address": partner.address if partner.address else "Адреса не вказана",
+                "dropoff_address": job.dropoff_address,
+                
+                # --- КЛЮЧІ ДЛЯ PWA (Щоб не зламати веб-версію кур'єра) ---
+                "restaurant": partner.name,
+                "address": job.dropoff_address
             }
+            
             await manager.notify_courier(target_courier_id, {"type": "direct_offer", "data": offer_data})
             
             if target_courier.fcm_token:
-                await send_push_to_couriers([target_courier.fcm_token], "⚡ Персональне замовлення!", f"Заклад {partner.name} пропонує вам ще одне замовлення попутно.", job_id=job.id)
+                await send_push_to_couriers(
+                    [target_courier.fcm_token], 
+                    "⚡ Персональне замовлення!", 
+                    f"Заклад {partner.name} пропонує вам ще одне замовлення попутно.", 
+                    job_id=job.id,
+                    fee=delivery_fee
+                )
     else:
         await broadcast_order_to_all(db, job, partner)
 

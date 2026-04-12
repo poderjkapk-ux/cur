@@ -1071,12 +1071,17 @@ def get_courier_pwa_html(courier, config):
 
             function showDirectOfferModal(offer) {{
                 currentOfferJobId = offer.id;
+                
+                // Читаем новые ключи, но оставляем фолбек на старые, чтобы ничего не сломалось
+                const restName = offer.restaurant_name || offer.restaurant || 'Невідомий заклад';
+                const clientAddress = offer.dropoff_address || offer.address || 'Адреса не вказана';
+
                 Swal.fire({{
                     title: '⚡ Додаткове замовлення!',
                     html: `
-                        <p>Заклад <b>${{escapeHTML(offer.restaurant)}}</b> пропонує вам взяти ще одне замовлення попутно!</p>
+                        <p>Заклад <b>${{escapeHTML(restName)}}</b> пропонує вам взяти ще одне замовлення попутно!</p>
                         <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; margin: 15px 0; text-align: left; color: white;">
-                            📍 <b>Адреса:</b> ${{escapeHTML(offer.address)}}<br>
+                            📍 <b>Адреса:</b> ${{escapeHTML(clientAddress)}}<br>
                             💰 <b>Доставка:</b> <span style="color:#4ade80; font-weight:bold; font-size:1.2rem;">${{offer.fee}} грн</span>
                         </div>
                         <p style="font-size: 0.85rem; color: #888;">У вас є 60 секунд на прийняття рішення.</p>
