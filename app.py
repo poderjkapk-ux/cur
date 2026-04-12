@@ -1620,6 +1620,46 @@ async def get_all_active_jobs(courier: Courier = Depends(auth.get_current_courie
         })
     return JSONResponse({"active": len(response) > 0, "jobs": response})
 
+@app.get("/api/courier/direct_offers")
+async def get_direct_offers(
+    courier: Courier = Depends(auth.get_current_courier),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Ендпоінт для отримання актуальних персональних пропозицій (додаткових замовлень).
+    Використовується PWA та Android додатком для перевірки пропущених пропозицій.
+    """
+    result = await db.execute(
+        select(DeliveryJob).options(joinedload(DeliveryJob.partner))
+        .where(DeliveryJob.target_courier_id == courier.id)
+        .where(DeliveryJob.status == "pending")
+    )
+    offers = result.scalars().all()
+    
+    data = []
+    for job in offers:
+        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
+        formatted_comment = f"[{payment_label}] {job.comment}" if job.comment else f"[{payment_label}]"
+        
+        data.append({
+            "id": job.id,
+            "fee": job.delivery_fee,
+            "price": job.order_price,
+            "estimated_ready_at": job.estimated_ready_at.isoformat() + "Z" if job.estimated_ready_at else None,
+            "payment_type": job.payment_type,
+            "is_return": job.is_return_required,
+            "comment": formatted_comment,
+            "dist_to_rest": None, 
+            "dist_trip": None,
+            # Ключі для сумісності з Android та PWA
+            "restaurant_name": job.partner.name if job.partner else "Невідомий заклад",
+            "restaurant_address": job.partner.address if job.partner else "Адреса не вказана",
+            "dropoff_address": job.dropoff_address,
+            "restaurant": job.partner.name if job.partner else "Невідомий заклад",
+            "address": job.dropoff_address
+        })
+    return JSONResponse(data)
+
 # ==============================================================================
 # CHAT API
 # ==============================================================================

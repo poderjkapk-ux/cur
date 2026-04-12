@@ -397,7 +397,7 @@ def get_courier_pwa_html(courier, config):
         top: 60px; /* Одразу під хедером */
         left: 0;
         right: 0;
-        z-index: 95; /* Поверх карти, але під модалками */
+        z-index: 95; /* Поверх карти, але модалок */
         display: flex;
         flex-direction: column;
     }
@@ -844,6 +844,7 @@ def get_courier_pwa_html(courier, config):
                 initWebSocket();
                 startLocationTracking();
                 checkActiveJob();
+                checkDirectOffers(); // <--- ДОБАВЛЕНО СЮДА
                 fetchHistory();
                 fetchAnnouncements(); 
                 checkAndroidBanner();
@@ -1069,7 +1070,26 @@ def get_courier_pwa_html(courier, config):
             // --- ПЕРСОНАЛЬНІ ЗАМОВЛЕННЯ ---
             let currentOfferJobId = null;
 
+            // --- ПЕРЕВІРКА АКТУАЛЬНИХ ПЕРСОНАЛЬНИХ ПРОПОЗИЦІЙ ---
+            async function checkDirectOffers() {{
+                try {{
+                    const res = await fetch('/api/courier/direct_offers');
+                    if (res.ok) {{
+                        const offers = await res.json();
+                        if (offers.length > 0) {{
+                            // Показуємо першу актуальну пропозицію
+                            showDirectOfferModal(offers[0]);
+                        }}
+                    }}
+                }} catch(e) {{
+                    console.error("Помилка перевірки персональних замовлень", e);
+                }}
+            }}
+
             function showDirectOfferModal(offer) {{
+                // Если окно уже открыто для этого же заказа, не перерисовываем
+                if (typeof Swal !== 'undefined' && Swal.isVisible() && currentOfferJobId === offer.id) return;
+
                 currentOfferJobId = offer.id;
                 
                 // Читаем новые ключи, но оставляем фолбек на старые, чтобы ничего не сломалось
@@ -1150,6 +1170,8 @@ def get_courier_pwa_html(courier, config):
                         checkActiveJob();
                     }}
                     
+                    checkDirectOffers(); // <--- ДОБАВЛЕНО СЮДА
+                    
                     if(pingInterval) clearInterval(pingInterval);
                     pingInterval = setInterval(() => {{ if(ws.readyState === WebSocket.OPEN) ws.send("ping"); }}, 30000);
                 }};
@@ -1224,6 +1246,7 @@ def get_courier_pwa_html(courier, config):
                         if(isOnline && !activeJobId) fetchOpenOrders();
                         if(activeJobId) checkActiveJob();
                     }}
+                    checkDirectOffers(); // <--- ДОБАВЛЕНО СЮДА
                 }}
             }});
 
