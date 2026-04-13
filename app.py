@@ -2103,6 +2103,14 @@ async def api_create_order_native(
                     job_id=job.id,
                     fee=delivery_fee
                 )
+           # --- ДОДАТИ ЦЕЙ БЛОК: ВІДПРАВКА В TELEGRAM ---
+            if target_courier.telegram_chat_id:
+                tg_msg = (
+                    f"⚡ <b>Персональне замовлення!</b>\n"
+                    f"Заклад <b>{partner.name}</b> пропонує вам ще одне замовлення попутно.\n"
+                    f"💰 Вартість доставки: <b>{delivery_fee} грн</b>"
+                )
+                asyncio.create_task(bot_service.send_telegram_message(target_courier.telegram_chat_id, tg_msg))
     else:
         await broadcast_order_to_all(db, job, partner)
 
@@ -2413,6 +2421,14 @@ async def create_partner_order(
                     job_id=job.id,
                     fee=delivery_fee
                 )
+            # --- ДОДАТИ ЦЕЙ БЛОК: ВІДПРАВКА В TELEGRAM ---
+            if target_courier.telegram_chat_id:
+                tg_msg = (
+                    f"⚡ <b>Персональне замовлення!</b>\n"
+                    f"Заклад <b>{partner.name}</b> пропонує вам ще одне замовлення попутно.\n"
+                    f"💰 Вартість доставки: <b>{delivery_fee} грн</b>"
+                )
+                asyncio.create_task(bot_service.send_telegram_message(target_courier.telegram_chat_id, tg_msg))
     else:
         await broadcast_order_to_all(db, job, partner)
 

@@ -5,6 +5,7 @@ import httpx
 import pytz
 import asyncio
 import shutil
+import html
 from datetime import datetime, time
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status, UploadFile, File
@@ -534,6 +535,12 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         # НОВЕ: Посилання на селфі
         selfie_link = f"<a href='{c.selfie_photo}' target='_blank' style='color:#8b5cf6; font-size:0.8rem; text-decoration:none; display:inline-block;'><i class='fa-solid fa-camera'></i> Селфі</a>" if getattr(c, 'selfie_photo', None) else "<span style='color:#94a3b8; font-size:0.8rem;'>Немає селфі</span>"
         
+        # ВЫВОД ЗАМЕТОК И КНОПКА
+        c_notes = getattr(c, 'notes', '') or ''
+        c_notes_display = f'<div style="font-size:0.8rem; color:#facc15; margin-top:5px; background:rgba(250, 204, 21, 0.1); padding:4px; border-radius:4px;"><i class="fa-solid fa-note-sticky"></i> {c_notes}</div>' if c_notes else ''
+        c_notes_safe = html.escape(c_notes)
+        btn_notes_courier = f'<button type="button" class="btn-mini warn" title="Нотатки" data-id="{c.id}" data-notes="{c_notes_safe}" onclick="openCourierModal(this)"><i class="fa-regular fa-clipboard"></i></button>'
+        
         balance_val = getattr(c, 'balance', 0.0)
         balance_color = "#ef4444" if balance_val < 0 else "#4ade80"
         commission_val = getattr(c, 'commission_rate', 10.0)
@@ -541,7 +548,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         courier_rows += f"""
         <tr>
             <td>{c.id}</td>
-            <td><b>{c.name}</b><br><small>{c.phone}</small>{tg_status}<br><div style="margin-top:5px;">{doc_link}{selfie_link}</div></td>
+            <td><b>{c.name}</b><br><small>{c.phone}</small>{tg_status}<br><div style="margin-top:5px;">{doc_link}{selfie_link}</div>{c_notes_display}</td>
             <td>
                 <span style="color:{balance_color}; font-weight:bold; font-size: 1.1rem;">{balance_val:.2f} ₴</span><br>
                 <small style="color:#94a3b8">Комісія: {commission_val}%</small>
@@ -569,6 +576,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                         <button class="btn-mini info" title="Змінити % комісії"><i class="fa-solid fa-percent"></i></button>
                     </form>
                     <div style="display:flex; gap:5px;">
+                        {btn_notes_courier}
                         <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
                         <form action="/admin/delivery/courier/control" method="post" style="margin:0;">
                             <input type="hidden" name="id" value="{c.id}">
@@ -593,13 +601,21 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         btn_icon = "fa-ban" if is_active else "fa-check"
         btn_class = "warn" if is_active else "success"
 
+        # ДАННЫЕ ДЛЯ РЕДАКТИРОВАНИЯ
+        p_notes = getattr(p, 'notes', '') or ''
+        p_notes_display = f'<div style="font-size:0.8rem; color:#facc15; margin-top:5px; background:rgba(250, 204, 21, 0.1); padding:4px; border-radius:4px;"><i class="fa-solid fa-note-sticky"></i> {p_notes}</div>' if p_notes else ''
+        p_address_safe = html.escape(p.address or '')
+        p_notes_safe = html.escape(p_notes)
+        btn_edit_partner = f'<button type="button" class="btn-mini warn" title="Редагувати (Адреса, Нотатки)" data-id="{p.id}" data-address="{p_address_safe}" data-notes="{p_notes_safe}" onclick="openPartnerModal(this)"><i class="fa-solid fa-pen"></i></button>'
+
         partner_rows += f"""
         <tr>
             <td>{p.id}</td>
-            <td><b>{p.name}</b><br><small>{p.address}</small></td>
+            <td><b>{p.name}</b><br><small>{p.address}</small>{p_notes_display}</td>
             <td>{p.email}<br><small>{p.phone}</small></td>
             <td><span class="dot" style="background:{status_color}"></span></td>
             <td style="display:flex; gap:5px;">
+                {btn_edit_partner}
                 <a href="/admin/delivery/partner/{p.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
                 <form action="/admin/delivery/partner/control" method="post" style="margin:0;">
                     <input type="hidden" name="id" value="{p.id}">
@@ -614,12 +630,26 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
             </td>
         </tr>"""
 
+    # Словник для перекладу статусів на українську
+    status_translation = {
+        "pending": "Очікує призначення",
+        "assigned": "Призначено",
+        "arrived_pickup": "Кур'єр в закладі",
+        "ready": "Готово",
+        "picked_up": "В дорозі до клієнта",
+        "delivered": "Доставлено",
+        "returning": "Повернення коштів",
+        "cancelled": "Скасовано"
+    }
+
     # ГЕНЕРАЦИЯ СТРОК АКТИВНЫХ ЗАКАЗОВ
     active_jobs_rows = ""
     for j in active_jobs:
         date_str = format_local_time(j.created_at, tz_string, '%H:%M') if j.created_at else "-"
         partner_name = j.partner.name if j.partner else "Невідомо"
         courier_name = j.courier.name if j.courier else "Не призначено"
+        
+        translated_status = status_translation.get(j.status, j.status)
         
         unassign_btn = ""
         if j.courier_id:
@@ -635,7 +665,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
             <td><b>#{j.id}</b><br><small>{date_str}</small></td>
             <td>{partner_name}</td>
             <td>{courier_name}</td>
-            <td>{j.status}</td>
+            <td>{translated_status}</td>
             <td>{j.order_price} / {j.delivery_fee} ₴</td>
             <td style="display:flex; gap:5px;">
                 <a href="/admin/delivery/job/{j.id}/chat" class="btn-mini info" title="Відкрити чат"><i class="fa-regular fa-comments"></i></a>
@@ -1046,6 +1076,75 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
             </div>
             
         </div>
+
+        <style>
+            .custom-modal {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(5px); }}
+            .modal-content {{ background: #1e293b; padding: 25px; border-radius: 12px; width: 450px; max-width: 90%; border: 1px solid #475569; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
+            .modal-content label {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 5px; display: block; }}
+            .modal-content textarea, .modal-content input[type="text"] {{ width: 100%; padding: 10px; margin-bottom: 15px; background: #0f172a; border: 1px solid #475569; color: white; border-radius: 6px; box-sizing: border-box; font-family: inherit; }}
+            .modal-content textarea:focus, .modal-content input[type="text"]:focus {{ outline: none; border-color: #3b82f6; }}
+        </style>
+
+        <div id="editModal" class="custom-modal">
+            <div class="modal-content">
+                <h2 id="modalTitle" style="margin-top:0; font-size: 1.2rem; margin-bottom: 20px;">Редагувати</h2>
+                <form id="modalForm" method="post" style="margin: 0;">
+                    <input type="hidden" name="id" id="modalId">
+                    
+                    <div id="modalAddressContainer" style="display:none;">
+                        <label>Адреса закладу:</label>
+                        <input type="text" name="address" id="modalAddress">
+                    </div>
+                    
+                    <div>
+                        <label>Нотатки (бачить тільки адмін):</label>
+                        <textarea name="notes" id="modalNotes" rows="4" placeholder="Напишіть коментар..."></textarea>
+                    </div>
+                    
+                    <div style="display:flex; gap:10px; justify-content: flex-end; margin-top: 10px;">
+                        <button type="button" class="btn" style="width:auto; padding: 10px 20px; background: #475569;" onclick="closeModal()">Скасувати</button>
+                        <button type="submit" class="btn success" style="width:auto; padding: 10px 20px;">💾 Зберегти</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script>
+            function openCourierModal(btn) {{
+                document.getElementById('editModal').style.display = 'flex';
+                document.getElementById('modalTitle').innerHTML = '<i class="fa-regular fa-clipboard"></i> Нотатки кур\\'єра (ID: ' + btn.dataset.id + ')';
+                document.getElementById('modalForm').action = '/admin/delivery/courier/update_notes';
+                document.getElementById('modalId').value = btn.dataset.id;
+                document.getElementById('modalNotes').value = btn.dataset.notes;
+                
+                document.getElementById('modalAddressContainer').style.display = 'none';
+                document.getElementById('modalAddress').disabled = true; // Відключаємо, щоб не відправлялось у формі
+            }}
+
+            function openPartnerModal(btn) {{
+                document.getElementById('editModal').style.display = 'flex';
+                document.getElementById('modalTitle').innerHTML = '<i class="fa-solid fa-pen"></i> Редагувати заклад (ID: ' + btn.dataset.id + ')';
+                document.getElementById('modalForm').action = '/admin/delivery/partner/update_info';
+                document.getElementById('modalId').value = btn.dataset.id;
+                document.getElementById('modalNotes').value = btn.dataset.notes;
+                
+                document.getElementById('modalAddressContainer').style.display = 'block';
+                document.getElementById('modalAddress').disabled = false;
+                document.getElementById('modalAddress').value = btn.dataset.address;
+            }}
+
+            function closeModal() {{
+                document.getElementById('editModal').style.display = 'none';
+            }}
+            
+            // Закриття модалки при кліку за її межами
+            window.onclick = function(event) {{
+                let modal = document.getElementById('editModal');
+                if (event.target == modal) {{
+                    closeModal();
+                }}
+            }}
+        </script>
     </body></html>
     """
 
@@ -1464,6 +1563,37 @@ async def view_motivator_progress(
     tz_string = await get_setting(db, "timezone") or "Europe/Kiev"
     
     return get_motivator_details_html(mot, progress_data, tz_string)
+
+# --- РЕДАГУВАННЯ ДАНИХ (АДРЕСА, НОТАТКИ) ---
+
+@router.post("/admin/delivery/courier/update_notes")
+async def courier_update_notes(
+    id: int = Form(...), 
+    notes: str = Form(""),
+    user: str = Depends(check_admin_auth), 
+    db: AsyncSession = Depends(get_db)
+):
+    courier = await db.get(Courier, id)
+    if courier:
+        courier.notes = notes
+        await db.commit()
+    return RedirectResponse(f"/admin/delivery?message=Нотатки для кур'єра {courier.name} збережено", status_code=302)
+
+
+@router.post("/admin/delivery/partner/update_info")
+async def partner_update_info(
+    id: int = Form(...), 
+    address: str = Form(...), 
+    notes: str = Form(""),
+    user: str = Depends(check_admin_auth), 
+    db: AsyncSession = Depends(get_db)
+):
+    partner = await db.get(DeliveryPartner, id)
+    if partner:
+        partner.address = address
+        partner.notes = notes
+        await db.commit()
+    return RedirectResponse(f"/admin/delivery?message=Дані закладу {partner.name} збережено", status_code=302)
 
 # --- УПРАВЛІННЯ КУР'ЄРАМИ ТА ПАРТНЕРАМИ ---
 

@@ -111,6 +111,8 @@ class Courier(Base):
     commission_rate = Column(Float, default=7.5)     # Відсоток комісії з доставки (за замовчуванням 10%)
     # ---------------
     
+    notes = Column(String(1000), nullable=True) # Замітки адміністратора
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class CourierTransaction(Base):
@@ -154,6 +156,8 @@ class DeliveryPartner(Base):
     # --- НОВЕ ПОЛЕ ДЛЯ PUSH-СПОВІЩЕНЬ (FIREBASE) ДЛЯ ПАРТНЕРА ---
     fcm_token = Column(String(255), nullable=True)
     # ------------------------------------------------------------
+
+    notes = Column(String(1000), nullable=True) # Замітки адміністратора
 
     is_active = Column(Boolean, default=True) 
     
