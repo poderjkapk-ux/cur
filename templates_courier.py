@@ -1642,7 +1642,6 @@ def get_courier_pwa_html(courier, config):
                         <div style="background:var(--panel); padding:15px; border-radius:12px; margin-bottom:15px;">
                             <h3 style="margin:0 0 10px; color:var(--warning);"><i class="fa-solid fa-store"></i> ${{safeRestName}}</h3>
                             <p style="margin:0 0 10px;"><i class="fa-solid fa-map-pin"></i> ${{safeRestAddress}}</p>
-                            <a href="tel:${{pPhone}}" class="btn outline" style="margin-bottom:15px; padding:10px;"><i class="fa-solid fa-phone"></i> Зателефонувати в заклад</a>
                             
                             ${{readyStatusHtml}}
                             
@@ -1696,13 +1695,18 @@ def get_courier_pwa_html(courier, config):
                     `;
                 }}
 
-                const chatBtn = stepNum < 3 ? `
-                    <button class="btn outline" style="margin-bottom:15px;" onclick="openChat()">
-                        <i class="fa-solid fa-comments"></i> Чат із закладом
-                    </button>
-                ` : '';
+                const commBtnsHtml = `
+                    <div style="display:flex; gap:10px; margin-bottom:15px;">
+                        <button class="btn outline" style="flex:1; padding:10px; font-size: 0.95rem;" onclick="openChat()">
+                            <i class="fa-solid fa-comments"></i> Чат
+                        </button>
+                        <a href="tel:${{pPhone}}" class="btn outline" style="flex:1; padding:10px; font-size: 0.95rem; text-decoration:none; display:flex; justify-content:center; align-items:center; gap:8px;">
+                            <i class="fa-solid fa-phone"></i> Дзвінок в заклад
+                        </a>
+                    </div>
+                `;
 
-                container.innerHTML = progressHtml + feeInfoHtml + chatBtn + actionHtml;
+                container.innerHTML = progressHtml + feeInfoHtml + commBtnsHtml + actionHtml;
             }}
 
             async function updateStatus(status, btnEl) {{
