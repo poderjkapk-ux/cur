@@ -539,7 +539,8 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         c_notes = getattr(c, 'notes', '') or ''
         c_notes_display = f'<div style="font-size:0.8rem; color:#facc15; margin-top:5px; background:rgba(250, 204, 21, 0.1); padding:4px; border-radius:4px;"><i class="fa-solid fa-note-sticky"></i> {c_notes}</div>' if c_notes else ''
         c_notes_safe = html.escape(c_notes)
-        btn_notes_courier = f'<button type="button" class="btn-mini warn" title="Нотатки" data-id="{c.id}" data-notes="{c_notes_safe}" onclick="openCourierModal(this)"><i class="fa-regular fa-clipboard"></i></button>'
+        c_name_safe = html.escape(c.name or '')
+        btn_edit_courier = f'<button type="button" class="btn-mini warn" title="Редагувати (Ім\'я, Нотатки)" data-id="{c.id}" data-name="{c_name_safe}" data-notes="{c_notes_safe}" onclick="openCourierModal(this)"><i class="fa-solid fa-pen"></i></button>'
         
         balance_val = getattr(c, 'balance', 0.0)
         balance_color = "#ef4444" if balance_val < 0 else "#4ade80"
@@ -576,7 +577,7 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                         <button class="btn-mini info" title="Змінити % комісії"><i class="fa-solid fa-percent"></i></button>
                     </form>
                     <div style="display:flex; gap:5px;">
-                        {btn_notes_courier}
+                        {btn_edit_courier}
                         <a href="/admin/delivery/courier/{c.id}/history" class="btn-mini info" title="Історія замовлень"><i class="fa-solid fa-list"></i></a>
                         <form action="/admin/delivery/courier/control" method="post" style="margin:0;">
                             <input type="hidden" name="id" value="{c.id}">
@@ -1091,6 +1092,11 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                 <form id="modalForm" method="post" style="margin: 0;">
                     <input type="hidden" name="id" id="modalId">
                     
+                    <div id="modalNameContainer" style="display:none;">
+                        <label>Ім'я кур'єра:</label>
+                        <input type="text" name="name" id="modalName">
+                    </div>
+                    
                     <div id="modalAddressContainer" style="display:none;">
                         <label>Адреса закладу:</label>
                         <input type="text" name="address" id="modalAddress">
@@ -1112,13 +1118,17 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
         <script>
             function openCourierModal(btn) {{
                 document.getElementById('editModal').style.display = 'flex';
-                document.getElementById('modalTitle').innerHTML = '<i class="fa-regular fa-clipboard"></i> Нотатки кур\\'єра (ID: ' + btn.dataset.id + ')';
-                document.getElementById('modalForm').action = '/admin/delivery/courier/update_notes';
+                document.getElementById('modalTitle').innerHTML = '<i class="fa-solid fa-pen"></i> Редагувати кур\\'єра (ID: ' + btn.dataset.id + ')';
+                document.getElementById('modalForm').action = '/admin/delivery/courier/update_info';
                 document.getElementById('modalId').value = btn.dataset.id;
                 document.getElementById('modalNotes').value = btn.dataset.notes;
                 
+                document.getElementById('modalNameContainer').style.display = 'block';
+                document.getElementById('modalName').disabled = false;
+                document.getElementById('modalName').value = btn.dataset.name;
+                
                 document.getElementById('modalAddressContainer').style.display = 'none';
-                document.getElementById('modalAddress').disabled = true; // Відключаємо, щоб не відправлялось у формі
+                document.getElementById('modalAddress').disabled = true; 
             }}
 
             function openPartnerModal(btn) {{
@@ -1127,6 +1137,9 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
                 document.getElementById('modalForm').action = '/admin/delivery/partner/update_info';
                 document.getElementById('modalId').value = btn.dataset.id;
                 document.getElementById('modalNotes').value = btn.dataset.notes;
+                
+                document.getElementById('modalNameContainer').style.display = 'none';
+                document.getElementById('modalName').disabled = true;
                 
                 document.getElementById('modalAddressContainer').style.display = 'block';
                 document.getElementById('modalAddress').disabled = false;
@@ -1564,20 +1577,22 @@ async def view_motivator_progress(
     
     return get_motivator_details_html(mot, progress_data, tz_string)
 
-# --- РЕДАГУВАННЯ ДАНИХ (АДРЕСА, НОТАТКИ) ---
+# --- РЕДАГУВАННЯ ДАНИХ (АДРЕСА, ІМ'Я, НОТАТКИ) ---
 
-@router.post("/admin/delivery/courier/update_notes")
-async def courier_update_notes(
+@router.post("/admin/delivery/courier/update_info")
+async def courier_update_info(
     id: int = Form(...), 
+    name: str = Form(...),
     notes: str = Form(""),
     user: str = Depends(check_admin_auth), 
     db: AsyncSession = Depends(get_db)
 ):
     courier = await db.get(Courier, id)
     if courier:
+        courier.name = name
         courier.notes = notes
         await db.commit()
-    return RedirectResponse(f"/admin/delivery?message=Нотатки для кур'єра {courier.name} збережено", status_code=302)
+    return RedirectResponse(f"/admin/delivery?message=Дані кур'єра {courier.name} збережено", status_code=302)
 
 
 @router.post("/admin/delivery/partner/update_info")
