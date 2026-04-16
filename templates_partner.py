@@ -960,16 +960,55 @@ DASHBOARD_SCRIPT = """
         try { await fetch('/api/partner/confirm_buyout_paid', {method:'POST', body:fd}); location.reload(); } 
         catch(err) { btn.disabled = false; btn.style.opacity = '1'; } 
     }
-    async function boostOrder(e, id) { 
-        if(!confirm("Підняти ціну доставки на 10 грн, щоб пришвидшити пошук?")) return; 
-        const btn = e.currentTarget; btn.disabled = true; btn.style.opacity = '0.5'; 
-        const fd = new FormData(); fd.append('job_id', id); fd.append('amount', 10); 
+
+    // --- ЛОГИКА ДЛЯ МОДАЛЬНОГО ОКНА ПОДНЯТИЯ ЦЕНЫ ---
+    function openBoostModal(jobId) {
+        document.getElementById('boost_job_id').value = jobId;
+        document.getElementById('boost_amount').value = '';
+        document.getElementById('boostSubmitBtn').disabled = false;
+        document.getElementById('boostSubmitBtn').innerHTML = '🚀 Підтвердити';
+        document.getElementById('boostModal').style.display = 'flex';
+    }
+
+    function closeBoostModal() {
+        document.getElementById('boostModal').style.display = 'none';
+    }
+
+    function setBoostAmount(val) {
+        document.getElementById('boost_amount').value = val;
+    }
+
+    async function submitBoost() {
+        const jobId = document.getElementById('boost_job_id').value;
+        const amount = parseFloat(document.getElementById('boost_amount').value);
+        
+        if (!amount || amount <= 0) {
+            showToast('❌ Введіть коректну суму!');
+            return;
+        }
+        
+        const btn = document.getElementById('boostSubmitBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="display:inline-block; width:15px; height:15px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 1s infinite linear;"></span> Завантаження...';
+        
+        const fd = new FormData(); 
+        fd.append('job_id', jobId); 
+        fd.append('amount', amount); 
+        
         try { 
             const res = await fetch('/api/partner/boost_order', {method:'POST', body:fd}); 
             const data = await res.json(); 
-            if(res.ok) { showToast(`💸 Ціну піднято! Нова сума: ${data.new_fee} грн`); setTimeout(() => location.reload(), 1500); } 
-            else { alert(data.message || "Помилка"); btn.disabled = false; btn.style.opacity = '1'; } 
-        } catch(err) { alert("Помилка з'єднання"); btn.disabled = false; btn.style.opacity = '1'; } 
+            closeBoostModal();
+            if (res.ok) { 
+                showToast(`💸 Ціну піднято! Нова сума: ${data.new_fee} грн`); 
+                setTimeout(() => location.reload(), 1500); 
+            } else { 
+                alert(data.message || "Помилка"); 
+            } 
+        } catch(err) { 
+            closeBoostModal();
+            alert("Помилка з'єднання"); 
+        } 
     }
 
     // --- RATING & TRACKING ---
@@ -1207,14 +1246,18 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             track_btn = f'<button class="btn-pro info" onclick="openTrackModal({j.id})" title="Де кур\'єр?"><i class="fa-solid fa-map-location-dot"></i> Трекінг</button>'
 
         # --- КНОПКА ДЕЙСТВИЯ (ACTION BTN) ---
-        if j.status == 'pending':
-            action_btn = f"""
-            <button class="btn-pro warn" onclick="boostOrder(event, {j.id})" title="Підняти ціну (+10 грн)">
-                <i class="fa-solid fa-fire"></i> Підняти ціну (+10 грн)
+        action_btn = ""
+        
+        # Кнопка поднятия цены доступна до тех пор, пока курьер не забрал заказ
+        if j.status in ['pending', 'assigned', 'arrived_pickup', 'ready']:
+            action_btn += f"""
+            <button class="btn-pro warn" onclick="openBoostModal({j.id})" title="Підняти ціну доставки" style="margin-bottom: 8px; width: 100%;">
+                <i class="fa-solid fa-fire"></i> Підняти ціну
             </button>
             """
-        elif j.status == 'returning':
-            action_btn = f"""
+
+        if j.status == 'returning':
+            action_btn += f"""
             <button class="btn-pro success" onclick="confirmReturn(event, {j.id})" title="Підтвердити отримання грошей">
                 <i class="fa-solid fa-sack-dollar"></i> Гроші отримано
             </button>
@@ -1225,7 +1268,7 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
             # --- НОВАЯ КНОПКА: Подтверждение оплаты выкупа (только если курьер уже прибыл) ---
             if j.payment_type == 'buyout' and not getattr(j, 'is_return_required', False) and j.status == 'arrived_pickup':
                 action_btn += f"""
-                <button class="btn-pro success" onclick="confirmBuyoutPaid(event, {j.id})" title="Підтвердити оплату від кур'єра" style="margin-bottom: 8px;">
+                <button class="btn-pro success" onclick="confirmBuyoutPaid(event, {j.id})" title="Підтвердити оплату від кур'єра" style="margin-bottom: 8px; width: 100%;">
                     <i class="fa-solid fa-check-double"></i> Кур'єр оплатив
                 </button>
                 """
@@ -1309,7 +1352,10 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                 <div style="font-weight:600;">{j.dropoff_address}</div>
                 <div style="font-size:0.8rem; color:#888;">{j.customer_name or 'Гість'}</div>
             </td>
-            <td data-label="Сума">{j.order_price} грн</td>
+            <td data-label="Сума">
+                <div style="font-weight:bold;">Чек: {j.order_price} грн</div>
+                <div style="font-size:0.85rem; color:#facc15; margin-top: 3px;"><i class="fa-solid fa-motorcycle"></i> Доставка: {j.delivery_fee} грн</div>
+            </td>
             <td data-label="Оцінка">{rating_html}</td>
         </tr>
         """
@@ -1514,6 +1560,28 @@ def get_partner_dashboard_html(partner: DeliveryPartner, jobs: List[DeliveryJob]
                     <textarea id="feedbackPartnerText" placeholder="Текст вашого повідомлення..." required style="min-height:120px; width:100%; box-sizing:border-box; margin-bottom:15px; border-radius: 12px; resize: none; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 15px; font-family: inherit; font-size: 1rem; outline: none;"></textarea>
                     <button type="submit" class="btn" id="feedbackPartnerSubmitBtn" style="background: #6366f1; width: 100%;"><i class="fa-solid fa-paper-plane"></i> Надіслати повідомлення</button>
                 </form>
+            </div>
+        </div>
+
+        <div id="boostModal" class="modal-overlay">
+            <div class="modal-card" style="max-width: 350px;">
+                <button style="position:absolute; top:15px; right:15px; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;" onclick="closeBoostModal()">×</button>
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <i class="fa-solid fa-fire" style="font-size: 2.5rem; color: #f59e0b; margin-bottom: 10px;"></i>
+                    <h2 style="margin:0; color:white; font-size: 1.3rem;">Підняти ціну доставки</h2>
+                    <p style="color:var(--text-muted); font-size: 0.9rem; margin-top: 5px;">Введіть суму, на яку хочете збільшити оплату кур'єру.</p>
+                </div>
+                <input type="hidden" id="boost_job_id">
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button type="button" class="btn-pro warn" style="flex:1; padding: 10px;" onclick="setBoostAmount(10)">+10 грн</button>
+                    <button type="button" class="btn-pro warn" style="flex:1; padding: 10px;" onclick="setBoostAmount(20)">+20 грн</button>
+                    <button type="button" class="btn-pro warn" style="flex:1; padding: 10px;" onclick="setBoostAmount(50)">+50 грн</button>
+                </div>
+                
+                <input type="number" id="boost_amount" placeholder="Або введіть свою суму" style="text-align:center; font-size:1.2rem; font-weight:bold; margin-bottom: 20px;" min="1">
+                
+                <button id="boostSubmitBtn" class="btn" style="width:100%; background: linear-gradient(135deg, #f59e0b, #ea580c); font-weight:bold;" onclick="submitBoost()">🚀 Підтвердити</button>
             </div>
         </div>
 

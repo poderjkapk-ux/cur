@@ -2245,7 +2245,7 @@ async def partner_confirm_return(
                 ))
             
             # --- Отправка уведомлений (WS, Telegram, Push) ---
-            msg_text = "✅ Заклад підтвердив отримання коштів. Ви вільні!"
+            msg_text = "✅ Заклад підтвердив отримання коштів. Доби свободен!"
             
             # 1. WebSocket
             await manager.notify_courier(job.courier_id, {
@@ -2530,68 +2530,85 @@ async def partner_boost_order(
     if not job or job.partner_id != partner.id:
         return JSONResponse({"status": "error", "message": "Замовлення не знайдено"}, status_code=404)
     
-    if job.status != "pending":
-         return JSONResponse({"status": "error", "message": "Замовлення вже прийнято або скасовано"}, status_code=400)
+    # РАЗРЕШАЕМ поднимать цену до момента, пока заказ не будет передан в статус picked_up
+    if job.status not in ["pending", "assigned", "arrived_pickup", "ready"]:
+         return JSONResponse({"status": "error", "message": "Замовлення вже забрано або скасовано"}, status_code=400)
     
     job.delivery_fee += amount
     await db.commit()
     
-    rest_lat, rest_lon = await geocode_address(job.partner.address)
-    
-    payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
-    
-    full_job_data = {
-        "id": job.id,
-        "address": job.dropoff_address,
-        "restaurant": job.partner.name,
-        "restaurant_address": job.partner.address,
-        "fee": job.delivery_fee,          
-        "price": job.order_price,
-        "comment": f"[{payment_label}] {job.comment or ''}",
-        "payment_type": job.payment_type,
-        "is_return": job.is_return_required,
-        "dist_to_rest": "?", 
-        "dist_rest_to_client": "?" 
-    }
-
-    busy_couriers_res = await db.execute(
-        select(DeliveryJob.courier_id)
-        .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
-        .where(DeliveryJob.courier_id.is_not(None))
-    )
-    busy_ids = set(busy_couriers_res.scalars().all())
-
-    online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
-    
-    for c in online_couriers:
-        if c.id in busy_ids: continue
+    # ЕСЛИ заказ еще в поиске - уведомляем всех курьеров
+    if job.status == "pending":
+        rest_lat, rest_lon = await geocode_address(job.partner.address)
+        payment_label = {"prepaid": "✅ Оплачено", "cash": "💵 Готівка", "buyout": "💰 Викуп", "buyout_paid": "✅ Оплачено"}.get(job.payment_type, "Оплата")
         
-        current_dist = "?"
-        if c.lat and c.lon and rest_lat and rest_lon:
-            d = calculate_distance(c.lat, c.lon, rest_lat, rest_lon)
-            if d: current_dist = d
-        
-        courier_specific_data = full_job_data.copy()
-        courier_specific_data["dist_to_rest"] = current_dist
+        full_job_data = {
+            "id": job.id,
+            "address": job.dropoff_address, 
+            "customer_name": job.customer_name,
+            "restaurant": job.partner.name,
+            "restaurant_address": job.partner.address,
+            "fee": job.delivery_fee,          
+            "price": job.order_price,
+            "comment": f"[{payment_label}] {job.comment or ''}",
+            "payment_type": job.payment_type,
+            "is_return": job.is_return_required,
+            "estimated_ready_at": job.estimated_ready_at.isoformat() + "Z" if job.estimated_ready_at else None,
+            "dist_to_rest": "?"
+        }
 
-        await manager.notify_courier(c.id, {
-            "type": "new_order", 
-            "data": courier_specific_data 
-        })
+        busy_couriers_res = await db.execute(
+            select(DeliveryJob.courier_id)
+            .where(DeliveryJob.status.notin_(["delivered", "cancelled"]))
+            .where(DeliveryJob.courier_id.is_not(None))
+        )
+        busy_ids = set(busy_couriers_res.scalars().all())
 
-        if c.fcm_token:
-             await send_push_to_couriers(
-                 [c.fcm_token], 
-                 "🔥 Ціна зросла!", 
-                 f"💰 {job.delivery_fee} грн\n📍 {job.dropoff_address}", 
-                 job_id=job.id, 
-                 fee=job.delivery_fee
-             )
-             
-        if c.telegram_chat_id:
-            tg_msg = f"🔥 <b>Ціна зросла!</b>\nНова ціна: 💰 {job.delivery_fee} грн\n📍 {job.dropoff_address}"
-            asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
+        online_couriers = (await db.execute(select(Courier).where(Courier.is_online == True))).scalars().all()
         
+        for c in online_couriers:
+            if c.id in busy_ids: continue
+            
+            current_dist = "?"
+            if c.lat and c.lon and rest_lat and rest_lon:
+                d = calculate_distance(c.lat, c.lon, rest_lat, rest_lon)
+                if d: current_dist = d
+            
+            courier_specific_data = full_job_data.copy()
+            courier_specific_data["dist_to_rest"] = current_dist
+
+            await manager.notify_courier(c.id, {"type": "new_order", "data": courier_specific_data })
+
+            if c.fcm_token:
+                 await send_push_to_couriers(
+                     [c.fcm_token], "🔥 Ціна зросла!", f"💰 {job.delivery_fee} грн\n📍 {job.dropoff_address}", 
+                     job_id=job.id, fee=job.delivery_fee
+                 )
+                 
+            if c.telegram_chat_id:
+                tg_msg = f"🔥 <b>Ціна зросла!</b>\nНова ціна: 💰 {job.delivery_fee} грн\n📍 {job.dropoff_address}"
+                asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
+    
+    # ЕСЛИ курьер уже назначен (assigned, arrived_pickup, ready) - уведомляем лично его в качестве "чаевых" или бонуса
+    else:
+        if job.courier_id:
+            c = await db.get(Courier, job.courier_id)
+            if c:
+                await manager.notify_courier(c.id, {
+                    "type": "job_update", 
+                    "message": f"🔥 Заклад підняв оплату за доставку! Нова сума: {job.delivery_fee} грн"
+                })
+                
+                if c.fcm_token:
+                     await send_push_to_couriers(
+                         [c.fcm_token], "🔥 Бонус від закладу!", f"Оплату підвищено! Нова сума: {job.delivery_fee} грн", 
+                         job_id=job.id, fee=job.delivery_fee
+                     )
+                     
+                if c.telegram_chat_id:
+                    tg_msg = f"🔥 <b>Бонус від закладу!</b>\nЗаклад підвищив оплату за активне замовлення #{job.id}!\nНова сума: 💰 {job.delivery_fee} грн"
+                    asyncio.create_task(bot_service.send_telegram_message(c.telegram_chat_id, tg_msg))
+
     return JSONResponse({"status": "ok", "new_fee": job.delivery_fee})
 
 @app.get("/api/partner/track_courier/{job_id}")
