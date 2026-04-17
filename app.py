@@ -2245,7 +2245,7 @@ async def partner_confirm_return(
                 ))
             
             # --- Отправка уведомлений (WS, Telegram, Push) ---
-            msg_text = "✅ Заклад підтвердив отримання коштів. Доби свободен!"
+            msg_text = "✅ Заклад підтвердив отримання коштів. Дякуэмо!"
             
             # 1. WebSocket
             await manager.notify_courier(job.courier_id, {
