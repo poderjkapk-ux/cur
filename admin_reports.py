@@ -62,7 +62,7 @@ def get_reports_html(
         for item in activity_data:
             activity_rows += f"""
             <tr>
-                <td data-label="Кур'єр"><b style="color:#f8fafc;">{item['name']}</b></td>
+                <td data-label="Кур'єр"><b style="color:#f8fafc;">{item['name']} (ID: {item['courier_id']})</b></td>
                 <td data-label="Виконано замовлень" style="text-align: center;">{item['orders']}</td>
                 <td data-label="Середній час виконання" style="text-align: center;"><b>{item['avg_time_min']} хв</b></td>
             </tr>
@@ -496,6 +496,7 @@ async def admin_reports_page(
             avg_min = 0
             
         activity_data.append({
+            'courier_id': cid,
             'name': data['name'],
             'orders': data['orders'],
             'avg_time_min': avg_min

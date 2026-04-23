@@ -1504,6 +1504,7 @@ async def update_job_status(
                 
                 if not hasattr(courier, 'balance'):
                     courier.balance = 0.0
+                old_balance = courier.balance
                 courier.balance -= commission_amount
                 
                 db.add(CourierTransaction(
@@ -1513,7 +1514,18 @@ async def update_job_status(
                     description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
                     job_id=job.id
                 ))
+                # --- ПЕРЕВІРКА БАЛАНСУ ---
+                if old_balance >= 30.0 and courier.balance < 30.0:
+                    warn_msg = f"Ваш баланс опустився нижче 30 грн (Поточний: {courier.balance:.2f} грн). Будь ласка, поповніть його."
+                    if courier.fcm_token:
+                        await send_push_to_couriers([courier.fcm_token], "⚠️ Низький баланс!", warn_msg)
+                    if courier.telegram_chat_id:
+                        asyncio.create_task(bot_service.send_telegram_message(
+                            courier.telegram_chat_id, 
+                            f"⚠️ <b>Увага! Низький баланс!</b>\n{warn_msg}"
+                        ))
             # -------------------------------
+            
             
         else:
              msg_text = f"Статус замовлення #{job.id}: {status}"
@@ -2236,6 +2248,7 @@ async def partner_confirm_return(
                 
                 if not hasattr(courier, 'balance'):
                     courier.balance = 0.0
+                old_balance = courier.balance
                 courier.balance -= commission_amount
                 
                 db.add(CourierTransaction(
@@ -2243,6 +2256,17 @@ async def partner_confirm_return(
                     type="commission", description=f"Комісія ({commission_rate}%) за замовлення #{job.id}",
                     job_id=job.id
                 ))
+                # --- ПЕРЕВІРКА БАЛАНСУ ---
+                if old_balance >= 30.0 and courier.balance < 30.0:
+                    warn_msg = f"Ваш баланс опустився нижче 30 грн (Поточний: {courier.balance:.2f} грн). Будь ласка, поповніть його."
+                    if courier.fcm_token:
+                        await send_push_to_couriers([courier.fcm_token], "⚠️ Низький баланс!", warn_msg)
+                    if courier.telegram_chat_id:
+                        asyncio.create_task(bot_service.send_telegram_message(
+                            courier.telegram_chat_id, 
+                            f"⚠️ <b>Увага! Низький баланс!</b>\n{warn_msg}"
+                        ))
+                # -------------------------
             
             # --- Отправка уведомлений (WS, Telegram, Push) ---
             msg_text = "✅ Заклад підтвердив отримання коштів. Дякуэмо!"
