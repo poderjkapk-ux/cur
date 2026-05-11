@@ -768,18 +768,19 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
     </style>
     </head>
     <body>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap: wrap; gap: 10px;">
-                <h1>🚴 Delivery Control</h1>
-                <div>
-                    <a href="/admin/delivery/reports" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #8b5cf6;"><i class="fa-solid fa-chart-pie"></i> Фінанси</a>
-                    <a href="/admin/delivery/rating_reports" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #f59e0b;"><i class="fa-solid fa-star"></i> Рейтинг та Відгуки</a>
-                    <a href="/admin/delivery/activity" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #ef4444;"><i class="fa-solid fa-users-viewfinder"></i> Активність та Борги</a>
-                    <a href="/admin/delivery/map" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #6366f1;">Реалтайм Карта</a>
-                    <a href="/admin" class="btn" style="width:auto; padding: 10px 20px; margin: 0;">← Назад в SaaS Admin</a>
-                </div>
-            </div>
+        <div style="margin-bottom: 20px;">
+            <h1 style="margin-top: 0; margin-bottom: 15px;">🚴 Delivery Control</h1>
             
-            {f'<div class="message success" style="background:#064e3b; color:#4ade80; padding:15px; border-radius:8px; margin-bottom:20px; border:1px solid #047857;">{message}</div>' if message else ''}
+            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                <a href="/admin/delivery/reports" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #8b5cf6;"><i class="fa-solid fa-chart-pie"></i> Фінанси</a>
+                <a href="/admin/delivery/rating_reports" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #f59e0b;"><i class="fa-solid fa-star"></i> Рейтинг та Відгуки</a>
+                <a href="/admin/delivery/activity" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #ef4444;"><i class="fa-solid fa-users-viewfinder"></i> Активність та Борги</a>
+                <a href="/admin/delivery/map" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #6366f1;">Реалтайм Карта</a>
+                <a href="/admin" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #475569;">← Назад в SaaS Admin</a>
+            </div>
+        </div>
+        
+        {f'<div class="message success" style="background:#064e3b; color:#4ade80; padding:15px; border-radius:8px; margin-bottom:20px; border:1px solid #047857;">{message}</div>' if message else ''}
 
             <div class="panel" style="margin-bottom: 20px; border-color: var(--primary);">
                 <h2>🚀 Активні замовлення в роботі</h2>
