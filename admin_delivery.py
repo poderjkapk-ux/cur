@@ -768,14 +768,14 @@ def get_delivery_admin_html(couriers, partners, pwa_config, apk_config, tz_strin
     </style>
     </head>
     <body>
-        <div style="max-width: 1400px; margin: 0 auto; padding: 20px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap: wrap; gap: 10px;">
                 <h1>🚴 Delivery Control</h1>
                 <div>
-                    <a href="/admin/delivery/reports" class="btn" style="width:auto; padding: 10px 20px; margin-right: 10px; background: #8b5cf6;"><i class="fa-solid fa-chart-pie"></i> Фінанси</a>
-                    <a href="/admin/delivery/rating_reports" class="btn" style="width:auto; padding: 10px 20px; margin-right: 10px; background: #f59e0b;"><i class="fa-solid fa-star"></i> Рейтинг та Відгуки</a>
-                    <a href="/admin/delivery/map" class="btn" style="width:auto; padding: 10px 20px; margin-right: 10px; background: #6366f1;">Реалтайм Карта</a>
-                    <a href="/admin" class="btn" style="width:auto; padding: 10px 20px;">← Назад в SaaS Admin</a>
+                    <a href="/admin/delivery/reports" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #8b5cf6;"><i class="fa-solid fa-chart-pie"></i> Фінанси</a>
+                    <a href="/admin/delivery/rating_reports" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #f59e0b;"><i class="fa-solid fa-star"></i> Рейтинг та Відгуки</a>
+                    <a href="/admin/delivery/activity" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #ef4444;"><i class="fa-solid fa-users-viewfinder"></i> Активність та Борги</a>
+                    <a href="/admin/delivery/map" class="btn" style="width:auto; padding: 10px 20px; margin: 0; background: #6366f1;">Реалтайм Карта</a>
+                    <a href="/admin" class="btn" style="width:auto; padding: 10px 20px; margin: 0;">← Назад в SaaS Admin</a>
                 </div>
             </div>
             
